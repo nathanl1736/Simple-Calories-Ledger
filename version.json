@@ -1,0 +1,8 @@
+{
+  "version": "1.5.8",
+  "notes": [
+    "Added remote version checking for Home Screen installs",
+    "Added update available popup with release notes",
+    "Added manual Check for updates button in Settings"
+  ]
+}
