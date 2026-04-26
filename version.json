@@ -1,8 +1,8 @@
 {
   "version": "1.5.9",
   "notes": [
-    "Fixed horizontal page dragging that could shift the app out of alignment on mobile Safari",
-    "Locked the app shell, bottom navigation, and modals to the viewport width",
-    "Added extra safeguards so accidental sideways scroll snaps back to the correct alignment"
+    "Raised the food entry three-dot action menu above cards and navigation so it is no longer blocked.",
+    "Moved the action menu into the top document layer when opened for more reliable Safari/Home Screen behaviour.",
+    "Kept the update checker pointing to ./version.json."
   ]
 }
