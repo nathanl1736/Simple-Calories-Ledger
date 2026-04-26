@@ -1,9 +1,8 @@
 {
-  "version": "1.6.5",
+  "version": "1.6.6",
   "notes": [
-    "Added a week selector to Weekly adherence to match Calories Bank",
-    "Added a Weekly adherence help popup explaining success rules",
-    "Tapping the Stats sub tab now resets all Stats week selections to the current week",
-    "Renamed the 7-day summary card to Last 7 days summary"
+    "Removed the kCal label from Weekly adherence day boxes so values fit better on mobile",
+    "Added a Reset Stats to this week button as a simple way to reset Stats week selections",
+    "Improved the Stats sub-tab reset so re-tapping Stats refreshes the week views immediately"
   ]
 }
