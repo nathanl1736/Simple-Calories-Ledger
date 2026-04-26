@@ -1,8 +1,8 @@
 {
-  "version": "1.5.9",
+  "version": "1.6.0",
   "notes": [
-    "Raised the food entry three-dot action menu above cards and navigation so it is no longer blocked.",
-    "Moved the action menu into the top document layer when opened for more reliable Safari/Home Screen behaviour.",
-    "Kept the update checker pointing to ./version.json."
+    "Added a centered meal photo modal when tapping a food entry icon or photo.",
+    "Users can upload or replace a photo directly from an existing food entry.",
+    "Added an option to remove an existing meal photo from the entry."
   ]
 }
