@@ -1,7 +1,8 @@
 {
-  "version": "1.6.2",
+  "version": "1.6.3",
   "notes": [
-    "Reset Calories Bank to the current week whenever the Stats sub tab is opened.",
-    "Removed the 7-day bank impact row from the Calories trend card."
+    "Added a Weekly adherence score card to the Stats page.",
+    "Added a 7-day adherence calendar aligned to the current Calories Bank week.",
+    "Cutting mode counts completed days at or under budget as successful; Maintain and Bulking count completed days within 100 kCal below target or above."
   ]
 }
