@@ -1,8 +1,9 @@
 {
-  "version": "1.6.0",
+  "version": "1.6.1",
   "notes": [
-    "Added a centered meal photo modal when tapping a food entry icon or photo.",
-    "Users can upload or replace a photo directly from an existing food entry.",
-    "Added an option to remove an existing meal photo from the entry."
+    "Renamed the web page title to Nathan's Simple Calories Ledger.",
+    "Added a pull-down gesture from the top of any tab to check for updates.",
+    "Enhanced the Calories trend graph with bank impact details aligned to Calories Bank.",
+    "Renamed the Stats card to Calories Bank and updated the help modal title to Calories Banking."
   ]
 }
