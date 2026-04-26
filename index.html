@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#151515" />
   <title>Calorie Tracker</title>
   <style>
@@ -12,9 +12,9 @@
       --radius:22px;--shadow:0 18px 50px rgba(0,0,0,.28);
     }
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;touch-action:manipulation}
     body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
-    button,input,select,textarea{font:inherit;color:inherit}button{border:0;cursor:pointer}button:active{transform:scale(.985)}
+    button,input,select,textarea{font:inherit;color:inherit;touch-action:manipulation}button{border:0;cursor:pointer}button:active{transform:scale(.985)}
     .app{max-width:720px;margin:0 auto;min-height:100vh;padding:28px 18px 106px}
     .screen-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}.kicker{font-size:13px;color:var(--accent);font-weight:900;letter-spacing:.09em;text-transform:uppercase;margin-bottom:8px}.screen-head h1,h1{font-size:34px;line-height:1.05;margin:0;letter-spacing:-.055em}.subtle{color:var(--muted);font-size:14px;line-height:1.35}.icon-btn{width:42px;height:42px;border-radius:999px;background:var(--card2);color:#aaa;display:grid;place-items:center;font-weight:900;border:1px solid var(--line)}
     .date-row{display:grid;grid-template-columns:48px 1fr 48px;gap:10px;align-items:center;margin:0 0 18px}.date-btn{height:48px;border-radius:16px;background:var(--card);color:#bbb;font-size:24px;border:1px solid var(--line)}.date-pill{min-height:48px;border-radius:16px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;gap:10px;font-weight:850;padding:0 12px}.date-pill input{position:absolute;opacity:0;pointer-events:none}.date-pill small{display:block;font-size:12px;color:var(--muted);font-weight:700;letter-spacing:0;margin-top:2px}.date-text{text-align:center;line-height:1.1}.today-shortcut{background:transparent;color:var(--accent);font-weight:900;padding:6px 2px;margin:-7px 0 14px}
@@ -122,6 +122,16 @@ async function importBackup(file){if(!file)return;const parsed=JSON.parse(await 
 function bind(){document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setTab(t.dataset.tab));document.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>setSub(b.dataset.sub));$('openLog').onclick=openEntry;$('closeModal').onclick=closeEntry;$('entryModal').onclick=e=>{if(e.target.id==='entryModal')closeEntry()};$('selectedDate').onchange=e=>{selectedDate=e.target.value||todayKey();render()};$('prevDay').onclick=()=>{selectedDate=addDays(selectedDate,-1);render()};$('nextDay').onclick=()=>{selectedDate=addDays(selectedDate,1);render()};$('jumpToday').onclick=$('todayShortcut').onclick=()=>{selectedDate=todayKey();render()};$('prevMonth').onclick=()=>{journalMonth.setMonth(journalMonth.getMonth()-1);renderJournal()};$('nextMonth').onclick=()=>{journalMonth.setMonth(journalMonth.getMonth()+1);renderJournal()};$('backToMonth').onclick=()=>{journalDay=null;renderJournal()};$('photo').onchange=async e=>{selectedPhotoData=await compressImage(e.target.files[0]);if(selectedPhotoData)toast('Photo attached')};$('clearForm').onclick=clearForm;$('historySearch').oninput=renderLibrary;$('entryForm').onsubmit=async e=>{e.preventDefault();const entry=formValues();if(!entry.name)return toast('Food name required');if(!entry.photo&&$('editingId').value){const old=state.entries.find(x=>x.id===$('editingId').value);entry.photo=selectedPhotoData||old?.photo||null}const idx=state.entries.findIndex(x=>x.id===entry.id);if(idx>=0){entry.createdAt=state.entries[idx].createdAt;state.entries[idx]=entry}else state.entries.push(entry);upsertFood(entry,$('favourite').checked);await persist();clearForm();closeEntry();toast(idx>=0?'Entry updated':'Entry saved')};$('saveGoals').onclick=async()=>{state.settings.calories=n($('goalCalories').value);state.settings.protein=n($('goalProtein').value);state.settings.carbs=n($('goalCarbs').value);state.settings.fat=n($('goalFat').value);await persist();toast('Goals saved')};$('accentColor').oninput=async e=>{state.settings.accent=e.target.value;applyAccent();await saveState()};document.querySelectorAll('.preset').forEach(b=>b.onclick=async()=>{state.settings.accent=b.dataset.color;applyAccent();await saveState()});$('exportBackup').onclick=exportBackup;$('importBackup').onchange=e=>importBackup(e.target.files[0]).catch(err=>alert(err.message));$('clearAll').onclick=async()=>{if(confirm('Delete all entries, foods, settings, and photos from this browser? Export a backup first if unsure.')){state=structuredClone(DEFAULT_STATE);await persist();toast('Local data deleted')}};$('closePhoto').onclick=()=>$('photoModal').style.display='none';$('photoModal').onclick=e=>{if(e.target.id==='photoModal')$('photoModal').style.display='none'}}
 async function init(){if(!('indexedDB'in window))alert('This browser does not support IndexedDB.');db=await openDB();state=await readState();state.settings={...DEFAULT_STATE.settings,...state.settings};selectedDate=todayKey();journalMonth=new Date();bind();applyAccent();setSub(activeSub);render()}init().catch(err=>{console.error(err);alert('Could not start app: '+err.message)})
 })();
+
+// Prevent accidental double-tap zoom in mobile Safari / webview while keeping normal scrolling.
+let __lastTouchEnd = 0;
+document.addEventListener('touchend', function(event){
+  const now = Date.now();
+  if (now - __lastTouchEnd <= 300) event.preventDefault();
+  __lastTouchEnd = now;
+}, {passive:false});
+document.addEventListener('dblclick', function(event){ event.preventDefault(); }, {passive:false});
+
 </script>
 </body>
 </html>
