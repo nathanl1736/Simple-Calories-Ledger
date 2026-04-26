@@ -1,9 +1,7 @@
 {
-  "version": "1.6.1",
+  "version": "1.6.2",
   "notes": [
-    "Renamed the web page title to Nathan's Simple Calories Ledger.",
-    "Added a pull-down gesture from the top of any tab to check for updates.",
-    "Enhanced the Calories trend graph with bank impact details aligned to Calories Bank.",
-    "Renamed the Stats card to Calories Bank and updated the help modal title to Calories Banking."
+    "Reset Calories Bank to the current week whenever the Stats sub tab is opened.",
+    "Removed the 7-day bank impact row from the Calories trend card."
   ]
 }
