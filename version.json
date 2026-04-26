@@ -1,8 +1,9 @@
 {
-  "version": "1.6.3",
+  "version": "1.6.5",
   "notes": [
-    "Added a Weekly adherence score card to the Stats page.",
-    "Added a 7-day adherence calendar aligned to the current Calories Bank week.",
-    "Cutting mode counts completed days at or under budget as successful; Maintain and Bulking count completed days within 100 kCal below target or above."
+    "Added a week selector to Weekly adherence to match Calories Bank",
+    "Added a Weekly adherence help popup explaining success rules",
+    "Tapping the Stats sub tab now resets all Stats week selections to the current week",
+    "Renamed the 7-day summary card to Last 7 days summary"
   ]
 }
