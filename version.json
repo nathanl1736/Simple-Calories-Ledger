@@ -1,8 +1,8 @@
 {
-  "version": "1.5.8",
+  "version": "1.5.9",
   "notes": [
-    "Added remote version checking for Home Screen installs",
-    "Added update available popup with release notes",
-    "Added manual Check for updates button in Settings"
+    "Fixed horizontal page dragging that could shift the app out of alignment on mobile Safari",
+    "Locked the app shell, bottom navigation, and modals to the viewport width",
+    "Added extra safeguards so accidental sideways scroll snaps back to the correct alignment"
   ]
 }
