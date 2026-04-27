@@ -1,6 +1,8 @@
 {
-  "version": "1.7.7",
+  "version": "1.7.8",
   "notes": [
-    "Updated the day completion slider handle to use a flat lock icon"
+    "Added Library Cards tab for meal share cards",
+    "Simplified meal card modal for screenshot sharing",
+    "Added Download PNG for meal summary cards"
   ]
 }
