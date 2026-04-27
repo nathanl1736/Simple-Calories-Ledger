@@ -1,9 +1,15 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.5",
   "notes": [
     "Cleaned up Library Cards rows and empty meal photo placeholders",
     "Improved meal card preview spacing so long food names do not collide with calorie values",
     "Simplified meal card export actions to a single Save / Share PNG button",
-    "Unified meal card titles and labels across both card formats"
+    "Unified meal card titles and labels across both card formats",
+    "Added serving portion support for food entries",
+    "Fixed journal calendar photo counts so day boxes stay fixed height",
+    "Clarified per-serving food logging UI and portion badges",
+    "Grouped food log calories and macros into one per-serving panel",
+    "Unified Additional Information spacing and fixed macro input focus",
+    "Added a read-only live logged-total preview for serving portions"
   ]
 }
