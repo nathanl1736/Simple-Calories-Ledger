@@ -1,7 +1,12 @@
 {
-  "version": "1.7.5",
+  "version": "1.7.6",
   "notes": [
-    "Added a Log same again shortcut for repeating today's latest entry",
+    "Moved Log same again into each meal group",
+    "Log same again now copies yesterday's matching meal entries into the selected day without carrying over photos",
+    "Made grouped meal sections the default Day log view",
+    "Updated Stats help text to match the current Stats controls",
+    "Combined the Last 7 days summary and Calories trend cards with new help text",
+    "Aligned the Last 7 days chart guide line to the daily calorie goal",
     "Improved empty states for Journal, Library, and Stats",
     "Polished iPhone Home Screen behaviour with stronger horizontal pan locking and PWA metadata"
   ]
