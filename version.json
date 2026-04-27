@@ -1,8 +1,8 @@
 {
-  "version": "1.6.7",
+  "version": "1.6.9",
   "notes": [
-    "Replaced the Complete/Reopen day button with a swipe-to-confirm control",
-    "Added completion animation feedback when a day is completed or reopened",
-    "Auto-scrolls to the top after completing or reopening a day"
+    "Renamed the Calories trend legend from Banked to Under for clearer wording",
+    "Replaced the Log Food save button with a swipe-to-log control",
+    "Kept the Save + add another behaviour as a Keep adding after log option in the swipe flow"
   ]
 }
