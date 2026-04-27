@@ -1,8 +1,9 @@
 {
-  "version": "1.7.2",
+  "version": "1.7.3",
   "notes": [
-    "Removed the Start Here helper text from the Log Food Calories field",
-    "Kept the iOS-friendly quick entry behaviour without the extra label",
-    "Minor Log Food spacing polish after removing the helper text"
+    "Moved the Slide to log food fast path directly under Calories",
+    "Added one-tap meal chips for Breakfast, Lunch, Dinner, Snack, and Drink",
+    "Replaced Log Food photo and favourite emoji with flat inline icons",
+    "Updated favourite copy to Save/Update as favourite"
   ]
 }
