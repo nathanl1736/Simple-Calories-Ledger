@@ -1,8 +1,9 @@
 {
-  "version": "1.6.9",
+  "version": "1.7.0",
   "notes": [
-    "Renamed the Calories trend legend from Banked to Under for clearer wording",
-    "Replaced the Log Food save button with a swipe-to-log control",
-    "Kept the Save + add another behaviour as a Keep adding after log option in the swipe flow"
+    "Updated checkbox controls into larger pill toggle buttons for a more polished mobile feel",
+    "Improved Log Food so the Calories input is automatically focused and selected when the modal opens",
+    "Added a bottom Close button to the Log Food modal",
+    "Polished the meal photo upload area with a larger tap target, clearer helper text, and an inline preview"
   ]
 }
