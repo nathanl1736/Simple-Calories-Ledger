@@ -1,5 +1,5 @@
 {
-  "version": "1.8.5",
+  "version": "1.8.6",
   "notes": [
     "Cleaned up Library Cards rows and empty meal photo placeholders",
     "Improved meal card preview spacing so long food names do not collide with calorie values",
@@ -10,6 +10,7 @@
     "Clarified per-serving food logging UI and portion badges",
     "Grouped food log calories and macros into one per-serving panel",
     "Unified Additional Information spacing and fixed macro input focus",
-    "Added a read-only live logged-total preview for serving portions"
+    "Added a read-only live logged-total preview for serving portions",
+    "Updated Settings color palettes to softer pastels"
   ]
 }
