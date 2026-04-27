@@ -1,8 +1,8 @@
 {
-  "version": "1.7.4",
+  "version": "1.7.5",
   "notes": [
-    "Updated the Meal Photo editor to use the same styled photo picker as Log Food",
-    "Moved the food swipe action down when Additional Information is expanded so saving stays near the detailed fields",
-    "Changed the edit-entry swipe text to Slide to save while keeping new logs as Slide to log food"
+    "Added a Log same again shortcut for repeating today's latest entry",
+    "Improved empty states for Journal, Library, and Stats",
+    "Polished iPhone Home Screen behaviour with stronger horizontal pan locking and PWA metadata"
   ]
 }
