@@ -3,6 +3,7 @@
   "notes": [
     "Cleaned up Library Cards rows and empty meal photo placeholders",
     "Improved meal card preview spacing so long food names do not collide with calorie values",
-    "Simplified meal card export actions to a single Save / Share PNG button"
+    "Simplified meal card export actions to a single Save / Share PNG button",
+    "Unified meal card titles and labels across both card formats"
   ]
 }
