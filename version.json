@@ -1,8 +1,8 @@
 {
-  "version": "1.7.8",
+  "version": "1.7.9",
   "notes": [
-    "Added Library Cards tab for meal share cards",
-    "Simplified meal card modal for screenshot sharing",
-    "Added Download PNG for meal summary cards"
+    "Added swipeable Photo and Numbers meal cards in Library Cards",
+    "Added Save / Share PNG to open the native iPhone share sheet when supported",
+    "Fixed empty meal image placeholder icon sizing and kept kCal on the same line as calorie totals"
   ]
 }
