@@ -1,9 +1,8 @@
 {
-  "version": "1.7.1",
+  "version": "1.7.2",
   "notes": [
-    "Improved the Log Food calories field so it is visually prioritised as the first step on iPhone and desktop",
-    "Adjusted focus behaviour for iOS Safari and Home Screen installs, where automatic keyboard opening can be restricted",
-    "Added a small iPhone-friendly hint when the keyboard cannot be opened automatically",
-    "Cleaned up swipe handles by removing the off-centre arrow icon and replacing it with a simpler centred grip"
+    "Removed the Start Here helper text from the Log Food Calories field",
+    "Kept the iOS-friendly quick entry behaviour without the extra label",
+    "Minor Log Food spacing polish after removing the helper text"
   ]
 }
