@@ -1,8 +1,8 @@
 {
-  "version": "1.6.6",
+  "version": "1.6.7",
   "notes": [
-    "Removed the kCal label from Weekly adherence day boxes so values fit better on mobile",
-    "Added a Reset Stats to this week button as a simple way to reset Stats week selections",
-    "Improved the Stats sub-tab reset so re-tapping Stats refreshes the week views immediately"
+    "Replaced the Complete/Reopen day button with a swipe-to-confirm control",
+    "Added completion animation feedback when a day is completed or reopened",
+    "Auto-scrolls to the top after completing or reopening a day"
   ]
 }
