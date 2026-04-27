@@ -1,9 +1,8 @@
 {
-  "version": "1.7.3",
+  "version": "1.7.4",
   "notes": [
-    "Moved the Slide to log food fast path directly under Calories",
-    "Added one-tap meal chips for Breakfast, Lunch, Dinner, Snack, and Drink",
-    "Replaced Log Food photo and favourite emoji with flat inline icons",
-    "Updated favourite copy to Save/Update as favourite"
+    "Updated the Meal Photo editor to use the same styled photo picker as Log Food",
+    "Moved the food swipe action down when Additional Information is expanded so saving stays near the detailed fields",
+    "Changed the edit-entry swipe text to Slide to save while keeping new logs as Slide to log food"
   ]
 }
