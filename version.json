@@ -1,9 +1,9 @@
 {
-  "version": "1.7.0",
+  "version": "1.7.1",
   "notes": [
-    "Updated checkbox controls into larger pill toggle buttons for a more polished mobile feel",
-    "Improved Log Food so the Calories input is automatically focused and selected when the modal opens",
-    "Added a bottom Close button to the Log Food modal",
-    "Polished the meal photo upload area with a larger tap target, clearer helper text, and an inline preview"
+    "Improved the Log Food calories field so it is visually prioritised as the first step on iPhone and desktop",
+    "Adjusted focus behaviour for iOS Safari and Home Screen installs, where automatic keyboard opening can be restricted",
+    "Added a small iPhone-friendly hint when the keyboard cannot be opened automatically",
+    "Cleaned up swipe handles by removing the off-centre arrow icon and replacing it with a simpler centred grip"
   ]
 }
