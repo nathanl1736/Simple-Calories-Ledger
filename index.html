@@ -20,6 +20,13 @@ html,body{width:100%;max-width:100vw;overflow-x:hidden;position:relative}.app,.n
 .portion-total-preview{margin-top:8px;background:#242424;border:1px solid #333;border-radius:14px;color:var(--accent);font-size:12px;font-weight:900;line-height:1.35;padding:10px}
 </style>
 </head><body>
+<!--
+Design principles:
+This is a local-first, low-friction calorie ledger that should feel simple, calm, and fast.
+It should help people log food, inspect trends, and review meals without forcing heavy planning or social layers.
+It should remain understandable at a glance, with clear per-serving inputs, readable totals, and minimal ceremony.
+The app is a personal tracker first; cloud sync or sharing can sit behind that core experience if added later.
+-->
 <div class="app">
 <section id="view-tracking" class="view"><div class="head"><div class="kicker">Tracking</div><h1>DASHBOARD</h1></div><div class="date-row"><button class="date-btn" id="prevDay">‹</button><label class="date-pill"><input id="selectedDate" type="date"><span><span id="dateLabel">Today</span><small id="dateSmall"></small></span></label><button class="date-btn" id="nextDay">›</button></div><button class="today-link" id="todayShortcut">Use today</button><div class="hero"><div class="ring" id="calRing"><div><strong id="eatenCal">0</strong><span id="ringLabel">USED</span></div></div><div class="remaining"><div class="label" id="calorieStatusLabel">Budget remaining</div><div class="value"><span id="remainCal">0</span> <small>kCal</small></div><div class="goal muted" id="goalLine">Budget: <span id="goalCalText">0</span> kCal</div></div></div><div class="macro-grid" id="macroGrid"></div><button class="log-btn" id="openLog">+ Log Food</button><div class="day-log-head"><h2 class="section">Day log</h2><button class="toggle-btn" id="toggleDayLogView" type="button">Group by meal</button></div><div id="entriesList"></div><div class="day-action-wrap" id="dayActionWrap">
   <div class="swipe-action" id="daySwipeAction" role="button" tabindex="0" aria-label="Slide to complete the day">
