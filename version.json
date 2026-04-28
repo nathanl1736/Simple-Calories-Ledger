@@ -1,7 +1,9 @@
 {
-  "version": "1.8.7",
+  "version": "1.8.7.1",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in index.html, APP_VERSION in sw.js, and this version value so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
+    "Adjusted iOS PWA modal safe-area spacing so bottom sheets sit flush to the bottom",
+    "Removed sticky modal headers so modal content scrolls as one sheet",
     "Added kCal and kJ display support while keeping saved calorie data normalized to kCal",
     "Added kCal and kJ entry options in the Log Food modal",
     "Improved safe-area spacing for modal sheets on iPhone-style screens",
