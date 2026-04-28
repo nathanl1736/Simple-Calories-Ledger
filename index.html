@@ -22,7 +22,93 @@ html,body{width:100%;max-width:100vw;overflow-x:hidden;position:relative}.app,.n
 .portion-total-preview{margin-top:8px;background:#242424;border:1px solid #333;border-radius:14px;color:var(--accent);font-size:12px;font-weight:900;line-height:1.35;padding:10px}
 .entry-unit-mode{grid-column:1/-1;background:#202020;border:1px solid var(--line);border-radius:18px;padding:10px}.entry-unit-mode .unit-label{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;color:#aaa;font-size:12px;font-weight:950;letter-spacing:.08em;text-transform:uppercase}.entry-unit-seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}.entry-unit-seg button{min-height:42px;border-radius:13px;background:#292929;border:1px solid #363636;color:#aaa;font-weight:950}.entry-unit-seg button.active{background:color-mix(in srgb,var(--accent) 23%,#292929);border-color:color-mix(in srgb,var(--accent) 42%,#363636);color:var(--accent)}.per-serving-chip.unit-toggle-chip{display:inline-grid;grid-template-columns:1fr 1fr;gap:3px;padding:3px;min-height:32px;background:#292929;border-color:#363636}.unit-toggle-chip button{min-height:26px;border-radius:999px;background:transparent;color:#888;font-size:10.5px;font-weight:950;padding:0 8px;white-space:nowrap}.unit-toggle-chip button.active{background:color-mix(in srgb,var(--accent) 23%,#292929);color:var(--accent)}
 .quick-search{padding:8px 8px 10px;border-bottom:1px solid #303030}.quick-search input{min-height:42px;border-radius:13px;font-size:15px}.quick-search-results{display:none;margin-top:12px;padding:0 0 2px}.quick-search-results.show{display:flex}.photo-action-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.photo-action-grid .primary,.photo-action-grid .secondary{width:100%;min-height:48px}.entry-photo-action-mode .entry-photo-picker,.entry-photo-action-mode>label,.entry-photo-action-mode label[for=entryPhotoInput],.entry-photo-action-mode #saveEntryPhoto{display:none!important}.entry-photo-action-mode .photo-upload-preview{margin-bottom:0}
-.modal-wrap{padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain}.modal{max-height:calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));padding-bottom:calc(18px + env(safe-area-inset-bottom));scroll-padding-top:calc(18px + env(safe-area-inset-top));scroll-padding-bottom:calc(18px + env(safe-area-inset-bottom))}.modal-head{gap:12px}.modal-head h2{min-width:0}.close{flex:0 0 44px}.toast{bottom:calc(96px + env(safe-area-inset-bottom))}.app{padding-top:calc(28px + env(safe-area-inset-top));padding-bottom:calc(104px + env(safe-area-inset-bottom))}.energy-seg{display:flex;background:#202020;border:1px solid var(--line);border-radius:16px;padding:4px}.energy-seg button{flex:1;min-height:42px;border-radius:12px;background:transparent;color:#888;font-weight:950}.energy-seg button.active{background:color-mix(in srgb,var(--accent) 18%,#333);color:var(--accent)}.entry-energy-seg{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:8px 0 4px}.entry-energy-seg button{min-height:34px;border-radius:12px;background:#292929;border:1px solid #363636;color:#aaa;font-size:12px;font-weight:950}.entry-energy-seg button.active{background:color-mix(in srgb,var(--accent) 23%,#292929);border-color:color-mix(in srgb,var(--accent) 42%,#363636);color:var(--accent)}.unit-note{margin-top:8px}
+.modal-wrap{padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain;background:rgba(0,0,0,.86)}.modal{max-height:calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));padding-bottom:calc(18px + env(safe-area-inset-bottom));scroll-padding-top:calc(18px + env(safe-area-inset-top));scroll-padding-bottom:calc(18px + env(safe-area-inset-bottom))}.modal-head{gap:12px}.modal-head h2{min-width:0}.close{flex:0 0 44px}.toast{bottom:calc(96px + env(safe-area-inset-bottom))}.app{padding-top:calc(28px + env(safe-area-inset-top));padding-bottom:calc(104px + env(safe-area-inset-bottom))}.energy-seg{display:flex;background:#202020;border:1px solid var(--line);border-radius:16px;padding:4px}.energy-seg button{flex:1;min-height:42px;border-radius:12px;background:transparent;color:#888;font-weight:950}.energy-seg button.active{background:color-mix(in srgb,var(--accent) 18%,#333);color:var(--accent)}.entry-energy-seg{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:8px 0 4px}.entry-energy-seg button{min-height:34px;border-radius:12px;background:#292929;border:1px solid #363636;color:#aaa;font-size:12px;font-weight:950}.entry-energy-seg button.active{background:color-mix(in srgb,var(--accent) 23%,#292929);border-color:color-mix(in srgb,var(--accent) 42%,#363636);color:var(--accent)}.unit-note{margin-top:8px}.journal-toggle{margin:0 0 14px}.journal-day-list{display:grid;gap:10px}.journal-entry-card{display:grid;grid-template-columns:86px minmax(0,1fr);gap:12px;align-items:center;background:var(--card);border:1px solid #292929;border-radius:18px;padding:10px;text-align:left}.journal-entry-card.no-photo{grid-template-columns:1fr}.journal-entry-photo{width:86px;aspect-ratio:1;border-radius:14px;object-fit:cover;background:#242424}.journal-entry-title{font-size:16px;font-weight:950;line-height:1.12;overflow-wrap:anywhere}.journal-entry-meta{color:var(--muted);font-size:12px;font-weight:850;line-height:1.35;margin-top:5px}.journal-entry-note{color:#aaa;font-size:12px;line-height:1.35;margin-top:7px}.journal-collage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.journal-photo-card{background:var(--card);border:1px solid #292929;border-radius:16px;padding:6px;text-align:left}.journal-photo-card img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;display:block}.journal-photo-caption{padding:8px 3px 3px}.journal-photo-caption strong{display:block;color:var(--ink);font-size:13px;font-weight:950;line-height:1.2;overflow-wrap:anywhere}.journal-photo-caption span{display:block;color:var(--muted);font-size:11px;font-weight:850;margin-top:3px}.photo-card span{display:none}@media(min-width:520px){.journal-collage-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.journal-day-toolbar{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:10px;
+  align-items:center;
+  margin:0 0 14px;
+}
+.journal-day-toolbar .journal-toggle{
+  margin:0;
+}
+.journal-label-toggle{
+  min-height:42px;
+  border-radius:12px;
+  background:#202020;
+  border:1px solid var(--line);
+  color:#888;
+  padding:0 14px;
+  font-size:13px;
+  font-weight:950;
+}
+.journal-label-toggle.active{
+  background:#333;
+  color:var(--ink);
+}
+.journal-collage-actions{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+}
+.journal-collage-actions .journal-label-toggle{
+  white-space:nowrap;
+}
+.journal-collage-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-auto-flow:dense;
+  gap:6px;
+}
+.journal-photo-card{
+  min-width:0;
+  background:#202020;
+  border:1px solid #292929;
+  border-radius:14px;
+  padding:4px;
+  text-align:left;
+}
+.journal-photo-card.featured{
+  grid-column:span 2;
+  grid-row:span 2;
+}
+.journal-photo-card img{
+  width:100%;
+  aspect-ratio:1;
+  object-fit:cover;
+  border-radius:10px;
+  display:block;
+}
+.journal-photo-card.featured img{
+  height:100%;
+}
+.journal-photo-caption{
+  padding:6px 2px 1px;
+}
+.journal-collage-grid.hide-labels .journal-photo-card{
+  padding:0;
+  border:0;
+  background:transparent;
+}
+.journal-collage-grid.hide-labels .journal-photo-card img{
+  border-radius:12px;
+}
+.journal-collage-grid.hide-labels .journal-photo-caption{
+  display:none;
+}
+@media(max-width:380px){
+  .journal-day-toolbar{
+    grid-template-columns:1fr;
+  }
+  .journal-label-toggle{
+    width:100%;
+  }
+  .journal-collage-actions{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+  }
+}
 </style>
 </head><body>
 <!--
@@ -43,7 +129,7 @@ The app is a personal tracker first; cloud sync or sharing can sit behind that c
 </div></section>
 <section id="view-journal" class="view hidden"><div class="head"><div class="kicker">Monthly view</div><h1>PHOTO JOURNAL</h1></div><div id="journalMonthView"><div class="month-tools"><button class="icon-btn" id="prevMonth">‹</button><strong id="monthTitle"></strong><button class="icon-btn" id="nextMonth">›</button></div><div class="calendar" id="calendarGrid"></div></div><div id="journalDayView" class="hidden"><div class="month-tools"><button class="secondary" id="backToMonth">← Month</button><strong id="journalDayTitle"></strong></div><div id="journalDayContent"></div></div></section>
 <section id="view-library" class="view hidden"><div class="head"><div class="kicker" id="librarySubheading">History</div><h1>LIBRARY</h1></div><div class="seg"><button class="active" data-sub="history">History</button><button data-sub="favs">Favourites</button><button data-sub="cards">Cards</button><button data-sub="stats">Stats</button></div><div id="libraryHistory"><div class="card"><label>Search history</label><input id="historySearch" placeholder="Search previous foods"></div><div id="historyList"></div></div><div id="libraryFavs" class="hidden"><div id="favList"></div></div><div id="libraryCards" class="hidden"><div id="cardsList"></div></div><div id="libraryStats" class="hidden"><button class="today-link" id="resetStatsToCurrentWeek" type="button">Reset Stats to this week</button><div class="card"><div class="card-head"><h2>Calories Bank</h2><button class="help-btn" id="bankingHelp" type="button" aria-label="What is Calories Banking?">?</button></div><div class="week-tools"><button class="week-nav" id="prevBankWeek" type="button">‹</button><div class="week-title" id="bankWeekTitle">This week</div><button class="week-nav" id="nextBankWeek" type="button">›</button></div><div id="bankingStats"></div><div class="bank-chart" id="bankChart"></div></div><div class="card"><div class="card-head"><h2>Weekly adherence</h2><button class="help-btn" id="adherenceHelp" type="button" aria-label="What is Weekly adherence?">?</button></div><div class="week-tools"><button class="week-nav" id="prevAdherenceWeek" type="button">‹</button><div class="week-title" id="adherenceWeekTitle">This week</div><button class="week-nav" id="nextAdherenceWeek" type="button">›</button></div><div id="adherenceStats"></div><div class="adherence-week" id="adherenceWeek"></div></div><div class="card"><div class="card-head"><h2>Last 7 days</h2><button class="help-btn" id="lastSevenHelp" type="button" aria-label="What is Last 7 days?">?</button></div><div id="summaryStats"></div><div id="calTrendSummary"></div><div class="bars enhanced-bars" id="calChart"></div><div class="trend-legend"><span><i class="dot goal-dot"></i>Daily goal</span><span><i class="dot banked-dot"></i>Under</span><span><i class="dot over-dot"></i>Over</span><span><i class="dot open-dot"></i>Open</span></div></div></div></section>
-<section id="view-settings" class="view hidden"><div class="head"><div class="kicker">Goals & Backup</div><h1>SETTINGS</h1></div><div class="card"><h2>Daily goals</h2><div class="form"><div class="full"><label>Tracking Mode</label><select id="trackingMode" disabled><option>Cutting</option><option>Bulking</option><option>Maintain</option></select></div><div class="full nutrition-grid"><div><label>Calories (kCal)</label><input id="goalCalories" type="number" inputmode="numeric" disabled></div><div><label>Fat (g)</label><input id="goalFat" type="number" inputmode="decimal" disabled></div><div><label>Carbs (g)</label><input id="goalCarbs" type="number" inputmode="decimal" disabled></div><div><label>Protein (g)</label><input id="goalProtein" type="number" inputmode="decimal" disabled></div></div></div><p class="mini-note">Cutting uses a daily calorie budget. Bulking and Maintain use a daily calorie goal.</p><div class="actions"><button class="primary" id="editGoals" type="button">Edit</button></div><p class="mini-note hidden" id="goalEditHint">Editing goals. Save is enabled after you change a value. Leaving Settings discards unsaved changes.</p></div><div class="card"><h2>Energy display</h2><div class="energy-seg" id="energyUnitToggle" role="group" aria-label="Energy display unit"><button type="button" data-energy-unit="kcal">kCal</button><button type="button" data-energy-unit="kj">kJ</button></div><p class="mini-note unit-note">Saved data stays normalized to kCal. Daily goals follow this display unit; Log Food can be entered in either unit.</p></div><div class="card"><h2>Accent colour</h2><input id="accentColor" type="color"><div class="actions"><button class="preset" title="Mint" style="--c:#9be7c4" data-color="#9be7c4"></button><button class="preset" title="Lilac" style="--c:#ccb7f6" data-color="#ccb7f6"></button><button class="preset" title="Sky" style="--c:#a8d8ff" data-color="#a8d8ff"></button><button class="preset" title="Butter" style="--c:#f5dd9d" data-color="#f5dd9d"></button><button class="preset" title="Peach" style="--c:#f4b8a1" data-color="#f4b8a1"></button><button class="preset" title="Rose" style="--c:#efb4c8" data-color="#efb4c8"></button></div></div><div class="card" id="backupSection"><h2>Backup</h2><p class="hint" id="backupStatus"></p><p class="hint">Backups include food logs, goals, saved foods, completed days, and compressed journal photos. Export before clearing Safari data, changing phones, or deleting the Home Screen app.</p><div class="form"><div class="full"><label>Backup reminder</label><select id="backupReminderDays"><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></div></div><div class="actions"><button class="primary" id="exportBackup">Export Backup</button><label class="secondary" style="display:inline-flex;align-items:center;margin:0"><input id="importBackup" type="file" accept="application/json" style="display:none">Import Backup</label><button class="secondary" id="checkUpdates" type="button">Check for updates</button><button class="secondary danger" id="clearAll">Clear Local Data</button></div></div><div class="version-footer">Version <span id="appVersion">1.8.6</span></div></section>
+<section id="view-settings" class="view hidden"><div class="head"><div class="kicker">Goals & Backup</div><h1>SETTINGS</h1></div><div class="card"><h2>Daily goals</h2><div class="form"><div class="full"><label>Tracking Mode</label><select id="trackingMode" disabled><option>Cutting</option><option>Bulking</option><option>Maintain</option></select></div><div class="full nutrition-grid"><div><label>Calories (kCal)</label><input id="goalCalories" type="number" inputmode="numeric" disabled></div><div><label>Fat (g)</label><input id="goalFat" type="number" inputmode="decimal" disabled></div><div><label>Carbs (g)</label><input id="goalCarbs" type="number" inputmode="decimal" disabled></div><div><label>Protein (g)</label><input id="goalProtein" type="number" inputmode="decimal" disabled></div></div></div><p class="mini-note">Cutting uses a daily calorie budget. Bulking and Maintain use a daily calorie goal.</p><div class="actions"><button class="primary" id="editGoals" type="button">Edit</button></div><p class="mini-note hidden" id="goalEditHint">Editing goals. Save is enabled after you change a value. Leaving Settings discards unsaved changes.</p></div><div class="card"><h2>Energy display</h2><div class="energy-seg" id="energyUnitToggle" role="group" aria-label="Energy display unit"><button type="button" data-energy-unit="kcal">kCal</button><button type="button" data-energy-unit="kj">kJ</button></div><p class="mini-note unit-note">Saved data stays normalized to kCal. Daily goals follow this display unit; Log Food can be entered in either unit.</p></div><div class="card"><h2>Accent colour</h2><input id="accentColor" type="color"><div class="actions"><button class="preset" title="Mint" style="--c:#9be7c4" data-color="#9be7c4"></button><button class="preset" title="Lilac" style="--c:#ccb7f6" data-color="#ccb7f6"></button><button class="preset" title="Sky" style="--c:#a8d8ff" data-color="#a8d8ff"></button><button class="preset" title="Butter" style="--c:#f5dd9d" data-color="#f5dd9d"></button><button class="preset" title="Peach" style="--c:#f4b8a1" data-color="#f4b8a1"></button><button class="preset" title="Rose" style="--c:#efb4c8" data-color="#efb4c8"></button></div></div><div class="card" id="backupSection"><h2>Backup</h2><p class="hint" id="backupStatus"></p><p class="hint">Backups include food logs, goals, saved foods, completed days, and compressed journal photos. Export before clearing Safari data, changing phones, or deleting the Home Screen app.</p><div class="form"><div class="full"><label>Backup reminder</label><select id="backupReminderDays"><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></div></div><div class="actions"><button class="primary" id="exportBackup">Export Backup</button><label class="secondary" style="display:inline-flex;align-items:center;margin:0"><input id="importBackup" type="file" accept="application/json" style="display:none">Import Backup</label><button class="secondary" id="checkUpdates" type="button">Check for updates</button><button class="secondary danger" id="clearAll">Clear Local Data</button></div></div><div class="version-footer">Version <span id="appVersion">1.8.7</span></div></section>
 </div>
 <nav class="nav"><div class="nav-inner">
   <button class="tab active" data-tab="tracking"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></svg></span>TRACKING</button>
@@ -57,7 +143,7 @@ The app is a personal tracker first; cloud sync or sharing can sit behind that c
 <div class="modal-wrap center-modal" id="versionModal"><div class="modal update-modal"><div class="version-badge">Version <span id="versionModalNumber">1.8.5</span></div><div class="modal-head"><h2>Version update available</h2><button class="close" id="closeVersionModal">×</button></div><p class="hint" id="versionModalHint">A newer version is ready to install.</p><ul class="update-list" id="versionUpdateList"></ul><div class="update-actions"><button class="primary" id="updateNow" type="button">Update now</button><button class="secondary" id="laterVersionUpdate" type="button">Later</button></div></div></div><div class="modal-wrap center-modal" id="backupReminderModal"><div class="modal update-modal"><div class="modal-head"><h2>Backup reminder</h2><button class="close" id="closeBackupReminder">×</button></div><p class="hint" id="backupReminderHint">Your latest backup is due.</p><div class="update-actions"><button class="primary" id="goToBackup" type="button">Open Backup</button><button class="secondary" id="dismissBackupReminder" type="button">Later today</button></div></div></div><div class="toast" id="toast"></div>
 <script>
 (()=>{let last=0;document.addEventListener('touchend',e=>{const now=Date.now();if(now-last<=300)e.preventDefault();last=now},{passive:false});document.addEventListener('dblclick',e=>e.preventDefault(),{passive:false});
-const APP_VERSION='1.8.6';const $=id=>document.getElementById(id),uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2),n=v=>Number(v)||0,fmt=v=>Number.isFinite(Number(v))?Math.round(Number(v)).toLocaleString():String(v),signed=v=>(Number(v)>0?'+':'')+fmt(v),esc=s=>(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const APP_VERSION='1.8.7';const $=id=>document.getElementById(id),uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2),n=v=>Number(v)||0,fmt=v=>Number.isFinite(Number(v))?Math.round(Number(v)).toLocaleString():String(v),signed=v=>(Number(v)>0?'+':'')+fmt(v),esc=s=>(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const toKey=d=>{const z=new Date(d);z.setMinutes(z.getMinutes()-z.getTimezoneOffset());return z.toISOString().slice(0,10)},todayKey=()=>toKey(new Date()),addDays=(key,days)=>{const d=new Date(key+'T00:00:00');d.setDate(d.getDate()+days);return toKey(d)};
 // When changing entries/state shape, review backup export/import compatibility too.
 const DEFAULT={settings:{calories:1800,protein:150,carbs:90,fat:50,accent:'#9be7c4',trackingMode:'Cutting',energyUnit:'kcal',lastBackupAt:null,lastBackupMeta:null,lastBackupReminderShownAt:null,backupReminderDays:7},entries:[],foods:[],completedDates:[]};function energyUnitValue(v){return v==='kj'?'kj':'kcal'}function energyUnit(){return energyUnitValue(state?.settings?.energyUnit)}function energyLabel(){return energyUnit()==='kj'?'kJ':'kCal'}function energyValue(kcal){const v=n(kcal);return energyUnit()==='kj'?v*4.184:v}function fmtEnergy(kcal){return fmt(energyValue(kcal))}function energyText(kcal,suffix=''){return fmtEnergy(kcal)+' '+energyLabel()+suffix}let db,state=structuredClone(DEFAULT),selectedDate=todayKey(),journalMonth=new Date(),journalDay=null,selectedPhotoData=null,activePhotoEntryId=null,selectedEntryPhotoData=null,dayLogView='group',pendingMeal=null,goalsEditing=false,bankingWeekStart=weekStartMonday(todayKey()),adherenceWeekStart=weekStartMonday(todayKey()),scrollLockY=0,openModals=new Set(),availableUpdate=null,activeMealCardGroup=null,activeMealCardVariant='photo';const MEALS=['Breakfast','Lunch','Dinner','Snack','Drink'];const ICON_PHOTO='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7.5h3l1.4-2h5.2l1.4 2h3A2 2 0 0 1 21 9.5v8A2 2 0 0 1 19 19.5H5A2 2 0 0 1 3 17.5v-8A2 2 0 0 1 5 7.5z"/><circle cx="12" cy="13.5" r="3.2"/></svg>',ICON_STAR='<svg class="flat-icon favourite-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2.55 5.17 5.7.83-4.12 4.02.97 5.68L12 16.52 6.9 19.2l.97-5.68L3.75 9.5l5.7-.83L12 3.5z"/></svg>',ICON_MEAL='<svg class="flat-icon entry-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v8M9 3v8M6 7h3M7.5 11v10M17 3c1.7 1.4 2.5 3.3 2.5 5.7 0 2.2-.9 4-2.5 5.3v7"/></svg>';
@@ -347,5 +433,54 @@ const energyRenderCards=renderCards;renderCards=function(){energyRenderCards();d
 const energyMealScreenshotCardHTML=mealScreenshotCardHTML;mealScreenshotCardHTML=function(group){return energyMealScreenshotCardHTML(group).replace(/([\d,]+) kCal/g,(m,num)=>fmtEnergy(Number(num.replace(/,/g,'')))+' '+energyLabel()).replace(/<span>kCal<\/span>/g,'<span>'+energyLabel()+'</span>')};
 const energyMealNumbersCardHTML=mealNumbersCardHTML;mealNumbersCardHTML=function(group){return energyMealNumbersCardHTML(group).replace(/([\d,]+) kCal/g,(m,num)=>fmtEnergy(Number(num.replace(/,/g,'')))+' '+energyLabel()).replace(/<span>kCal<\/span>/g,'<span>'+energyLabel()+'</span>')};
 initEnergyUnitSetting();
+let journalDayViewMode='list';
+let journalCollageShowText=true;
+let journalCollageShuffleSeed=0;
+let journalCollageLastTailId='';
+function journalDayToggleHTML(){
+  const collageActions=journalDayViewMode==='collage'?`<div class="journal-collage-actions"><button class="journal-label-toggle" type="button" data-journal-shuffle>Shuffle</button><button class="journal-label-toggle ${journalCollageShowText?'active':''}" type="button" data-journal-label-toggle>${journalCollageShowText?'Labels on':'Labels off'}</button></div>`:'';
+  return `<div class="journal-day-toolbar"><div class="seg journal-toggle" role="group" aria-label="Journal day view"><button type="button" data-journal-day-mode="list" class="${journalDayViewMode==='list'?'active':''}">List</button><button type="button" data-journal-day-mode="collage" class="${journalDayViewMode==='collage'?'active':''}">Collage</button></div>${collageActions}</div>`;
+}
+function journalEntryListHTML(entries){
+  return entries.length?`<div class="journal-day-list">${entries.map(e=>{const t=entryTotals(e),photo=e.photo?`<img class="journal-entry-photo" src="${e.photo}" alt="${esc(e.name)} photo">`:'',note=e.notes?`<div class="journal-entry-note">${esc(e.notes)}</div>`:'';return `<button class="journal-entry-card ${e.photo?'':'no-photo'}" type="button" ${e.photo?`data-open-photo="${e.id}"`:''}>${photo}<div><div class="journal-entry-title">${esc(e.name)}</div><div class="journal-entry-meta">${esc(e.meal||'Snack')} · ${energyText(t.calories)} · P ${fmt(t.protein)}g · C ${fmt(t.carbs)}g · F ${fmt(t.fat)}g</div>${note}</div></button>`}).join('')}</div>`:'<div class="empty">No food logged for this day.</div>';
+}
+function journalCollageHTML(entries){
+  const photos=shuffleJournalPhotos(entries.filter(e=>e.photo));
+  const featureOffset=journalCollageShuffleSeed?journalCollageShuffleSeed%5:0;
+  return photos.length?`<div class="journal-collage-grid ${journalCollageShowText?'':'hide-labels'}">${photos.map((e,i)=>{const t=entryTotals(e),featured=i===featureOffset||((i+featureOffset)%7===0&&i<photos.length-1);return `<button class="journal-photo-card ${featured?'featured':''}" type="button" data-open-photo="${e.id}"><img src="${e.photo}" alt="${esc(e.name)} photo"><span class="journal-photo-caption"><strong>${esc(e.name)}</strong><span>${esc(e.meal||'Snack')} · ${energyText(t.calories)}</span></span></button>`}).join('')}</div>`:'<div class="empty">No photos for this day.</div>';
+}
+function shuffleJournalPhotos(photos){
+  const list=[...photos];
+  if(!journalCollageShuffleSeed)return list;
+  let seed=journalCollageShuffleSeed;
+  for(let i=list.length-1;i>0;i--){
+    seed=(seed*1664525+1013904223)>>>0;
+    const j=seed%(i+1);
+    [list[i],list[j]]=[list[j],list[i]];
+  }
+  if(list.length>1&&journalCollageLastTailId&&list[list.length-1]?.id===journalCollageLastTailId){
+    const swapIndex=seed%(list.length-1);
+    [list[list.length-1],list[swapIndex]]=[list[swapIndex],list[list.length-1]];
+  }
+  return list;
+}
+function bindJournalDayActions(){
+  document.querySelectorAll('[data-journal-day-mode]').forEach(btn=>btn.onclick=()=>{journalDayViewMode=btn.dataset.journalDayMode==='collage'?'collage':'list';renderJournal()});
+  const shuffleBtn=document.querySelector('[data-journal-shuffle]');
+  if(shuffleBtn)shuffleBtn.onclick=()=>{const current=[...document.querySelectorAll('.journal-photo-card')],tail=current[current.length-1];journalCollageLastTailId=tail?.dataset.openPhoto||'';journalCollageShuffleSeed=Date.now();renderJournal()};
+  const labelToggle=document.querySelector('[data-journal-label-toggle]');
+  if(labelToggle)labelToggle.onclick=()=>{journalCollageShowText=!journalCollageShowText;renderJournal()};
+  document.querySelectorAll('[data-open-photo]').forEach(btn=>btn.onclick=()=>{const e=state.entries.find(x=>x.id===btn.dataset.openPhoto);if(e?.photo){$('photoPreview').src=e.photo;showModal('photoModal')}});
+}
+const refinedRenderJournal=renderJournal;
+renderJournal=function(){
+  if(!journalDay)return refinedRenderJournal();
+  $('journalMonthView').classList.add('hidden');
+  $('journalDayView').classList.remove('hidden');
+  const entries=dayEntries(journalDay),title=new Date(journalDay+'T00:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+  $('journalDayTitle').textContent=title;
+  $('journalDayContent').innerHTML=journalDayToggleHTML()+(journalDayViewMode==='collage'?journalCollageHTML(entries):journalEntryListHTML(entries));
+  bindJournalDayActions();
+};
 async function init(){db=await openDB();state=normalizeStateShape(await readState());state.settings.backupReminderDays=validBackupReminderDays(state.settings.backupReminderDays);state.settings.energyUnit=energyUnitValue(state.settings.energyUnit);if(state.settings.accent==='#efad7c'||state.settings.accent==='#ccb7f6')state.settings.accent='#9be7c4';if(state.settings.calories===2000&&state.settings.protein===150&&state.settings.carbs===200&&state.settings.fat===65){state.settings.calories=1800;state.settings.carbs=90;state.settings.fat=50}goalsEditing=false;bankingWeekStart=weekStartMonday(todayKey());adherenceWeekStart=weekStartMonday(todayKey());bind();applyAccent();setSub(localStorage.getItem('calorie-tracker-library-sub')||'history',{persist:false});const savedTab=localStorage.getItem('calorie-tracker-active-tab')||'tracking';setTab(savedTab,{persist:false,reset:false});setGoalInputsEditing(false);checkForUpdates();setTimeout(()=>{if(!openModals.size)showBackupReminderIfDue()},700)}init().catch(err=>{console.error(err);alert('Could not start app: '+err.message)})})();
 </script></body></html>

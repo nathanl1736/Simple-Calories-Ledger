@@ -1,6 +1,12 @@
 {
-  "version": "1.8.6",
+  "version": "1.8.7",
+  "maintenanceNote": "When releasing app changes, bump APP_VERSION in index.html, APP_VERSION in sw.js, and this version value so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
+    "Added kCal and kJ display support while keeping saved calorie data normalized to kCal",
+    "Added kCal and kJ entry options in the Log Food modal",
+    "Improved safe-area spacing for modal sheets on iPhone-style screens",
+    "Refined Photo Journal day view with List and Collage modes",
+    "Added Collage labels toggle and shuffle control",
     "Cleaned up Library Cards rows and empty meal photo placeholders",
     "Improved meal card preview spacing so long food names do not collide with calorie values",
     "Simplified meal card export actions to a single Save / Share PNG button",
