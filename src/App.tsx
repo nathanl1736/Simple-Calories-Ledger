@@ -676,6 +676,7 @@ export function App() {
       <FoodModal
         food={activeFood}
         open={modal === 'food'}
+        energyUnit={state.settings.energyUnit}
         onClose={() => setModal(null)}
         onSave={food => updateState(draft => {
           const target = draft.foods.find(item => item.id === food.id);
@@ -1284,23 +1285,53 @@ function EntryModal({
   );
 }
 
-function FoodModal({ food, open, onClose, onSave, onDelete }: { food: Food | null; open: boolean; onClose: () => void; onSave: (food: Food) => void; onDelete: (food: Food) => void }) {
+function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }: { food: Food | null; open: boolean; energyUnit: EnergyUnit; onClose: () => void; onSave: (food: Food) => void; onDelete: (food: Food) => void }) {
   const [draft, setDraft] = useState<Food | null>(food);
-  useEffect(() => setDraft(food ? structuredClone(food) : null), [food]);
+  const foodEnergyUnit = energyUnitValue(energyUnit);
+  const [calorieInput, setCalorieInput] = useState('');
+  useEffect(() => {
+    setDraft(food ? structuredClone(food) : null);
+    setCalorieInput(food ? energyInputFromKcal(food.calories, foodEnergyUnit) : '');
+  }, [food, foodEnergyUnit]);
   if (!draft) return <Modal open={open} title="Manage food" onClose={onClose}><div className="empty">Food not found.</div></Modal>;
   const patch = (next: Partial<Food>) => setDraft(current => current ? { ...current, ...next } : current);
+  const setCalories = (value: string) => {
+    setCalorieInput(value);
+    patch({ calories: energyInputToKcal(value, foodEnergyUnit) });
+  };
+  const toggleFoodUnitMode = () => patch({ unitMode: entryUnitModeValue(draft.unitMode) === 'serving' ? '100g' : 'serving' });
   return (
     <Modal open={open} title="Manage food" onClose={onClose}>
-      <form className="form" onSubmit={event => { event.preventDefault(); onSave(draft); }}>
+      <form className="form" onSubmit={event => { event.preventDefault(); onSave({ ...draft, calories: energyInputToKcal(calorieInput, foodEnergyUnit) }); }}>
         <Field label="Name" full><input value={draft.name} onChange={event => patch({ name: event.target.value })} /></Field>
-        <Field label="Calories"><input inputMode="decimal" value={draft.calories} onChange={event => patch({ calories: n(event.target.value) })} /></Field>
-        <Field label="Fat"><input inputMode="decimal" value={draft.fat} onChange={event => patch({ fat: n(event.target.value) })} /></Field>
-        <Field label="Carbs"><input inputMode="decimal" value={draft.carbs} onChange={event => patch({ carbs: n(event.target.value) })} /></Field>
-        <Field label="Protein"><input inputMode="decimal" value={draft.protein} onChange={event => patch({ protein: n(event.target.value) })} /></Field>
+        <Field label="Calories">
+          <div className="calorie-input-row food-calorie-input">
+            <input inputMode="decimal" value={calorieInput} onChange={event => setCalories(event.target.value)} />
+            <span>{energyUnitLabel(foodEnergyUnit)}</span>
+          </div>
+        </Field>
+        <Field label="Fat">
+          <div className="calorie-input-row macro-input-row">
+            <input inputMode="decimal" value={draft.fat} onChange={event => patch({ fat: n(event.target.value) })} />
+            <span>g</span>
+          </div>
+        </Field>
+        <Field label="Carbs">
+          <div className="calorie-input-row macro-input-row">
+            <input inputMode="decimal" value={draft.carbs} onChange={event => patch({ carbs: n(event.target.value) })} />
+            <span>g</span>
+          </div>
+        </Field>
+        <Field label="Protein">
+          <div className="calorie-input-row macro-input-row">
+            <input inputMode="decimal" value={draft.protein} onChange={event => patch({ protein: n(event.target.value) })} />
+            <span>g</span>
+          </div>
+        </Field>
         <Field label="Nutrition values" full>
           <span className="unit-toggle-chip food-basis-toggle" role="group" aria-label="Saved food nutrition basis">
-            <button type="button" className={entryUnitModeValue(draft.unitMode) === 'serving' ? 'active' : ''} onClick={() => patch({ unitMode: 'serving' })}>Per serving</button>
-            <button type="button" className={entryUnitModeValue(draft.unitMode) === '100g' ? 'active' : ''} onClick={() => patch({ unitMode: '100g' })}>Per 100g</button>
+            <button type="button" className={entryUnitModeValue(draft.unitMode) === 'serving' ? 'active' : ''} onClick={toggleFoodUnitMode}>Per serving</button>
+            <button type="button" className={entryUnitModeValue(draft.unitMode) === '100g' ? 'active' : ''} onClick={toggleFoodUnitMode}>Per 100g</button>
           </span>
         </Field>
         <label className="check-pill full"><input type="checkbox" checked={draft.favourite} onChange={event => patch({ favourite: event.target.checked })} /><span>Favourite</span></label>
