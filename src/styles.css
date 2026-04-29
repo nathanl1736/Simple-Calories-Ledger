@@ -405,6 +405,25 @@ textarea { min-height: 78px; resize: vertical; }
 .quick-picker summary::-webkit-details-marker { display: none; }
 .quick-picker summary:after { content: "+"; color: var(--accent); font-size: 22px; }
 .quick-picker details[open] summary:after { content: "-"; }
+.quick-result-section { display: grid; gap: 8px; }
+.quick-section-label { color: #8b8b8b; font-size: 11px; font-weight: 950; letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.quick-result-list { display: grid; gap: 8px; }
+.quick-food-result { width: 100%; min-width: 0; min-height: 62px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px; border-radius: 14px; background: #242424; color: inherit; text-align: left; border: 1px solid #303030; }
+.quick-food-result.database { background: #202020; border-style: dashed; }
+.quick-food-icon { width: 38px; height: 38px; border-radius: 12px; background: #2f2f2f; color: #9d9d9d; display: grid; place-items: center; font-size: 10px; font-weight: 950; letter-spacing: .04em; }
+.quick-food-icon.fav { background: color-mix(in srgb, var(--accent) 16%, #2f2f2f); color: var(--accent); }
+.quick-food-main { min-width: 0; display: grid; gap: 4px; }
+.quick-food-main strong { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.1; font-weight: 950; }
+.quick-food-main small { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 800; }
+.quick-food-macros { display: flex; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.quick-food-macros .meta-chip { min-height: 21px; padding: 3px 6px 2px; font-size: 10px; }
+.quick-food-cal { color: var(--accent); font-size: 13px; font-weight: 950; white-space: nowrap; align-self: start; padding-top: 2px; }
+.quick-empty { display: grid; gap: 3px; border-top: 1px solid #303030; padding-top: 12px; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.quick-empty strong { color: #ddd; font-size: 14px; }
+.quick-more-btn { min-height: 42px; border-radius: 12px; background: #2b2b2b; color: var(--accent); font-size: 13px; font-weight: 950; }
+.database-query { margin: 0 0 12px; }
+.modal-results { padding-bottom: 6px; }
+.food-basis-toggle { width: max-content; max-width: 100%; }
 .portion-help { color: var(--muted); font-size: 13px; font-weight: 850; line-height: 1.35; margin-top: -4px; }
 .check-pill { position: relative; display: inline-flex; align-items: center; width: max-content; max-width: 100%; color: var(--muted); font-size: 13px; font-weight: 900; cursor: pointer; }
 .check-pill input { position: absolute; opacity: 0; pointer-events: none; width: 1px; min-height: 1px; }

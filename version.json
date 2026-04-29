@@ -1,7 +1,10 @@
 {
-  "version": "2.0.0.11",
+  "version": "2.0.0.12",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the public version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Updated app icon."
+    "Improved Quick Picks search layout.",
+    "Added grouped search results for user foods and database suggestions.",
+    "Added mock local database suggestions for testing future food database UX.",
+    "Kept database suggestions limited so search stays clean."
   ]
 }

@@ -45,6 +45,13 @@ export type Food = {
   id: string;
   name: string;
   unitMode?: 'serving' | '100g';
+  brand?: string;
+  servingLabel?: string;
+  servingGrams?: number;
+  source?: string;
+  sourceId?: string;
+  category?: string;
+  tags?: string[];
   calories: number;
   protein: number;
   carbs: number;

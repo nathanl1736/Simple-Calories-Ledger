@@ -8,6 +8,7 @@ import { compressImage, downloadBlob } from './image';
 import { backupCounts, exportBackup, parseBackup } from './backup';
 import { applyAppUpdate, checkForAppUpdate, registerServiceWorker, type UpdateInfo } from './pwa';
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
+import { databaseItemToFood, loadFoodDatabase, type FoodDatabaseItem } from './foodDatabase';
 import {
   addDays,
   dayEntries,
@@ -58,6 +59,13 @@ type EntryDraft = {
   name: string;
   meal: Meal;
   unitMode: 'serving' | '100g';
+  brand: string;
+  servingLabel: string;
+  servingGrams: string;
+  source: string;
+  sourceId: string;
+  category: string;
+  tags: string[];
   calories: string;
   protein: string;
   carbs: string;
@@ -75,6 +83,13 @@ const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kc
   name: '',
   meal,
   unitMode: 'serving',
+  brand: '',
+  servingLabel: '',
+  servingGrams: '',
+  source: '',
+  sourceId: '',
+  category: '',
+  tags: [],
   calories: '',
   protein: '',
   carbs: '',
@@ -317,12 +332,20 @@ export function App() {
   };
 
   const editEntry = (entry: Entry) => {
+    const sourceFood = entry.sourceFoodId ? state.foods.find(food => food.id === entry.sourceFoodId) : null;
     setEntryDraft({
       editingId: entry.id,
       sourceFoodId: entry.sourceFoodId || '',
       name: entry.name,
       meal: entry.meal || 'Snack',
       unitMode: entryUnitModeValue(entry.unitMode),
+      brand: sourceFood?.brand || '',
+      servingLabel: sourceFood?.servingLabel || '',
+      servingGrams: sourceFood?.servingGrams ? String(sourceFood.servingGrams) : '',
+      source: sourceFood?.source || '',
+      sourceId: sourceFood?.sourceId || '',
+      category: sourceFood?.category || '',
+      tags: sourceFood?.tags || [],
       entryEnergyUnit: energyUnitValue(state.settings.energyUnit),
       calories: draftEnergyText(macroBase(entry, 'calories'), energyUnitValue(state.settings.energyUnit)),
       protein: draftNumberText(macroBase(entry, 'protein')),
@@ -369,6 +392,13 @@ export function App() {
     if (entry.autoNamed) return;
     const base = {
       unitMode: entryUnitModeValue(entry.unitMode),
+      brand: entryDraft.brand.trim() || undefined,
+      servingLabel: entryDraft.servingLabel.trim() || undefined,
+      servingGrams: n(entryDraft.servingGrams) || undefined,
+      source: entryDraft.source.trim() || undefined,
+      sourceId: entryDraft.sourceId.trim() || undefined,
+      category: entryDraft.category.trim() || undefined,
+      tags: entryDraft.tags.length ? entryDraft.tags : undefined,
       calories: macroBase(entry, 'calories'),
       protein: macroBase(entry, 'protein'),
       carbs: macroBase(entry, 'carbs'),
@@ -432,9 +462,16 @@ export function App() {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
     setEntryDraft({
       ...blankEntryDraft('Snack', entryEnergyUnit),
-      sourceFoodId: food.id,
+      sourceFoodId: food.source ? '' : food.id,
       name: food.name,
       unitMode: entryUnitModeValue(food.unitMode),
+      brand: food.brand || '',
+      servingLabel: food.servingLabel || '',
+      servingGrams: food.servingGrams ? String(food.servingGrams) : '',
+      source: food.source || '',
+      sourceId: food.sourceId || '',
+      category: food.category || '',
+      tags: food.tags || [],
       calories: draftEnergyText(food.calories, entryEnergyUnit),
       protein: draftNumberText(food.protein),
       carbs: draftNumberText(food.carbs),
@@ -761,7 +798,7 @@ function TrackingView(props: {
               <h2>Quick picks</h2>
             </div>
           </summary>
-          <SavedFoodPicker foods={props.state.foods} onChoose={props.onPrefillFood} compact />
+          <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} compact />
         </details>
       )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
@@ -937,40 +974,163 @@ function SwipeConfirm({ label, confirmLabel, className = '', onConfirm }: { labe
   );
 }
 
-function SavedFoodPicker({ foods, onChoose, compact = false }: { foods: Food[]; onChoose: (food: Food) => void; compact?: boolean }) {
+function searchNeedle(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function compactKey(value: string | undefined) {
+  return searchNeedle(value || '').replace(/[^a-z0-9]+/g, '');
+}
+
+function userFoodSearchText(food: Food) {
+  return [food.name, food.brand, food.servingLabel, food.category, ...(food.tags || [])].filter(Boolean).join(' ').toLowerCase();
+}
+
+function userFoodRank(food: Food, query: string) {
+  const q = searchNeedle(query);
+  const name = food.name.toLowerCase();
+  const text = userFoodSearchText(food);
+  if (!q) return 0;
+  if (name === q) return 0;
+  if (name.startsWith(q)) return 1;
+  if (text.includes(q)) return 2;
+  return 99;
+}
+
+function databaseRank(item: FoodDatabaseItem, query: string) {
+  const q = searchNeedle(query);
+  const name = item.name.toLowerCase();
+  const brand = (item.brand || '').toLowerCase();
+  const category = (item.category || '').toLowerCase();
+  if (!q) return 99;
+  if (name === q) return 0;
+  if (name.startsWith(q)) return 1;
+  if (brand && (brand === q || brand.startsWith(q) || brand.includes(q))) return 2;
+  if (item.searchText.includes(q) || name.includes(q)) return 3;
+  if (category.includes(q) || item.tags.some(tag => tag.toLowerCase().includes(q))) return 4;
+  return 99;
+}
+
+function rankUserFoods(foods: Food[], query: string) {
+  return [...foods]
+    .map(food => ({ food, rank: userFoodRank(food, query) }))
+    .filter(item => item.rank < 99)
+    .sort((a, b) =>
+      Number(b.food.favourite) - Number(a.food.favourite)
+      || a.rank - b.rank
+      || (b.food.lastUsedAt || 0) - (a.food.lastUsedAt || 0)
+      || (b.food.usageCount || 0) - (a.food.usageCount || 0)
+      || a.food.name.localeCompare(b.food.name)
+    )
+    .map(item => item.food);
+}
+
+function rankDatabaseFoods(items: FoodDatabaseItem[], query: string, foods: Food[]) {
+  const sourceIds = new Set(foods.map(food => food.sourceId).filter(Boolean));
+  const userNames = new Set(foods.map(food => compactKey(food.name)).filter(Boolean));
+  return [...items]
+    .map(item => ({ item, rank: databaseRank(item, query) }))
+    .filter(({ item, rank }) => rank < 99 && !sourceIds.has(item.id) && !userNames.has(compactKey(item.name)))
+    .sort((a, b) => a.rank - b.rank || a.item.name.localeCompare(b.item.name))
+    .map(item => item.item);
+}
+
+function QuickFoodResultRow({ state, food, sourceLabel, databaseSuggestion = false, onChoose }: { state: AppState; food: Food; sourceLabel?: string; databaseSuggestion?: boolean; onChoose: (food: Food) => void }) {
+  const meta = [food.brand, food.servingLabel, foodUnitText(food), sourceLabel || food.category].filter(Boolean).join(' · ');
+  return (
+    <button className={`quick-food-result ${databaseSuggestion ? 'database' : 'user-food'}`} type="button" onClick={() => onChoose(food)}>
+      <span className={`quick-food-icon ${food.favourite ? 'fav' : ''}`}>{food.favourite ? <span className="star-icon" aria-hidden="true" /> : databaseSuggestion ? 'DB' : ''}</span>
+      <span className="quick-food-main">
+        <strong>{food.name}</strong>
+        <small>{meta || foodUnitText(food)}</small>
+        <span className="quick-food-macros"><MacroChips fat={food.fat} carbs={food.carbs} protein={food.protein} /></span>
+      </span>
+      <span className="quick-food-cal">{energyText(state, food.calories)}</span>
+    </button>
+  );
+}
+
+function QuickResultSection({ title, children }: { title: string; children: ReactNode }) {
+  return <div className="quick-result-section"><div className="quick-section-label">{title}</div><div className="quick-result-list">{children}</div></div>;
+}
+
+function SavedFoodPicker({ state, foods, onChoose, compact = false }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; compact?: boolean }) {
   const [query, setQuery] = useState('');
   const [favouritesOpen, setFavouritesOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [databaseMatches, setDatabaseMatches] = useState<FoodDatabaseItem[]>([]);
+  const [databaseOpen, setDatabaseOpen] = useState(false);
   const recentFoods = [...foods].sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0));
   const favourites = recentFoods.filter(food => food.favourite).slice(0, 12);
   const recent = recentFoods.slice(0, 14);
-  const results = query.trim()
-    ? recentFoods.filter(food => food.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 24)
-    : [];
-  const chips = (items: Food[], empty: string) => (
-    <div className="chips quick-search-results">
-      {items.length ? items.map(food => (
-        <button key={food.id} type="button" className={`chip ${food.favourite ? 'star' : ''}`} onClick={() => onChoose(food)}>
-          {food.favourite && <span className="star-icon" aria-hidden="true" />}{food.name}
-        </button>
-      )) : <span className="hint">{empty}</span>}
+  const trimmedQuery = query.trim();
+  const userResults = useMemo(() => trimmedQuery ? rankUserFoods(recentFoods, trimmedQuery).slice(0, 5) : [], [recentFoods, trimmedQuery]);
+  const shownDatabase = databaseMatches.slice(0, 3);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (trimmedQuery.length < 2) {
+      setDatabaseMatches([]);
+      return;
+    }
+    loadFoodDatabase()
+      .then(items => {
+        if (!cancelled) setDatabaseMatches(rankDatabaseFoods(items, trimmedQuery, foods));
+      })
+      .catch(() => {
+        if (!cancelled) setDatabaseMatches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [foods, trimmedQuery]);
+
+  const choose = (food: Food) => {
+    setDatabaseOpen(false);
+    onChoose(food);
+  };
+  const rows = (items: Food[], empty: string) => (
+    <div className="quick-result-list">
+      {items.length ? items.map(food => <QuickFoodResultRow key={food.id} state={state} food={food} onChoose={choose} />) : <span className="hint">{empty}</span>}
     </div>
   );
+  const dbRows = (items: FoodDatabaseItem[]) => items.map(item => {
+    const food = databaseItemToFood(item);
+    return <QuickFoodResultRow key={item.id} state={state} food={food} sourceLabel="Database suggestion" databaseSuggestion onChoose={choose} />;
+  });
   return (
     <section className={`quick-picker ${compact ? 'compact' : ''}`}>
-      <input type="search" placeholder="Search saved foods" value={query} onChange={event => setQuery(event.target.value)} />
-      {query.trim() ? chips(results, 'No matching saved foods.') : (
+      <input type="search" placeholder="Search saved foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
+      {trimmedQuery ? (
+        <>
+          {userResults.length ? (
+            <QuickResultSection title="Your foods">
+              {userResults.map(food => <QuickFoodResultRow key={food.id} state={state} food={food} onChoose={choose} />)}
+            </QuickResultSection>
+          ) : <div className="quick-empty"><strong>{shownDatabase.length ? 'No saved matches yet' : 'No matching foods yet'}</strong><span>Try a different search or log manually.</span></div>}
+          {shownDatabase.length > 0 && (
+            <QuickResultSection title="From food database">
+              {dbRows(shownDatabase)}
+              {databaseMatches.length > shownDatabase.length && <button className="quick-more-btn" type="button" onClick={() => setDatabaseOpen(true)}>Show more database results</button>}
+            </QuickResultSection>
+          )}
+        </>
+      ) : (
         <>
           <details open={favouritesOpen} onToggle={event => setFavouritesOpen(event.currentTarget.open)}>
             <summary>Favourites</summary>
-            {chips(favourites, 'No favourites yet.')}
+            {rows(favourites, 'No favourites yet.')}
           </details>
           <details open={recentOpen} onToggle={event => setRecentOpen(event.currentTarget.open)}>
             <summary>Recent foods</summary>
-            {chips(recent, 'Recent foods appear after saving entries.')}
+            {rows(recent, 'Recent foods appear after saving entries.')}
           </details>
         </>
       )}
+      <Modal open={databaseOpen} title="Food database results" onClose={() => setDatabaseOpen(false)} wide>
+        <p className="hint database-query">Results for “{trimmedQuery}”</p>
+        <div className="quick-result-list modal-results">{dbRows(databaseMatches.slice(0, 20))}</div>
+      </Modal>
     </section>
   );
 }
@@ -1030,9 +1190,16 @@ function EntryModal({
     const unit = draft.entryEnergyUnit;
     setDraft(current => ({
       ...current,
-      sourceFoodId: food.id,
+      sourceFoodId: food.source ? '' : food.id,
       name: food.name,
       unitMode: entryUnitModeValue(food.unitMode),
+      brand: food.brand || '',
+      servingLabel: food.servingLabel || '',
+      servingGrams: food.servingGrams ? String(food.servingGrams) : '',
+      source: food.source || '',
+      sourceId: food.sourceId || '',
+      category: food.category || '',
+      tags: food.tags || [],
       calories: draftEnergyText(food.calories, unit),
       protein: draftNumberText(food.protein),
       carbs: draftNumberText(food.carbs),
@@ -1054,7 +1221,7 @@ function EntryModal({
   return (
     <Modal open={open} title={draft.editingId ? 'Edit entry' : `Log ${draft.meal.toLowerCase()}`} onClose={onClose} wide>
       <form className="form entry-form" onSubmit={(event: FormEvent) => { event.preventDefault(); onSave(false); }}>
-        <SavedFoodPicker foods={foods} onChoose={chooseFood} compact />
+        <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} compact />
         <div ref={caloriesPanelRef} className="calories-priority full">
           <label>
             <span>Calories & Macros</span>
@@ -1130,6 +1297,12 @@ function FoodModal({ food, open, onClose, onSave, onDelete }: { food: Food | nul
         <Field label="Fat"><input inputMode="decimal" value={draft.fat} onChange={event => patch({ fat: n(event.target.value) })} /></Field>
         <Field label="Carbs"><input inputMode="decimal" value={draft.carbs} onChange={event => patch({ carbs: n(event.target.value) })} /></Field>
         <Field label="Protein"><input inputMode="decimal" value={draft.protein} onChange={event => patch({ protein: n(event.target.value) })} /></Field>
+        <Field label="Nutrition values" full>
+          <span className="unit-toggle-chip food-basis-toggle" role="group" aria-label="Saved food nutrition basis">
+            <button type="button" className={entryUnitModeValue(draft.unitMode) === 'serving' ? 'active' : ''} onClick={() => patch({ unitMode: 'serving' })}>Per serving</button>
+            <button type="button" className={entryUnitModeValue(draft.unitMode) === '100g' ? 'active' : ''} onClick={() => patch({ unitMode: '100g' })}>Per 100g</button>
+          </span>
+        </Field>
         <label className="check-pill full"><input type="checkbox" checked={draft.favourite} onChange={event => patch({ favourite: event.target.checked })} /><span>Favourite</span></label>
         <div className="actions full"><button className="primary" type="submit">Save food</button><button className="secondary danger" type="button" onClick={() => onDelete(draft)}>Delete</button></div>
       </form>
