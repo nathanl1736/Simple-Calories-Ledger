@@ -274,10 +274,16 @@ export function App() {
   }, [loaded, modal]);
 
   const setTab = (next: Tab) => {
-    if (next === 'tracking' && tab === 'tracking') setSelectedDate(todayKey());
+    if (next === 'tracking') setSelectedDate(todayKey());
     if (next === 'journal' && tab === 'journal') {
       setJournalDay(null);
       setJournalMonth(new Date());
+    }
+    if (next === 'cards' && tab === 'cards') setCardsDate(todayKey());
+    if (next === 'stats' && tab === 'stats') {
+      setSelectedDate(todayKey());
+      setBankingWeekStart(weekStartMonday(todayKey()));
+      setAdherenceWeekStart(weekStartMonday(todayKey()));
     }
     setTabState(next);
     localStorage.setItem('calorie-tracker-active-tab', next);

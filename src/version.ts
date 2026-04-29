@@ -1,8 +1,9 @@
 // Release checklist: always bump APP_VERSION here, sw.js, public/sw.js, package.json,
 // package-lock.json, version.json, and public/version.json for user-visible app changes.
-export const APP_VERSION = '2.0.0.5';
+export const APP_VERSION = '2.0.0.6';
 
 export const RELEASE_NOTES = [
+  'Reset Cards and Stats on tab re-tap.',
   'Reset Track and Journal on tab re-tap.',
   'Cleaned up Meal Card branding.',
   'Pill toggles now switch from either side.',
