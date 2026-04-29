@@ -36,8 +36,7 @@ export async function exportBackup(state: AppState) {
     if (!navigator.canShare || navigator.canShare({ files: [file] })) {
       await navigator.share({
         files: [file],
-        title: 'Simple Calories Ledger backup',
-        text: 'Backup with food logs, goals, saved foods, completed days, and compressed journal photos.'
+        title: 'Simple Calories Ledger backup'
       });
       return backupState;
     }

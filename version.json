@@ -1,7 +1,10 @@
 {
-  "version": "2.0.0.1",
+  "version": "2.0.0.2",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the public version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
+    "Made Stats mode-aware for cutting, bulking, and maintaining, with open days excluded from scores and banking.",
+    "Aligned Last 7 days graph reference lines and completed-day coloring with the active goal mode.",
+    "Unified macro chips through a reusable component across Track, Library, Journal, and Cards.",
     "Migrated the app to React, Vite, and TypeScript while preserving existing local data.",
     "Restored polished centered popup modals and improved iOS/PWA safe-area behavior.",
     "Rebuilt Stats, Journal, Food Log, quick picks, and meal cards for closer feature parity.",

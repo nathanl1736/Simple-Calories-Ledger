@@ -82,6 +82,23 @@ const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kc
 });
 
 type Toast = { id: number; text: string } | null;
+type MacroChipKey = 'fat' | 'carbs' | 'protein';
+
+function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', 'protein'] }: { fat?: number; carbs?: number; protein?: number; show?: MacroChipKey[] }) {
+  const chips: Record<MacroChipKey, { label: string; value: number; className: string }> = {
+    fat: { label: 'F', value: fat, className: 'fat' },
+    carbs: { label: 'C', value: carbs, className: 'carb' },
+    protein: { label: 'P', value: protein, className: 'protein' }
+  };
+  return (
+    <>
+      {show.map(key => {
+        const chip = chips[key];
+        return <span key={key} className={`meta-chip macro-chip ${chip.className}`}>{chip.label} {fmt(chip.value)}g</span>;
+      })}
+    </>
+  );
+}
 
 function Modal({ open, title, children, onClose, wide = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   useEffect(() => {
@@ -176,7 +193,7 @@ export function App() {
   const [journalMonth, setJournalMonth] = useState(() => new Date());
   const [journalDay, setJournalDay] = useState<string | null>(null);
   const [journalDayViewMode, setJournalDayViewMode] = useState<JournalDayViewMode>('collage');
-  const [journalLabelMode, setJournalLabelMode] = useState<JournalLabelMode>('nameCalories');
+  const [journalLabelMode, setJournalLabelMode] = useState<JournalLabelMode>('calories');
   const [journalShuffleSeed, setJournalShuffleSeed] = useState(0);
   const [librarySub, setLibrarySub] = useState(() => localStorage.getItem('calorie-tracker-library-sub') || 'favourites');
   const [historySearch, setHistorySearch] = useState('');
@@ -625,11 +642,11 @@ export function App() {
         <div className="photo-preview-shell">{photoPreview ? <img className="photo-preview-large" src={photoPreview} alt="Meal" /> : <div className="empty">No photo available.</div>}</div>
       </Modal>
       <Modal open={modal === 'bankHelp'} title="Calorie banking" onClose={() => setModal(null)}>
-        <p className="hint">Completed days count toward the weekly bank. Open days stay out of the total until you lock them.</p>
-        <div className="help-callout">Banked calories mean completed days came in under your daily target. Used extra means completed days went over.</div>
+        <p className="hint">Completed days count toward weekly balance. Open days stay out of the total until you lock them.</p>
+        <div className="help-callout">Cutting rewards calories saved, bulking tracks catch-up or surplus progress, and maintaining tracks distance from your weekly range.</div>
       </Modal>
       <Modal open={modal === 'adherenceHelp'} title="Weekly adherence" onClose={() => setModal(null)}>
-        <p className="hint">Adherence scores only completed days. For cutting, success means at or under budget. For bulking, success allows a small buffer below target.</p>
+        <p className="hint">Adherence scores only completed days. Cutting succeeds at or under target, bulking succeeds from target to target +300, and maintaining succeeds within +/-150.</p>
       </Modal>
       <Modal open={modal === 'version'} title="Version update available" onClose={() => setModal(null)}>
         <div className="version-badge">Version {availableUpdate?.version || APP_VERSION}</div>
@@ -684,7 +701,7 @@ function TrackingView(props: {
       </header>
       <DayNav value={props.selectedDate} onChange={props.setSelectedDate} />
       <section className="hero">
-        <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Eaten</span></div></div>
+        <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Intake</span></div></div>
         <div className="remaining">
           <div className="label">{props.state.settings.trackingMode === 'Bulking' ? 'Target remaining' : 'Budget remaining'}</div>
           <div className="value">{fmt(remaining)} <small>{energyLabel(props.state)}</small></div>
@@ -696,6 +713,16 @@ function TrackingView(props: {
         <Macro name="CARBS" value={props.totals.carbs} goal={props.state.settings.carbs} color="--carbs" />
         <Macro name="PROTEIN" value={props.totals.protein} goal={props.state.settings.protein} color="--protein" />
       </div>
+      {!props.complete && (
+        <details className="card quick-picks">
+          <summary className="quick-picks-summary">
+            <div>
+              <h2>Quick picks</h2>
+            </div>
+          </summary>
+          <SavedFoodPicker foods={props.state.foods} onChoose={props.onPrefillFood} compact />
+        </details>
+      )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
       <section className="card">
         <div className="card-head">
@@ -712,12 +739,6 @@ function TrackingView(props: {
           onConfirm={props.onToggleComplete}
         />
       </section>
-      {!props.complete && (
-        <section className="card quick-picks">
-          <h2>Quick picks</h2>
-          <SavedFoodPicker foods={props.state.foods} onChoose={props.onPrefillFood} />
-        </section>
-      )}
     </>
   );
 }
@@ -805,7 +826,9 @@ function EntryRow({ state, entry, complete, onPhoto, onEdit, onRepeat, onDelete 
       </button>
       <div className="entry-main">
         <div className="entry-title"><div className="entry-name">{entry.name}</div>{portion}</div>
-        <div className="entry-meta"><span style={{ color: 'var(--fat)' }}>F {fmt(totals.fat)}g</span> <span style={{ color: 'var(--carbs)' }}>C {fmt(totals.carbs)}g</span> <span style={{ color: 'var(--protein)' }}>P {fmt(totals.protein)}g</span></div>
+        <div className="meta-chips">
+          <MacroChips fat={totals.fat} carbs={totals.carbs} protein={totals.protein} />
+        </div>
       </div>
       <div className="entry-cal">{energyText(state, totals.calories)}</div>
       {!complete && <div className="entry-menu-wrap"><button ref={menuButtonRef} className="entry-menu-btn" type="button" aria-label="Entry actions" onClick={() => setMenuOpen(open => !open)}><span aria-hidden="true" /></button>{menuOpen && <div ref={menuRef} className="entry-menu" style={menuStyle}><button type="button" onClick={() => { setMenuOpen(false); onRepeat(entry); }}>Repeat</button><button type="button" onClick={() => { setMenuOpen(false); onEdit(entry); }}>Edit</button><button type="button" className="danger-text" onClick={() => { setMenuOpen(false); onDelete(entry.id); }}>Delete</button></div>}</div>}
@@ -856,11 +879,9 @@ function SwipeConfirm({ label, confirmLabel, className = '', onConfirm }: { labe
         }
       }}
       onPointerDown={event => {
-        const rect = wrapRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        startX.current = rect.left + 6;
+        startX.current = event.clientX;
+        setProgress(0);
         setDragging(true);
-        updateProgress(event.clientX);
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={event => dragging && updateProgress(event.clientX)}
@@ -1002,7 +1023,13 @@ function EntryModal({
               <button type="button" className={draft.unitMode === '100g' ? 'active' : ''} onClick={() => update({ unitMode: '100g', portion: draft.portion === '1' ? '100' : draft.portion })}>Per 100g</button>
             </span>
           </div>
-          {multiplier !== 1 && <div className="portion-preview">Logged total: {energyTextForUnit(total.calories, state.settings.energyUnit)} | F {fmt(total.fat)}g | C {fmt(total.carbs)}g | P {fmt(total.protein)}g</div>}
+          {multiplier !== 1 && (
+            <div className="meta-chips portion-preview">
+              <span className="meta-chip neutral">Logged total</span>
+              <span className="meta-chip accent">{energyTextForUnit(total.calories, state.settings.energyUnit)}</span>
+              <MacroChips fat={total.fat} carbs={total.carbs} protein={total.protein} />
+            </div>
+          )}
         </div>
 
         <Field label="Meal" full><div className="meal-chip-row">{MEALS.map(meal => <button key={meal} type="button" className={`meal-chip ${draft.meal === meal ? 'active' : ''}`} onClick={() => update({ meal })}>{meal}</button>)}</div></Field>
@@ -1068,7 +1095,24 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
 }
 
 function FoodRow({ state, food, showUsage, onPrefill, onManage }: { state: AppState; food: Food; showUsage: boolean; onPrefill: (food: Food) => void; onManage: (food: Food) => void }) {
-  return <div className="food-row"><div className={`emoji ${food.favourite ? 'fav' : ''}`}>{food.favourite && <span className="star-icon" aria-hidden="true" />}</div><div className="body"><strong>{food.name}</strong><small>{energyText(state, food.calories)} {foodUnitText(food)} | F {fmt(food.fat)}g | C {fmt(food.carbs)}g | P {fmt(food.protein)}g{showUsage ? ` | ${fmt(food.usageCount)}x` : ''}</small></div><button className="small-btn" type="button" onClick={() => onPrefill(food)}>Log</button><button className="small-btn" type="button" onClick={() => onManage(food)}>Manage</button></div>;
+  return (
+    <div className="food-row">
+      <div className={`emoji ${food.favourite ? 'fav' : ''}`}>{food.favourite && <span className="star-icon" aria-hidden="true" />}</div>
+      <div className="body">
+        <strong>{food.name}</strong>
+        <div className="food-meta">
+          <span className="food-cal">{energyText(state, food.calories)}</span>
+          <span>{foodUnitText(food)}</span>
+          {showUsage && <span className="food-usage">{fmt(food.usageCount)}x</span>}
+        </div>
+      </div>
+      <button className="small-btn food-log-btn" type="button" onClick={() => onPrefill(food)}>Log</button>
+      <button className="food-manage-btn" type="button" onClick={() => onManage(food)} aria-label={`Manage ${food.name}`}><span aria-hidden="true" /></button>
+      <div className="meta-chips food-macros" aria-label={`Fat ${fmt(food.fat)}g, carbs ${fmt(food.carbs)}g, protein ${fmt(food.protein)}g`}>
+        <MacroChips fat={food.fat} carbs={food.carbs} protein={food.protein} />
+      </div>
+    </div>
+  );
 }
 
 function shuffleEntries<T extends { id: string }>(items: T[], seed: number) {
@@ -1113,6 +1157,14 @@ function JournalView({
   if (journalDay) {
     const entries = dayEntries(state, journalDay);
     const photos = entries.filter(entry => entry.photo);
+    const setDay = (key: string) => {
+      setJournalDay(key);
+      setJournalMonth(new Date(`${key}T00:00:00`));
+    };
+    const returnToMonth = () => {
+      setJournalMonth(new Date(`${journalDay}T00:00:00`));
+      setJournalDay(null);
+    };
     const labelOrder: JournalLabelMode[] = ['photo', 'calories', 'nameCalories'];
     const labelTitle = labelMode === 'photo' ? 'Photo' : labelMode === 'calories' ? 'Calories' : 'Name + Cal';
     const shuffledPhotos = shuffleEntries(photos, shuffleSeed);
@@ -1125,8 +1177,11 @@ function JournalView({
     };
     return (
       <>
-        <button className="today-link" type="button" onClick={() => setJournalDay(null)}>Back to month</button>
         <header className="head"><div className="kicker">Journal</div><h1>{readable(journalDay)}</h1></header>
+        <div className="journal-day-nav">
+          <DayNav value={journalDay} onChange={setDay} />
+          <button className="journal-month-btn" type="button" aria-label="Return to month view" onClick={returnToMonth}><span aria-hidden="true" /></button>
+        </div>
         <div className="journal-day-toolbar">
           <div className="seg journal-toggle" role="group" aria-label="Journal day view">
             <button type="button" className={dayViewMode === 'list' ? 'active' : ''} onClick={() => setDayViewMode('list')}>List</button>
@@ -1144,7 +1199,23 @@ function JournalView({
             const featured = index === featureOffset || ((index + featureOffset) % 7 === 0 && index < photos.length - 1);
             return <button className={`journal-photo-card ${featured ? 'featured' : ''}`} key={entry.id} type="button" onClick={() => onPhoto(entry)}><img src={entry.photo || ''} alt="" />{labelText(entry)}</button>;
           })}</div> : <div className="empty">No photos for this day.</div>
-          : entries.length ? <div className="journal-day-list">{entries.map(entry => <button key={entry.id} className={`journal-entry-card ${entry.photo ? '' : 'no-photo'}`} type="button" onClick={() => entry.photo && onPhoto(entry)}>{entry.photo && <img className="journal-entry-photo" src={entry.photo} alt="" />}<div><div className="journal-entry-title">{entry.name}</div><div className="journal-entry-meta">{entry.meal || 'Snack'} | {energyText(state, entryTotals(entry).calories)} | P {fmt(entryTotals(entry).protein)}g | C {fmt(entryTotals(entry).carbs)}g | F {fmt(entryTotals(entry).fat)}g</div>{entry.notes && <div className="journal-entry-note">{entry.notes}</div>}</div></button>)}</div> : <div className="empty">No food logged for this day.</div>}
+          : entries.length ? <div className="journal-day-list">{entries.map(entry => {
+            const totals = entryTotals(entry);
+            return (
+              <button key={entry.id} className={`journal-entry-card ${entry.photo ? '' : 'no-photo'}`} type="button" onClick={() => entry.photo && onPhoto(entry)}>
+                {entry.photo && <img className="journal-entry-photo" src={entry.photo} alt="" />}
+                <div>
+                  <div className="journal-entry-title">{entry.name}</div>
+                  <div className="meta-chips journal-meta-chips">
+                    <span className="meta-chip neutral">{entry.meal || 'Snack'}</span>
+                    <span className="meta-chip accent">{energyText(state, totals.calories)}</span>
+                    <MacroChips fat={totals.fat} carbs={totals.carbs} protein={totals.protein} />
+                  </div>
+                  {entry.notes && <div className="journal-entry-note">{entry.notes}</div>}
+                </div>
+              </button>
+            );
+          })}</div> : <div className="empty">No food logged for this day.</div>}
       </>
     );
   }
@@ -1203,15 +1274,20 @@ function CardsView({
       {datedGroups.length ? <div className="cards-list">{datedGroups.map(group => {
         const names = group.items.map(item => item.name).join(', ');
         const photo = group.photos[0];
+        const photoCount = Math.min(group.photos.length, 4);
         return (
           <article key={group.id} className="meal-card-row">
-            <div className={`meal-card-thumb ${group.photos.length > 1 ? 'stacked' : ''}`}>
+            <div className={`meal-card-thumb count-${photoCount || 0}`}>
               {photo ? group.photos.slice(0, 4).map((src, index) => <img key={`${src}${index}`} src={src} alt="" />) : <span className="empty-photo-icon" aria-hidden="true" />}
             </div>
             <div className="meal-card-row-body">
               <strong>{group.meal}</strong>
               <small>{shortDate(group.date)}</small>
-              <div className="meal-card-row-meta">{group.items.length} item{group.items.length === 1 ? '' : 's'} - {energyText(state, group.totals.calories)} - P {fmt(group.totals.protein)}g</div>
+              <div className="meta-chips meal-card-row-meta">
+                <span className="meta-chip neutral">{group.items.length} item{group.items.length === 1 ? '' : 's'}</span>
+                <span className="meta-chip accent">{energyText(state, group.totals.calories)}</span>
+                <MacroChips protein={group.totals.protein} show={['protein']} />
+              </div>
               <p>{names}</p>
             </div>
             <button className="secondary show-card-btn" type="button" onClick={() => onOpen(group)}>Show card</button>
@@ -1308,11 +1384,61 @@ async function sharePhotoBlob(blob: Blob, filename: string, title: string, notif
 }
 
 function EntryPhotoModal({ entry, open, onClose, onReplace, onRemove, onShare }: { entry: Entry | null; open: boolean; onClose: () => void; onReplace: () => void; onRemove: () => void; onShare: () => void }) {
-  return <Modal open={open} title="Meal photo" onClose={onClose}>{entry?.photo ? <><img className="photo-preview-large" src={entry.photo} alt="" /><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
+  return <Modal open={open} title="Meal photo" onClose={onClose}>{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
 }
 
 function StatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, adherenceWeekStart, setAdherenceWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; adherenceWeekStart: string; setAdherenceWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
   return <RichStatsView state={state} selectedDate={selectedDate} bankingWeekStart={bankingWeekStart} setBankingWeekStart={setBankingWeekStart} adherenceWeekStart={adherenceWeekStart} setAdherenceWeekStart={setAdherenceWeekStart} onBankHelp={onBankHelp} onAdherenceHelp={onAdherenceHelp} />;
+}
+
+type CalorieDayStatus = 'open' | 'good' | 'under' | 'over';
+
+function getCalorieBand(settings: Settings) {
+  const target = Math.max(settings.calories, 1);
+  if (settings.trackingMode === 'Bulking') return { lower: target, target, upper: target + 300 };
+  if (settings.trackingMode === 'Maintaining') return { lower: target - 150, target, upper: target + 150 };
+  return { lower: 0, target, upper: target };
+}
+
+function classifyCalorieDay(total: number, complete: boolean, settings: Settings): CalorieDayStatus {
+  if (!complete) return 'open';
+  const band = getCalorieBand(settings);
+  if (settings.trackingMode === 'Cutting') return total <= band.target ? 'good' : 'over';
+  if (settings.trackingMode === 'Bulking') {
+    if (total < band.lower) return 'under';
+    return total <= band.upper ? 'good' : 'over';
+  }
+  if (total < band.lower) return 'under';
+  return total <= band.upper ? 'good' : 'over';
+}
+
+function statsRuleText(settings: Settings) {
+  if (settings.trackingMode === 'Bulking') return `Success = completed days from ${energyTextForUnit(settings.calories, settings.energyUnit)} to ${energyTextForUnit(settings.calories + 300, settings.energyUnit)}.`;
+  if (settings.trackingMode === 'Maintaining') return `Success = completed days within ${energyTextForUnit(settings.calories - 150, settings.energyUnit)}-${energyTextForUnit(settings.calories + 150, settings.energyUnit)}.`;
+  return `Success = completed days at or under ${energyTextForUnit(settings.calories, settings.energyUnit)}.`;
+}
+
+function statusLabel(status: CalorieDayStatus) {
+  if (status === 'good') return 'OK';
+  if (status === 'under') return 'Under';
+  if (status === 'over') return 'Over';
+  return 'Open';
+}
+
+function signedEnergyText(state: AppState, kcal: number) {
+  return `${kcal > 0 ? '+' : ''}${energyText(state, kcal)}`;
+}
+
+function signedEnergyValue(state: AppState, kcal: number) {
+  const value = energyValueForUnit(kcal, state.settings.energyUnit);
+  return `${value > 0 ? '+' : ''}${fmt(value)}`;
+}
+
+function isGoodWeeklyTotal(settings: Settings, total: number) {
+  const target = Math.max(settings.calories, 1) * 7;
+  if (settings.trackingMode === 'Cutting') return total <= target;
+  if (settings.trackingMode === 'Bulking') return total >= target && total <= target + 300 * 7;
+  return total >= target - 150 * 7 && total <= target + 150 * 7;
 }
 
 function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, adherenceWeekStart, setAdherenceWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; adherenceWeekStart: string; setAdherenceWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
@@ -1320,9 +1446,8 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
   const rows = days.map(date => ({ date, totals: sum(dayEntries(state, date)), complete: isDayComplete(state, date) }));
   const loggedRows = rows.filter(row => row.totals.calories > 0);
   const completed = rows.filter(row => row.complete);
-  const avgCalories = loggedRows.reduce((acc, row) => acc + row.totals.calories, 0) / (loggedRows.length || 1);
-  const avgProtein = loggedRows.reduce((acc, row) => acc + row.totals.protein, 0) / (loggedRows.length || 1);
-  const completedAverage = completed.reduce((acc, row) => acc + row.totals.calories, 0) / (completed.length || 1);
+  const completedAvgCalories = completed.reduce((acc, row) => acc + row.totals.calories, 0) / (completed.length || 1);
+  const completedAvgProtein = completed.reduce((acc, row) => acc + row.totals.protein, 0) / (completed.length || 1);
   return (
     <>
       <header className="head"><div className="kicker">Trends</div><h1>Stats</h1></header>
@@ -1330,33 +1455,39 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
       <RichAdherence state={state} start={adherenceWeekStart} setStart={setAdherenceWeekStart} onHelp={onAdherenceHelp} />
       <section className="card stats-card">
         <div className="card-head"><h2>Last 7 days</h2></div>
-        {loggedRows.length ? (
+        {completed.length ? (
           <>
-            <div className="stat"><span>Avg calories</span><strong>{energyText(state, avgCalories)} / {energyText(state, state.settings.calories)}</strong></div>
-            <div className="stat"><span>Avg protein</span><strong>{fmt(avgProtein)}g / {fmt(state.settings.protein)}g</strong></div>
-            <div className="stat"><span>Logged days</span><strong>{loggedRows.length} / 7</strong></div>
-            <div className="stat"><span>Completed-day average</span><strong>{completed.length ? `${energyText(state, completedAverage)}/day` : 'Open'}</strong></div>
+            <div className="stat"><span>Avg calories (completed)</span><strong>{energyText(state, completedAvgCalories)} / {energyText(state, state.settings.calories)}</strong></div>
+            <div className="stat"><span>Avg protein (completed)</span><strong>{fmt(completedAvgProtein)}g / {fmt(state.settings.protein)}g</strong></div>
+            <div className="stat"><span>Completed days</span><strong>{completed.length} / 7</strong></div>
           </>
-        ) : <div className="empty">No logged days in this window yet.</div>}
-        <ConsumptionBars state={state} rows={rows.map(row => ({ date: row.date, total: row.totals.calories }))} />
+        ) : <div className="empty">{loggedRows.length ? 'Lock a day in this window to calculate completed averages.' : 'No logged days in this window yet.'}</div>}
+        <ConsumptionBars state={state} rows={rows.map(row => ({ date: row.date, total: row.totals.calories, complete: row.complete }))} />
       </section>
     </>
   );
 }
 
-function ConsumptionBars({ state, rows }: { state: AppState; rows: { date: string; total: number }[] }) {
-  const goal = Math.max(state.settings.calories, 1);
-  const maxTotal = Math.max(goal, ...rows.map(row => row.total), 1);
+function ConsumptionBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean }[] }) {
+  const band = getCalorieBand(state.settings);
+  const maxTotal = Math.max(band.upper, ...rows.map(row => row.total), 1);
+  const trackHeight = 96;
+  const trackBottom = 32;
+  const targetBottom = trackBottom + Math.max(0, Math.min(1, band.target / maxTotal)) * trackHeight;
+  const lowerBottom = trackBottom + Math.max(0, Math.min(1, band.lower / maxTotal)) * trackHeight;
+  const upperBottom = trackBottom + Math.max(0, Math.min(1, band.upper / maxTotal)) * trackHeight;
   return (
     <div className="consumption-chart" aria-label="Consumed calories over the last 7 days">
-      <div className="consumption-goal" style={{ bottom: `${Math.min(100, goal / maxTotal * 100)}%` }} />
+      {state.settings.trackingMode === 'Maintaining' && <div className="consumption-range" style={{ bottom: lowerBottom, height: Math.max(2, upperBottom - lowerBottom) }} />}
+      <div className="consumption-goal" style={{ bottom: targetBottom }} />
       {rows.map(row => {
         const height = row.total ? Math.max(8, row.total / maxTotal * 100) : 3;
         const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
+        const status = classifyCalorieDay(row.total, row.complete, state.settings);
         return (
           <div className="consumption-col" key={row.date}>
             <div className="consumption-value">{row.total ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : 'Open'}</div>
-            <div className="consumption-track"><div className={`consumption-fill ${row.total > goal ? 'over' : row.total ? 'under' : 'empty'}`} style={{ height: `${height}%` }} /></div>
+            <div className="consumption-track"><div className={`consumption-fill ${status}`} style={{ height: `${height}%` }} /></div>
             <div className="consumption-day">{weekday}</div>
           </div>
         );
@@ -1381,18 +1512,20 @@ function WeekRangeControl({ start, setStart }: { start: string; setStart: (start
   );
 }
 
-function BankBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean }[] }) {
+function BankBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean; delta: number; status: CalorieDayStatus }[] }) {
   const goal = Math.max(state.settings.calories, 1);
   return (
     <div className="bank-chart">
       {rows.map(row => {
-        const delta = goal - row.total;
-        const barHeight = row.total ? Math.min(46, Math.max(8, Math.abs(delta) / goal * 54)) : 6;
+        const delta = row.complete ? row.delta : 0;
+        const barHeight = row.complete ? Math.min(46, Math.max(8, Math.abs(delta) / goal * 54)) : 6;
         const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
+        const direction = delta >= 0 ? 'up' : 'down';
+        const tone = row.status === 'good' ? 'good-fill' : 'warn-fill';
         return (
           <div className="bank-col" key={row.date}>
-            <div className="bank-delta">{row.total ? signed(delta) : 'Open'}</div>
-            <div className="bank-track"><span className="bank-midline" />{row.total ? <div className={`bank-fill ${delta >= 0 ? 'good-fill up' : 'warn-fill down'}`} style={{ height: barHeight }} /> : <div className="bank-open-mark" />}</div>
+            <div className="bank-delta">{row.complete ? signedEnergyValue(state, delta) : 'Open'}</div>
+            <div className="bank-track"><span className="bank-midline" />{row.complete ? <div className={`bank-fill ${tone} ${direction}`} style={{ height: barHeight }} /> : <div className="bank-open-mark" />}</div>
             <div className="bank-day">{weekday}</div>
           </div>
         );
@@ -1406,7 +1539,7 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
   const rows = days.map(date => {
     const total = sum(dayEntries(state, date)).calories;
     const complete = isDayComplete(state, date);
-    return { date, total, complete, delta: state.settings.calories - total };
+    return { date, total, complete, delta: complete ? state.settings.calories - total : 0, status: classifyCalorieDay(total, complete, state.settings) };
   });
   const completed = rows.filter(row => row.complete);
   const banked = completed.reduce((acc, row) => acc + row.delta, 0);
@@ -1414,18 +1547,29 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
   const weekBudget = state.settings.calories * 7;
   const completedAverage = completedEaten / (completed.length || 1);
   const projected = completed.length ? completedAverage * 7 : 0;
+  const completedExpected = completed.length * state.settings.calories;
+  const completedBalanceGood = state.settings.trackingMode === 'Cutting'
+    ? banked >= 0
+    : state.settings.trackingMode === 'Bulking'
+      ? banked <= 0 && completedEaten <= completedExpected + 300 * completed.length
+      : Math.abs(banked) <= 150 * completed.length;
+  const bankLabel = state.settings.trackingMode === 'Bulking'
+    ? banked > 0 ? 'Calories to catch up' : 'Weekly surplus progress'
+    : state.settings.trackingMode === 'Maintaining' ? 'Weekly balance' : 'Banked from completed days';
+  const bankValue = state.settings.trackingMode === 'Bulking' && banked < 0 ? -banked : banked;
+  const bankHeroText = state.settings.trackingMode === 'Bulking' && banked > 0 ? energyText(state, bankValue) : signedEnergyText(state, bankValue);
   return (
     <section className="card stats-card">
       <div className="card-head"><h2>Calories Bank</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
       <WeekRangeControl start={start} setStart={setStart} />
       {completed.length ? (
         <>
-          <div className="bank-hero"><div className="label">Banked from completed days</div><div className={`value ${banked >= 0 ? 'good' : 'warn'}`}>{banked > 0 ? '+' : ''}{energyText(state, banked)}</div><div className="bank-note">{completed.length} completed day{completed.length === 1 ? '' : 's'} - Open days do not count yet</div></div>
+          <div className="bank-hero"><div className="label">{bankLabel}</div><div className={`value ${completedBalanceGood ? 'good' : 'warn'}`}>{bankHeroText}</div><div className="bank-note">{completed.length} completed day{completed.length === 1 ? '' : 's'} - Open days do not count yet</div></div>
           <div className="stat"><span>Weekly budget</span><strong>{energyText(state, weekBudget)}</strong></div>
           <div className="stat"><span>Eaten from completed days</span><strong>{energyText(state, completedEaten)}</strong></div>
           <div className="stat"><span>Remaining this week</span><strong className={weekBudget - completedEaten >= 0 ? 'good' : 'warn'}>{energyText(state, weekBudget - completedEaten)}</strong></div>
-          <div className="stat"><span>Completed-day average</span><strong className={banked >= 0 ? 'good' : 'warn'}>{energyText(state, completedAverage)}/day</strong></div>
-          <div className="stat"><span>Projected week</span><strong className={projected <= weekBudget ? 'good' : 'warn'}>{energyText(state, projected)}</strong></div>
+          <div className="stat"><span>Completed-day average</span><strong className={classifyCalorieDay(completedAverage, true, state.settings) === 'good' ? 'good' : 'warn'}>{energyText(state, completedAverage)}/day</strong></div>
+          <div className="stat"><span>Projected week</span><strong className={projected && isGoodWeeklyTotal(state.settings, projected) ? 'good' : 'warn'}>{energyText(state, projected)}</strong></div>
           <BankBars state={state} rows={rows} />
         </>
       ) : <div className="empty">Complete a day in this week to calculate banking.</div>}
@@ -1438,8 +1582,8 @@ function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; st
   const rows = days.map(date => {
     const total = sum(dayEntries(state, date)).calories;
     const complete = isDayComplete(state, date);
-    const success = complete && (state.settings.trackingMode === 'Bulking' ? total >= state.settings.calories - 100 : total <= state.settings.calories);
-    return { date, total, complete, success };
+    const status = classifyCalorieDay(total, complete, state.settings);
+    return { date, total, complete, status, success: status === 'good' };
   });
   const completed = rows.filter(row => row.complete);
   const success = rows.filter(row => row.success);
@@ -1448,8 +1592,8 @@ function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; st
     <section className="card stats-card">
       <div className="card-head"><h2>Weekly adherence</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
       <WeekRangeControl start={start} setStart={setStart} />
-      {completed.length ? <div className="adherence-hero"><div className="label">Weekly adherence</div><div className={`score ${score >= 70 ? 'good' : 'warn'}`}>{fmt(score)}%</div><div className="bank-note">{success.length} of {completed.length} completed days on track - Success = completed days at or under budget</div></div> : <div className="empty">Complete a day in this week to calculate adherence.</div>}
-      <div className="adherence-week">{rows.map(row => <div key={row.date} className={`adh-day ${!row.complete ? 'open' : row.success ? 'good' : 'warn'}`}><div className="adh-label">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3)}</div><div className="adh-icon">{!row.complete ? '-' : row.success ? 'OK' : 'Over'}</div><div className="adh-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : 'Open'}</div></div>)}</div>
+      {completed.length ? <div className="adherence-hero"><div className="label">Weekly adherence</div><div className={`score ${score >= 70 ? 'good' : 'warn'}`}>{fmt(score)}%</div><div className="bank-note">{success.length} of {completed.length} completed days on track - {statsRuleText(state.settings)}</div></div> : <div className="empty">Complete a day in this week to calculate adherence.</div>}
+      <div className="adherence-week">{rows.map(row => <div key={row.date} className={`adh-day ${row.status}`}><div className="adh-label">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3)}</div><div className="adh-icon">{statusLabel(row.status)}</div><div className="adh-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : 'Open'}</div></div>)}</div>
     </section>
   );
 }
