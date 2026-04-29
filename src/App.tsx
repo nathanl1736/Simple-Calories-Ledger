@@ -178,7 +178,7 @@ export function App() {
   const [journalDayViewMode, setJournalDayViewMode] = useState<JournalDayViewMode>('collage');
   const [journalLabelMode, setJournalLabelMode] = useState<JournalLabelMode>('nameCalories');
   const [journalShuffleSeed, setJournalShuffleSeed] = useState(0);
-  const [librarySub, setLibrarySub] = useState(() => localStorage.getItem('calorie-tracker-library-sub') || 'history');
+  const [librarySub, setLibrarySub] = useState(() => localStorage.getItem('calorie-tracker-library-sub') || 'favourites');
   const [historySearch, setHistorySearch] = useState('');
   const [dayLogView, setDayLogView] = useState<'group' | 'list'>('group');
   const [modal, setModal] = useState<ModalName>(null);
@@ -268,8 +268,8 @@ export function App() {
   const complete = isDayComplete(state, selectedDate);
   const mealGroups = useMemo(() => getMealGroups(state), [state]);
 
-  const openEntry = (meal: Meal = 'Snack') => {
-    if (complete) return notify('Reopen the day before changing food logs');
+  const openEntry = (meal: Meal = 'Snack', date = selectedDate) => {
+    if (isDayComplete(state, date)) return notify('Reopen the day before changing food logs');
     setEntryDraft(blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)));
     setModal('entry');
     setTimeout(() => document.getElementById('entryCalories')?.focus(), 80);
@@ -477,8 +477,9 @@ export function App() {
           setActiveMealCard(group);
           setModal('mealCard');
         }} onStartLog={() => {
+          setSelectedDate(cardsDate);
           setTab('tracking');
-          openEntry();
+          openEntry('Snack', cardsDate);
         }} />
       )}
       {tab === 'stats' && (
@@ -501,7 +502,7 @@ export function App() {
           setGoalDraft={setGoalDraft}
           setGoalsEditing={setGoalsEditing}
           onSaveGoals={() => updateState(draft => {
-            draft.settings = { ...draft.settings, ...goalDraft };
+            draft.settings = { ...draft.settings, ...goalDraft, calories: energyInputToKcal(goalDraft.calories, state.settings.energyUnit) };
           }).then(() => {
             setGoalsEditing(false);
             notify('Goals saved');
@@ -509,9 +510,19 @@ export function App() {
           onAccent={color => updateState(draft => {
             draft.settings.accent = color;
           })}
-          onEnergyUnit={unit => updateState(draft => {
+          onEnergyUnit={unit => {
+            const previousUnit = energyUnitValue(state.settings.energyUnit);
+            if (goalsEditing) {
+              setGoalDraft(current => ({
+                ...current,
+                energyUnit: unit,
+                calories: n(energyInputFromKcal(energyInputToKcal(current.calories, previousUnit), unit))
+              }));
+            }
+            updateState(draft => {
             draft.settings.energyUnit = unit;
-          })}
+            });
+          }}
           onBackupDays={days => updateState(draft => {
             draft.settings.backupReminderDays = validBackupReminderDays(days);
           })}
@@ -866,7 +877,7 @@ function SwipeConfirm({ label, confirmLabel, className = '', onConfirm }: { labe
 
 function SavedFoodPicker({ foods, onChoose, compact = false }: { foods: Food[]; onChoose: (food: Food) => void; compact?: boolean }) {
   const [query, setQuery] = useState('');
-  const [favouritesOpen, setFavouritesOpen] = useState(compact);
+  const [favouritesOpen, setFavouritesOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const recentFoods = [...foods].sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0));
   const favourites = recentFoods.filter(food => food.favourite).slice(0, 12);
@@ -1051,13 +1062,13 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
       <header className="head"><div className="kicker">Saved foods</div><h1>Library</h1></header>
       <div className="seg"><button className={sub === 'history' ? 'active' : ''} onClick={() => setSub('history')} type="button">History</button><button className={sub === 'favourites' ? 'active' : ''} onClick={() => setSub('favourites')} type="button">Favourites</button></div>
       <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search saved foods" />
-      <section className="card">{shown.length ? shown.map(food => <FoodRow key={food.id} state={state} food={food} onPrefill={onPrefill} onManage={onManage} />) : <div className="empty">No matching foods.</div>}</section>
+      <section className="card">{shown.length ? shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onManage={onManage} />) : <div className="empty">No matching foods.</div>}</section>
     </>
   );
 }
 
-function FoodRow({ state, food, onPrefill, onManage }: { state: AppState; food: Food; onPrefill: (food: Food) => void; onManage: (food: Food) => void }) {
-  return <div className="food-row"><div className={`emoji ${food.favourite ? 'fav' : ''}`}>{food.favourite && <span className="star-icon" aria-hidden="true" />}</div><div className="body"><strong>{food.name}</strong><small>{energyText(state, food.calories)} {foodUnitText(food)} | F {fmt(food.fat)}g | C {fmt(food.carbs)}g | P {fmt(food.protein)}g | {fmt(food.usageCount)}x</small></div><button className="small-btn" type="button" onClick={() => onPrefill(food)}>Log</button><button className="small-btn" type="button" onClick={() => onManage(food)}>Manage</button></div>;
+function FoodRow({ state, food, showUsage, onPrefill, onManage }: { state: AppState; food: Food; showUsage: boolean; onPrefill: (food: Food) => void; onManage: (food: Food) => void }) {
+  return <div className="food-row"><div className={`emoji ${food.favourite ? 'fav' : ''}`}>{food.favourite && <span className="star-icon" aria-hidden="true" />}</div><div className="body"><strong>{food.name}</strong><small>{energyText(state, food.calories)} {foodUnitText(food)} | F {fmt(food.fat)}g | C {fmt(food.carbs)}g | P {fmt(food.protein)}g{showUsage ? ` | ${fmt(food.usageCount)}x` : ''}</small></div><button className="small-btn" type="button" onClick={() => onPrefill(food)}>Log</button><button className="small-btn" type="button" onClick={() => onManage(food)}>Manage</button></div>;
 }
 
 function shuffleEntries<T extends { id: string }>(items: T[], seed: number) {
@@ -1213,17 +1224,33 @@ function CardsView({
 
 function MealCardModal({ state, group, open, onClose, onShare }: { state: AppState; group: MealGroup | null; open: boolean; onClose: () => void; onShare: () => void }) {
   const [format, setFormat] = useState<'photo' | 'summary'>('photo');
+  const tapStart = useRef<{ x: number; y: number; time: number } | null>(null);
   useEffect(() => {
     if (open) setFormat(group?.photos.length ? 'photo' : 'summary');
   }, [open, group?.id]);
   if (!group) return <Modal open={open} title="Meal Card" onClose={onClose} wide><div className="empty">Meal card not found.</div></Modal>;
   const photoMode = format === 'photo' && group.photos.length > 0;
+  const toggleFormat = () => setFormat(current => current === 'photo' ? 'summary' : group.photos.length ? 'photo' : 'summary');
+  const handleCardPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = tapStart.current;
+    tapStart.current = null;
+    if (!start) return;
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    const elapsed = Date.now() - start.time;
+    if (moved <= 8 && elapsed < 500) toggleFormat();
+  };
   return (
     <Modal open={open} title="Meal Card" onClose={onClose} wide>
-      <p className="hint meal-card-modal-hint">Swipe between card formats. On iPhone, Save / Share PNG opens the native share sheet.</p>
+      <p className="hint meal-card-modal-hint">Tap the card to switch formats. On iPhone, Save / Share PNG opens the native share sheet.</p>
       <div
         className={`share-card ${photoMode ? 'photo-mode' : 'summary-mode'}`}
-        onPointerUp={() => setFormat(current => current === 'photo' ? 'summary' : group.photos.length ? 'photo' : 'summary')}
+        onPointerDown={event => {
+          tapStart.current = { x: event.clientX, y: event.clientY, time: Date.now() };
+        }}
+        onPointerUp={handleCardPointerUp}
+        onPointerCancel={() => {
+          tapStart.current = null;
+        }}
       >
         <div className="share-card-kicker">Meal Summary</div>
         <div className="share-card-head"><h3>{group.meal}</h3><span>{shortDate(group.date)}</span></div>
@@ -1246,7 +1273,7 @@ function MealCardModal({ state, group, open, onClose, onShare }: { state: AppSta
         <div className="share-card-footer"><strong>Simple Calories Ledger</strong><i /></div>
       </div>
       <div className="card-dots" aria-hidden="true"><span className={format === 'photo' ? 'active' : ''} /><span className={format === 'summary' ? 'active' : ''} /></div>
-      <p className="hint">Swipe to compare formats</p>
+      <p className="hint">Tap card to compare formats</p>
       <div className="actions vertical"><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary" type="button" onClick={onClose}>Close</button></div>
     </Modal>
   );
@@ -1328,7 +1355,7 @@ function ConsumptionBars({ state, rows }: { state: AppState; rows: { date: strin
         const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
         return (
           <div className="consumption-col" key={row.date}>
-            <div className="consumption-value">{row.total ? energyText(state, row.total) : 'Open'}</div>
+            <div className="consumption-value">{row.total ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : 'Open'}</div>
             <div className="consumption-track"><div className={`consumption-fill ${row.total > goal ? 'over' : row.total ? 'under' : 'empty'}`} style={{ height: `${height}%` }} /></div>
             <div className="consumption-day">{weekday}</div>
           </div>
@@ -1442,12 +1469,14 @@ function SettingsView(props: {
   onClear: () => void;
 }) {
   const counts = backupCounts(props.state);
-  const draft = props.goalsEditing ? props.goalDraft : props.state.settings;
+  const goalUnit = energyUnitValue(props.state.settings.energyUnit);
+  const visibleSettings = { ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) };
+  const draft = props.goalsEditing ? props.goalDraft : visibleSettings;
   const patchGoal = (patch: Partial<Settings>) => props.setGoalDraft({ ...props.goalDraft, ...patch });
   return (
     <>
       <header className="head"><div className="kicker">Preferences</div><h1>Settings</h1></header>
-      <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft(props.state.settings), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label="Calories"><input disabled={!props.goalsEditing} value={draft.calories} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
+      <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={props.state.settings.energyUnit === 'kcal' ? 'active' : ''} onClick={() => props.onEnergyUnit('kcal')}>kCal</button><button type="button" className={props.state.settings.energyUnit === 'kj' ? 'active' : ''} onClick={() => props.onEnergyUnit('kj')}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#9be7c4', '#a8d8ff', '#f5dd9d', '#ffb3ba', '#d8c3ff'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup exported: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}` : 'No backup exported yet.'} Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
       <section className="card"><h2>App</h2><p className="hint"><strong>Nathan&apos;s Calories Ledger</strong><br />Version {APP_VERSION}<br /><span className="project-note">A project by Nathan.</span></p><div className="actions"><button className="secondary" type="button" onClick={props.onCheckUpdates}>Check for updates</button><button className="secondary danger" type="button" onClick={props.onClear}>Clear local data</button></div></section>
