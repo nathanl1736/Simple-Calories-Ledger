@@ -132,9 +132,6 @@ export async function renderMealCardCanvas(group: MealGroup) {
     ctx.textAlign = 'left';
     y += 62;
   });
-  ctx.fillStyle = muted;
-  ctx.font = `900 26px ${font}`;
-  ctx.fillText('Simple Calories Ledger', x, H - pad - 34);
   return canvas;
 }
 

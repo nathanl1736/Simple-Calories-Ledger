@@ -263,7 +263,6 @@ h2 { margin: 0 0 14px; font-size: 22px; letter-spacing: 0; }
 .share-card.summary-mode .share-card-macros strong { font-size: 21px; margin-top: 2px; }
 .share-card.summary-mode .share-card-breakdown { padding: 12px; border-radius: 16px; }
 .share-card.summary-mode .share-card-breakdown div { padding: 7px 0; }
-.share-card.summary-mode .share-card-footer { font-size: 13px; }
 .share-card-macros div { background: #242424; border: 1px solid #373737; border-radius: 18px; padding: 16px; }
 .share-card-macros span, .share-card-breakdown > span { display: block; color: var(--muted); font-size: 13px; font-weight: 950; letter-spacing: .12em; text-transform: uppercase; }
 .share-card-macros strong { display: block; font-size: 27px; margin-top: 6px; }
@@ -271,8 +270,6 @@ h2 { margin: 0 0 14px; font-size: 22px; letter-spacing: 0; }
 .share-card-breakdown div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #303030; padding: 10px 0; }
 .share-card-breakdown div:last-child { border-bottom: 0; }
 .share-card-breakdown small { color: #aaa; font-weight: 900; white-space: nowrap; }
-.share-card-footer { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-weight: 950; }
-.share-card-footer i { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); }
 .card-dots { display: flex; justify-content: center; gap: 10px; margin: 16px 0 8px; }
 .card-dots span { width: 48px; height: 10px; border-radius: 999px; background: #3c3c3c; }
 .card-dots span.active { background: var(--accent); }

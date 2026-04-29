@@ -274,7 +274,11 @@ export function App() {
   }, [loaded, modal]);
 
   const setTab = (next: Tab) => {
-    if (next === 'journal' && tab === 'journal') setJournalDay(null);
+    if (next === 'tracking' && tab === 'tracking') setSelectedDate(todayKey());
+    if (next === 'journal' && tab === 'journal') {
+      setJournalDay(null);
+      setJournalMonth(new Date());
+    }
     setTabState(next);
     localStorage.setItem('calorie-tracker-active-tab', next);
   };
@@ -1380,7 +1384,6 @@ function MealCardModal({ state, group, open, onClose, onShare }: { state: AppSta
           <span>{photoMode ? 'Food items' : 'Breakdown'}</span>
           {group.items.map(item => <div key={item.id}><strong>{item.name}</strong><small>{energyText(state, entryTotals(item).calories)}</small></div>)}
         </div>
-        <div className="share-card-footer"><strong>Simple Calories Ledger</strong><i /></div>
       </div>
       <div className="card-dots" aria-hidden="true"><span className={format === 'photo' ? 'active' : ''} /><span className={format === 'summary' ? 'active' : ''} /></div>
       <p className="hint">Tap card to compare formats</p>

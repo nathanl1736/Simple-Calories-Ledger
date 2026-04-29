@@ -1,7 +1,9 @@
 {
-  "version": "2.0.0.4",
+  "version": "2.0.0.5",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
+    "Reset Track and Journal on tab re-tap.",
+    "Cleaned up Meal Card branding.",
     "Pill toggles now switch from either side.",
     "Improved Food Log modal focus behavior, zero-value display, and Calories & Macros layout.",
     "Allowed completed-day entries to repeat into today while keeping completed days read-only.",

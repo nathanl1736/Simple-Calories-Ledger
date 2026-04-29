@@ -1,8 +1,10 @@
 // Release checklist: always bump APP_VERSION here, sw.js, public/sw.js, package.json,
 // package-lock.json, version.json, and public/version.json for user-visible app changes.
-export const APP_VERSION = '2.0.0.4';
+export const APP_VERSION = '2.0.0.5';
 
 export const RELEASE_NOTES = [
+  'Reset Track and Journal on tab re-tap.',
+  'Cleaned up Meal Card branding.',
   'Pill toggles now switch from either side.',
   'Improved Food Log modal focus behavior, zero-value display, and Calories & Macros layout.',
   'Allowed completed-day entries to repeat into today while keeping completed days read-only.',
