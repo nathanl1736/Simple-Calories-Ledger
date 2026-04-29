@@ -1,4 +1,4 @@
-const APP_VERSION = '2.0.0.10';
+const APP_VERSION = '2.0.0.11';
 const CACHE_PREFIX = 'nathans-calories-ledger';
 const CACHE_NAME = `${CACHE_PREFIX}-${APP_VERSION}`;
 const APP_SHELL = [
@@ -6,9 +6,9 @@ const APP_SHELL = [
   './index.html',
   './version.json',
   './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/apple-touch-icon.png'
+  './icons/icon-192-v2-0-0-11.png',
+  './icons/icon-512-v2-0-0-11.png',
+  './icons/apple-touch-icon-v2-0-0-11.png'
 ];
 
 self.addEventListener('install', event => {

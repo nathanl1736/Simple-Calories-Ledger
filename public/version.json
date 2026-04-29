@@ -1,7 +1,7 @@
 {
-  "version": "2.0.0.10",
+  "version": "2.0.0.11",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Improved Log Food autofocus on iOS."
+    "Updated app icon."
   ]
 }
