@@ -1,5 +1,5 @@
 import type { AppState, Entry, Food, Settings } from './types';
-import { energyUnitValue, entryTotals, entryUnitModeValue, n, portionValue, validBackupReminderDays } from './utils';
+import { energyUnitValue, entryTotals, entryUnitModeValue, goalSnapshotFromSettings, lockPastGoals, n, normalizeDateKey, normalizeGoalSnapshot, portionValue, validBackupReminderDays } from './utils';
 
 export const DEFAULT: AppState = {
   settings: {
@@ -17,7 +17,8 @@ export const DEFAULT: AppState = {
   },
   entries: [],
   foods: [],
-  completedDates: []
+  completedDates: [],
+  dailyGoals: {}
 };
 
 export function normalizeEntry(input: Partial<Entry>): Entry {
@@ -70,10 +71,17 @@ export function normalizeStateShape(input: unknown): AppState {
     settings.carbs = 90;
     settings.fat = 50;
   }
-  return {
+  const next: AppState = {
     settings,
     entries: Array.isArray(raw.entries) ? raw.entries.map(entry => normalizeEntry(entry)) : [],
     foods: Array.isArray(raw.foods) ? raw.foods.map(food => normalizeFood(food)) : [],
-    completedDates: Array.isArray(raw.completedDates) ? raw.completedDates.map(String) : []
+    completedDates: Array.isArray(raw.completedDates) ? raw.completedDates.map(String) : [],
+    dailyGoals: {}
   };
+  const rawDailyGoals = raw.dailyGoals && typeof raw.dailyGoals === 'object' ? raw.dailyGoals : {};
+  Object.entries(rawDailyGoals).forEach(([key, value]) => {
+    const date = normalizeDateKey(key);
+    if (date) next.dailyGoals[date] = normalizeGoalSnapshot(value as Partial<Settings>, settings);
+  });
+  return lockPastGoals(next, undefined, goalSnapshotFromSettings(settings));
 }

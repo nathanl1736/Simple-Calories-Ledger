@@ -322,11 +322,11 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
 .bank-delta { color: #888; font-size: 12px; font-weight: 950; white-space: nowrap; }
 .bank-day { color: #777; font-size: 12px; font-weight: 850; }
 .consumption-chart { position: relative; display: flex; align-items: end; gap: 8px; height: 178px; border-top: 1px solid #292929; border-bottom: 1px solid #333; padding: 18px 0 12px; margin-top: 12px; }
-.consumption-goal { position: absolute; left: 0; right: 0; height: 1px; border-top: 1px dashed #626262; opacity: .75; pointer-events: none; }
-.consumption-range { position: absolute; left: 0; right: 0; background: color-mix(in srgb, var(--accent) 12%, transparent); border-top: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); pointer-events: none; }
+.consumption-goal { position: absolute; left: 0; right: 0; height: 1px; border-top: 1px dashed #cfcfcf; opacity: .8; pointer-events: none; z-index: 3; }
+.consumption-range { position: absolute; left: 0; right: 0; background: color-mix(in srgb, var(--accent) 16%, transparent); border-top: 1px solid color-mix(in srgb, var(--accent) 48%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--accent) 48%, transparent); pointer-events: none; z-index: 2; }
 .consumption-col { position: relative; z-index: 1; flex: 1; height: 142px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
-.consumption-track { width: 100%; max-width: 34px; height: 96px; border-radius: 14px 14px 8px 8px; background: #242424; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
-.consumption-fill { width: 100%; border-radius: 14px 14px 5px 5px; background: var(--accent); min-height: 3px; }
+.consumption-track { position: relative; width: 100%; max-width: 34px; height: 96px; border-radius: 14px 14px 8px 8px; background: #242424; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+.consumption-fill { position: relative; z-index: 1; width: 100%; border-radius: 14px 14px 5px 5px; background: var(--accent); min-height: 3px; }
 .consumption-fill.good { background: var(--accent); }
 .consumption-fill.under { background: color-mix(in srgb, var(--carbs) 82%, #c8a24f); }
 .consumption-fill.over { background: var(--danger); }
@@ -340,7 +340,7 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
 .adh-day.over { border-color: color-mix(in srgb, var(--danger) 55%, #333); background: color-mix(in srgb, var(--danger) 12%, #252525); }
 .adh-day.open { opacity: .55; }
 .adh-label, .adh-value { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.adh-icon { width: 100%; min-width: 0; font-size: 18px; font-weight: 950; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adh-icon { width: 100%; min-width: 0; font-size: 26px; font-weight: 950; line-height: 1; overflow: hidden; white-space: nowrap; }
 .adh-day.open .adh-icon { color: #888; font-size: 20px; }
 
 .form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

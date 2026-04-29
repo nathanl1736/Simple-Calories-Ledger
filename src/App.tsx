@@ -1,7 +1,7 @@
 ﻿import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { flushSync } from 'react-dom';
-import type { AppState, EnergyUnit, Entry, Food, Meal, Settings } from './types';
+import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
 import { compressImage, downloadBlob } from './image';
@@ -25,7 +25,10 @@ import {
   fmtGram,
   fmtPortion,
   foodUnitText,
+  goalForDate,
+  goalSnapshotFromSettings,
   isDayComplete,
+  lockPastGoals,
   MEALS,
   mealGroupId,
   macroBase,
@@ -553,6 +556,8 @@ export function App() {
           setGoalDraft={setGoalDraft}
           setGoalsEditing={setGoalsEditing}
           onSaveGoals={() => updateState(draft => {
+            const previousGoal = goalSnapshotFromSettings(draft.settings);
+            Object.assign(draft, lockPastGoals(draft, todayKey(), previousGoal));
             draft.settings = { ...draft.settings, ...goalDraft, calories: energyInputToKcal(goalDraft.calories, state.settings.energyUnit) };
           }).then(() => {
             setGoalsEditing(false);
@@ -725,7 +730,8 @@ function TrackingView(props: {
   onToggleComplete: () => void;
   onPrefillFood: (food: Food) => void;
 }) {
-  const goal = props.state.settings.calories || 1;
+  const dayGoal = goalForDate(props.state, props.selectedDate);
+  const goal = dayGoal.calories || 1;
   const remaining = goal - props.totals.calories;
   const deg = Math.min(360, Math.max(0, props.totals.calories) / goal * 360);
   return (
@@ -738,15 +744,15 @@ function TrackingView(props: {
       <section className="hero">
         <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Intake</span></div></div>
         <div className="remaining">
-          <div className="label">{props.state.settings.trackingMode === 'Bulking' ? 'Target remaining' : 'Budget remaining'}</div>
+          <div className="label">{dayGoal.trackingMode === 'Bulking' ? 'Target remaining' : 'Budget remaining'}</div>
           <div className="value">{fmt(remaining)} <small>{energyLabel(props.state)}</small></div>
-          <div className="hint">Goal: {energyText(props.state, props.state.settings.calories)}</div>
+          <div className="hint">Goal: {energyText(props.state, dayGoal.calories)}</div>
         </div>
       </section>
       <div className="macro-grid">
-        <Macro name="FAT" value={props.totals.fat} goal={props.state.settings.fat} color="--fat" />
-        <Macro name="CARBS" value={props.totals.carbs} goal={props.state.settings.carbs} color="--carbs" />
-        <Macro name="PROTEIN" value={props.totals.protein} goal={props.state.settings.protein} color="--protein" />
+        <Macro name="FAT" value={props.totals.fat} goal={dayGoal.fat} color="--fat" />
+        <Macro name="CARBS" value={props.totals.carbs} goal={dayGoal.carbs} color="--carbs" />
+        <Macro name="PROTEIN" value={props.totals.protein} goal={dayGoal.protein} color="--protein" />
       </div>
       {!props.complete && (
         <details className="card quick-picks">
@@ -1443,18 +1449,18 @@ function StatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart,
 
 type CalorieDayStatus = 'open' | 'good' | 'under' | 'over';
 
-function getCalorieBand(settings: Settings) {
-  const target = Math.max(settings.calories, 1);
-  if (settings.trackingMode === 'Bulking') return { lower: target, target, upper: target + 300 };
-  if (settings.trackingMode === 'Maintaining') return { lower: target - 150, target, upper: target + 150 };
+function getCalorieBand(goal: DailyGoalSnapshot) {
+  const target = Math.max(goal.calories, 1);
+  if (goal.trackingMode === 'Bulking') return { lower: target, target, upper: target + 300 };
+  if (goal.trackingMode === 'Maintaining') return { lower: target - 150, target, upper: target + 150 };
   return { lower: 0, target, upper: target };
 }
 
-function classifyCalorieDay(total: number, complete: boolean, settings: Settings): CalorieDayStatus {
+function classifyCalorieDay(total: number, complete: boolean, goal: DailyGoalSnapshot): CalorieDayStatus {
   if (!complete) return 'open';
-  const band = getCalorieBand(settings);
-  if (settings.trackingMode === 'Cutting') return total <= band.target ? 'good' : 'over';
-  if (settings.trackingMode === 'Bulking') {
+  const band = getCalorieBand(goal);
+  if (goal.trackingMode === 'Cutting') return total <= band.target ? 'good' : 'over';
+  if (goal.trackingMode === 'Bulking') {
     if (total < band.lower) return 'under';
     return total <= band.upper ? 'good' : 'over';
   }
@@ -1462,17 +1468,16 @@ function classifyCalorieDay(total: number, complete: boolean, settings: Settings
   return total <= band.upper ? 'good' : 'over';
 }
 
-function statsRuleText(settings: Settings) {
-  if (settings.trackingMode === 'Bulking') return `Success = completed days from ${energyTextForUnit(settings.calories, settings.energyUnit)} to ${energyTextForUnit(settings.calories + 300, settings.energyUnit)}.`;
-  if (settings.trackingMode === 'Maintaining') return `Success = completed days within ${energyTextForUnit(settings.calories - 150, settings.energyUnit)}-${energyTextForUnit(settings.calories + 150, settings.energyUnit)}.`;
-  return `Success = completed days at or under ${energyTextForUnit(settings.calories, settings.energyUnit)}.`;
+function statsRuleText(goal: DailyGoalSnapshot, unit: EnergyUnit) {
+  if (goal.trackingMode === 'Bulking') return `Success = completed days from ${energyTextForUnit(goal.calories, unit)} to ${energyTextForUnit(goal.calories + 300, unit)}.`;
+  if (goal.trackingMode === 'Maintaining') return `Success = completed days within ${energyTextForUnit(goal.calories - 150, unit)}-${energyTextForUnit(goal.calories + 150, unit)}.`;
+  return `Success = completed days at or under ${energyTextForUnit(goal.calories, unit)}.`;
 }
 
-function statusLabel(status: CalorieDayStatus) {
-  if (status === 'good') return 'OK';
-  if (status === 'under') return 'Under';
-  if (status === 'over') return 'Over';
-  return 'Open';
+function statusIcon(status: CalorieDayStatus) {
+  if (status === 'good') return '✓';
+  if (status === 'under' || status === 'over') return '✕';
+  return '-';
 }
 
 function signedEnergyText(state: AppState, kcal: number) {
@@ -1484,20 +1489,19 @@ function signedEnergyValue(state: AppState, kcal: number) {
   return `${value > 0 ? '+' : ''}${fmt(value)}`;
 }
 
-function isGoodWeeklyTotal(settings: Settings, total: number) {
-  const target = Math.max(settings.calories, 1) * 7;
-  if (settings.trackingMode === 'Cutting') return total <= target;
-  if (settings.trackingMode === 'Bulking') return total >= target && total <= target + 300 * 7;
-  return total >= target - 150 * 7 && total <= target + 150 * 7;
+function isGoodWeeklyAverage(rows: { goal: DailyGoalSnapshot; status: CalorieDayStatus }[]) {
+  return rows.length ? rows.every(row => row.status === 'good') : false;
 }
 
 function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, adherenceWeekStart, setAdherenceWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; adherenceWeekStart: string; setAdherenceWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(selectedDate, i - 6));
-  const rows = days.map(date => ({ date, totals: sum(dayEntries(state, date)), complete: isDayComplete(state, date) }));
+  const rows = days.map(date => ({ date, totals: sum(dayEntries(state, date)), complete: isDayComplete(state, date), goal: goalForDate(state, date) }));
   const loggedRows = rows.filter(row => row.totals.calories > 0);
   const completed = rows.filter(row => row.complete);
   const completedAvgCalories = completed.reduce((acc, row) => acc + row.totals.calories, 0) / (completed.length || 1);
   const completedAvgProtein = completed.reduce((acc, row) => acc + row.totals.protein, 0) / (completed.length || 1);
+  const completedAvgCalorieGoal = completed.reduce((acc, row) => acc + row.goal.calories, 0) / (completed.length || 1);
+  const completedAvgProteinGoal = completed.reduce((acc, row) => acc + row.goal.protein, 0) / (completed.length || 1);
   return (
     <>
       <header className="head"><div className="kicker">Trends</div><h1>Stats</h1></header>
@@ -1507,37 +1511,38 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
         <div className="card-head"><h2>Last 7 days</h2></div>
         {completed.length ? (
           <>
-            <div className="stat"><span>Avg calories (completed)</span><strong>{energyText(state, completedAvgCalories)} / {energyText(state, state.settings.calories)}</strong></div>
-            <div className="stat"><span>Avg protein (completed)</span><strong>{fmt(completedAvgProtein)}g / {fmt(state.settings.protein)}g</strong></div>
+            <div className="stat"><span>Avg calories (completed)</span><strong>{energyText(state, completedAvgCalories)} / {energyText(state, completedAvgCalorieGoal)}</strong></div>
+            <div className="stat"><span>Avg protein (completed)</span><strong>{fmt(completedAvgProtein)}g / {fmt(completedAvgProteinGoal)}g</strong></div>
             <div className="stat"><span>Completed days</span><strong>{completed.length} / 7</strong></div>
           </>
         ) : <div className="empty">{loggedRows.length ? 'Lock a day in this window to calculate completed averages.' : 'No logged days in this window yet.'}</div>}
-        <ConsumptionBars state={state} rows={rows.map(row => ({ date: row.date, total: row.totals.calories, complete: row.complete }))} />
+        <ConsumptionBars state={state} rows={rows.map(row => ({ date: row.date, total: row.totals.calories, complete: row.complete, goal: row.goal }))} />
       </section>
     </>
   );
 }
 
-function ConsumptionBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean }[] }) {
-  const band = getCalorieBand(state.settings);
-  const maxTotal = Math.max(band.upper, ...rows.map(row => row.total), 1);
-  const trackHeight = 96;
-  const trackBottom = 32;
-  const targetBottom = trackBottom + Math.max(0, Math.min(1, band.target / maxTotal)) * trackHeight;
-  const lowerBottom = trackBottom + Math.max(0, Math.min(1, band.lower / maxTotal)) * trackHeight;
-  const upperBottom = trackBottom + Math.max(0, Math.min(1, band.upper / maxTotal)) * trackHeight;
+function ConsumptionBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean; goal: DailyGoalSnapshot }[] }) {
+  const bands = rows.map(row => getCalorieBand(row.goal));
+  const maxTotal = Math.max(...bands.map(band => band.upper), ...rows.map(row => row.total), 1);
   return (
     <div className="consumption-chart" aria-label="Consumed calories over the last 7 days">
-      {state.settings.trackingMode === 'Maintaining' && <div className="consumption-range" style={{ bottom: lowerBottom, height: Math.max(2, upperBottom - lowerBottom) }} />}
-      <div className="consumption-goal" style={{ bottom: targetBottom }} />
-      {rows.map(row => {
+      {rows.map((row, index) => {
+        const band = bands[index];
         const height = row.total ? Math.max(8, row.total / maxTotal * 100) : 3;
+        const targetBottom = Math.max(0, Math.min(1, band.target / maxTotal)) * 100;
+        const lowerBottom = Math.max(0, Math.min(1, band.lower / maxTotal)) * 100;
+        const upperBottom = Math.max(0, Math.min(1, band.upper / maxTotal)) * 100;
         const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
-        const status = classifyCalorieDay(row.total, row.complete, state.settings);
+        const status = classifyCalorieDay(row.total, row.complete, row.goal);
         return (
           <div className="consumption-col" key={row.date}>
             <div className="consumption-value">{row.total ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : 'Open'}</div>
-            <div className="consumption-track"><div className={`consumption-fill ${status}`} style={{ height: `${height}%` }} /></div>
+            <div className="consumption-track">
+              {row.goal.trackingMode === 'Maintaining' && <span className="consumption-range" style={{ bottom: `${lowerBottom}%`, height: `${Math.max(2, upperBottom - lowerBottom)}%` }} />}
+              <span className="consumption-goal" style={{ bottom: `${targetBottom}%` }} />
+              <div className={`consumption-fill ${status}`} style={{ height: `${height}%` }} />
+            </div>
             <div className="consumption-day">{weekday}</div>
           </div>
         );
@@ -1562,13 +1567,13 @@ function WeekRangeControl({ start, setStart }: { start: string; setStart: (start
   );
 }
 
-function BankBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean; delta: number; status: CalorieDayStatus }[] }) {
-  const goal = Math.max(state.settings.calories, 1);
+function BankBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean; delta: number; status: CalorieDayStatus; goal: DailyGoalSnapshot }[] }) {
+  const maxGoal = Math.max(...rows.map(row => row.goal.calories), 1);
   return (
     <div className="bank-chart">
       {rows.map(row => {
         const delta = row.complete ? row.delta : 0;
-        const barHeight = row.complete ? Math.min(46, Math.max(8, Math.abs(delta) / goal * 54)) : 6;
+        const barHeight = row.complete ? Math.min(46, Math.max(8, Math.abs(delta) / maxGoal * 54)) : 6;
         const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
         const direction = delta >= 0 ? 'up' : 'down';
         const tone = row.status === 'good' ? 'good-fill' : 'warn-fill';
@@ -1589,25 +1594,30 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
   const rows = days.map(date => {
     const total = sum(dayEntries(state, date)).calories;
     const complete = isDayComplete(state, date);
-    return { date, total, complete, delta: complete ? state.settings.calories - total : 0, status: classifyCalorieDay(total, complete, state.settings) };
+    const goal = goalForDate(state, date);
+    return { date, total, complete, goal, delta: complete ? goal.calories - total : 0, status: classifyCalorieDay(total, complete, goal) };
   });
   const completed = rows.filter(row => row.complete);
   const banked = completed.reduce((acc, row) => acc + row.delta, 0);
   const completedEaten = completed.reduce((acc, row) => acc + row.total, 0);
-  const weekBudget = state.settings.calories * 7;
+  const weekBudget = rows.reduce((acc, row) => acc + row.goal.calories, 0);
+  const weekBand = rows.reduce((acc, row) => {
+    const band = getCalorieBand(row.goal);
+    acc.lower += band.lower;
+    acc.upper += band.upper;
+    return acc;
+  }, { lower: 0, upper: 0 });
   const completedAverage = completedEaten / (completed.length || 1);
   const projected = completed.length ? completedAverage * 7 : 0;
-  const completedExpected = completed.length * state.settings.calories;
-  const completedBalanceGood = state.settings.trackingMode === 'Cutting'
-    ? banked >= 0
-    : state.settings.trackingMode === 'Bulking'
-      ? banked <= 0 && completedEaten <= completedExpected + 300 * completed.length
-      : Math.abs(banked) <= 150 * completed.length;
-  const bankLabel = state.settings.trackingMode === 'Bulking'
+  const completedExpected = completed.reduce((acc, row) => acc + row.goal.calories, 0);
+  const completedBalanceGood = isGoodWeeklyAverage(completed);
+  const firstCompletedMode = completed[0]?.goal.trackingMode;
+  const bankMode = firstCompletedMode && completed.every(row => row.goal.trackingMode === firstCompletedMode) ? firstCompletedMode : null;
+  const bankLabel = bankMode === 'Bulking'
     ? banked > 0 ? 'Calories to catch up' : 'Weekly surplus progress'
-    : state.settings.trackingMode === 'Maintaining' ? 'Weekly balance' : 'Banked from completed days';
-  const bankValue = state.settings.trackingMode === 'Bulking' && banked < 0 ? -banked : banked;
-  const bankHeroText = state.settings.trackingMode === 'Bulking' && banked > 0 ? energyText(state, bankValue) : signedEnergyText(state, bankValue);
+    : bankMode === 'Maintaining' ? 'Weekly balance' : bankMode === 'Cutting' ? 'Banked from completed days' : 'Weekly goal balance';
+  const bankValue = bankMode === 'Bulking' && banked < 0 ? -banked : banked;
+  const bankHeroText = bankMode === 'Bulking' && banked > 0 ? energyText(state, bankValue) : signedEnergyText(state, bankValue);
   return (
     <section className="card stats-card">
       <div className="card-head"><h2>Calories Bank</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
@@ -1618,8 +1628,9 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
           <div className="stat"><span>Weekly budget</span><strong>{energyText(state, weekBudget)}</strong></div>
           <div className="stat"><span>Eaten from completed days</span><strong>{energyText(state, completedEaten)}</strong></div>
           <div className="stat"><span>Remaining this week</span><strong className={weekBudget - completedEaten >= 0 ? 'good' : 'warn'}>{energyText(state, weekBudget - completedEaten)}</strong></div>
-          <div className="stat"><span>Completed-day average</span><strong className={classifyCalorieDay(completedAverage, true, state.settings) === 'good' ? 'good' : 'warn'}>{energyText(state, completedAverage)}/day</strong></div>
-          <div className="stat"><span>Projected week</span><strong className={projected && isGoodWeeklyTotal(state.settings, projected) ? 'good' : 'warn'}>{energyText(state, projected)}</strong></div>
+          <div className="stat"><span>Completed goal total</span><strong>{energyText(state, completedExpected)}</strong></div>
+          <div className="stat"><span>Completed-day average</span><strong className={completedBalanceGood ? 'good' : 'warn'}>{energyText(state, completedAverage)}/day</strong></div>
+          <div className="stat"><span>Projected week</span><strong className={projected && projected >= weekBand.lower && projected <= weekBand.upper ? 'good' : 'warn'}>{energyText(state, projected)}</strong></div>
           <BankBars state={state} rows={rows} />
         </>
       ) : <div className="empty">Complete a day in this week to calculate banking.</div>}
@@ -1632,18 +1643,22 @@ function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; st
   const rows = days.map(date => {
     const total = sum(dayEntries(state, date)).calories;
     const complete = isDayComplete(state, date);
-    const status = classifyCalorieDay(total, complete, state.settings);
-    return { date, total, complete, status, success: status === 'good' };
+    const goal = goalForDate(state, date);
+    const status = classifyCalorieDay(total, complete, goal);
+    return { date, total, complete, goal, status, success: status === 'good' };
   });
   const completed = rows.filter(row => row.complete);
   const success = rows.filter(row => row.success);
   const score = completed.length ? Math.round(success.length / completed.length * 100) : 0;
+  const firstGoal = completed[0]?.goal || goalForDate(state, todayKey());
+  const oneRule = completed.every(row => row.goal.trackingMode === firstGoal.trackingMode && row.goal.calories === firstGoal.calories);
+  const ruleText = oneRule ? statsRuleText(firstGoal, state.settings.energyUnit) : 'Success = each completed day against its saved goal.';
   return (
     <section className="card stats-card">
       <div className="card-head"><h2>Weekly adherence</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
       <WeekRangeControl start={start} setStart={setStart} />
-      {completed.length ? <div className="adherence-hero"><div className="label">Weekly adherence</div><div className={`score ${score >= 70 ? 'good' : 'warn'}`}>{fmt(score)}%</div><div className="bank-note">{success.length} of {completed.length} completed days on track - {statsRuleText(state.settings)}</div></div> : <div className="empty">Complete a day in this week to calculate adherence.</div>}
-      <div className="adherence-week">{rows.map(row => <div key={row.date} className={`adh-day ${row.status}`}><div className="adh-label">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3)}</div><div className="adh-icon">{row.complete ? statusLabel(row.status) : '-'}</div><div className="adh-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '-'}</div></div>)}</div>
+      {completed.length ? <div className="adherence-hero"><div className="label">Weekly adherence</div><div className={`score ${score >= 70 ? 'good' : 'warn'}`}>{fmt(score)}%</div><div className="bank-note">{success.length} of {completed.length} completed days on track - {ruleText}</div></div> : <div className="empty">Complete a day in this week to calculate adherence.</div>}
+      <div className="adherence-week">{rows.map(row => <div key={row.date} className={`adh-day ${row.status}`}><div className="adh-label">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3)}</div><div className="adh-icon" aria-label={row.complete ? row.status : 'open'}>{statusIcon(row.status)}</div><div className="adh-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '-'}</div></div>)}</div>
     </section>
   );
 }

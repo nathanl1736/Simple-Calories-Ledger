@@ -16,6 +16,8 @@ export type Settings = {
   backupReminderDays: number;
 };
 
+export type DailyGoalSnapshot = Pick<Settings, 'calories' | 'protein' | 'carbs' | 'fat' | 'trackingMode'>;
+
 export type Entry = {
   id: string;
   sourceFoodId: string | null;
@@ -59,6 +61,7 @@ export type AppState = {
   entries: Entry[];
   foods: Food[];
   completedDates: string[];
+  dailyGoals: Record<string, DailyGoalSnapshot>;
 };
 
 export type Totals = {

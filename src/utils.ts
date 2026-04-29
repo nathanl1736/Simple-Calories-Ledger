@@ -1,4 +1,4 @@
-import type { AppState, EnergyUnit, Entry, Food, Meal, Totals } from './types';
+import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings, Totals } from './types';
 
 export const MEALS: Meal[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Drink'];
 
@@ -114,6 +114,51 @@ export function setDayComplete(state: AppState, key: string, on: boolean): AppSt
     ...state,
     completedDates: on ? [...new Set([...completedDates, date])] : completedDates.filter(item => item !== date)
   };
+}
+
+export function goalSnapshotFromSettings(settings: Settings): DailyGoalSnapshot {
+  return {
+    calories: n(settings.calories),
+    protein: n(settings.protein),
+    carbs: n(settings.carbs),
+    fat: n(settings.fat),
+    trackingMode: settings.trackingMode
+  };
+}
+
+export function normalizeGoalSnapshot(input: Partial<DailyGoalSnapshot> | undefined, fallback: Settings): DailyGoalSnapshot {
+  const base = goalSnapshotFromSettings(fallback);
+  return {
+    calories: n(input?.calories) || base.calories,
+    protein: n(input?.protein) || base.protein,
+    carbs: n(input?.carbs) || base.carbs,
+    fat: n(input?.fat) || base.fat,
+    trackingMode: input?.trackingMode === 'Bulking' || input?.trackingMode === 'Maintaining' || input?.trackingMode === 'Cutting'
+      ? input.trackingMode
+      : base.trackingMode
+  };
+}
+
+export function goalForDate(state: AppState, key: string): DailyGoalSnapshot {
+  const date = normalizeDateKey(key);
+  const today = todayKey();
+  if (!date || date >= today) return goalSnapshotFromSettings(state.settings);
+  return state.dailyGoals?.[date] || goalSnapshotFromSettings(state.settings);
+}
+
+export function datesWithRecords(state: AppState) {
+  return [...new Set([
+    ...state.entries.map(entry => normalizeDateKey(entry.date)).filter(Boolean),
+    ...state.completedDates.map(normalizeDateKey).filter(Boolean)
+  ])].sort();
+}
+
+export function lockPastGoals(state: AppState, today = todayKey(), goal = goalSnapshotFromSettings(state.settings)): AppState {
+  const dailyGoals = { ...(state.dailyGoals || {}) };
+  datesWithRecords(state).forEach(date => {
+    if (date < today && !dailyGoals[date]) dailyGoals[date] = goal;
+  });
+  return { ...state, dailyGoals };
 }
 
 export function energyUnitValue(value: unknown): EnergyUnit {
