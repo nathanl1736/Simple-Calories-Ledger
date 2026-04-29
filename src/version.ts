@@ -1,8 +1,11 @@
 // Release checklist: always bump APP_VERSION here, sw.js, public/sw.js, package.json,
 // package-lock.json, version.json, and public/version.json for user-visible app changes.
-export const APP_VERSION = '2.0.0.2';
+export const APP_VERSION = '2.0.0.4';
 
 export const RELEASE_NOTES = [
+  'Pill toggles now switch from either side.',
+  'Improved Food Log modal focus behavior, zero-value display, and Calories & Macros layout.',
+  'Allowed completed-day entries to repeat into today while keeping completed days read-only.',
   'Made Stats mode-aware for cutting, bulking, and maintaining, with open days excluded from scores and banking.',
   'Aligned Last 7 days graph reference lines and completed-day coloring with the active goal mode.',
   'Unified macro chips through a reusable component across Track, Library, Journal, and Cards.',

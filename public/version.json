@@ -1,7 +1,10 @@
 {
-  "version": "2.0.0.2",
+  "version": "2.0.0.4",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
+    "Pill toggles now switch from either side.",
+    "Improved Food Log modal focus behavior, zero-value display, and Calories & Macros layout.",
+    "Allowed completed-day entries to repeat into today while keeping completed days read-only.",
     "Made Stats mode-aware for cutting, bulking, and maintaining, with open days excluded from scores and banking.",
     "Aligned Last 7 days graph reference lines and completed-day coloring with the active goal mode.",
     "Unified macro chips through a reusable component across Track, Library, Journal, and Cards.",

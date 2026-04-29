@@ -325,13 +325,13 @@ h2 { margin: 0 0 14px; font-size: 22px; letter-spacing: 0; }
 .field { display: block; min-width: 0; }
 .field.full, .full { grid-column: 1 / -1; }
 .project-note { display: inline-block; margin-top: 6px; color: var(--muted); font-weight: 850; }
-.field > span, .calories-priority label { display: block; color: #888; font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 7px; }
-input, select, textarea { width: 100%; min-width: 0; background: #252525; border: 1px solid #373737; border-radius: 14px; min-height: 48px; padding: 12px; outline: none; }
+.field > span, .calories-priority label { display: block; color: #8e8e8e; font-size: 11px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 6px; }
+input, select, textarea { width: 100%; min-width: 0; background: #252525; border: 1px solid #373737; border-radius: 14px; min-height: 48px; padding: 12px; outline: none; font-weight: 750; }
 textarea { min-height: 78px; resize: vertical; }
-.calories-priority { background: color-mix(in srgb, var(--accent) 8%, #202020); border: 1px solid color-mix(in srgb, var(--accent) 30%, #373737); border-radius: 18px; padding: 12px; min-width: 0; }
-.calories-priority label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-.calories-priority input { font-size: 28px; font-weight: 950; text-align: center; min-height: 62px; }
-.calorie-input-row { position: relative; margin-bottom: 12px; }
+.calories-priority { background: color-mix(in srgb, var(--accent) 8%, #202020); border: 1px solid color-mix(in srgb, var(--accent) 30%, #373737); border-radius: 18px; padding: 11px; min-width: 0; }
+.calories-priority label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.calories-priority input { font-size: 28px; font-weight: 950; text-align: left; min-height: 58px; }
+.calorie-input-row { position: relative; margin-bottom: 10px; }
 .calorie-input-row input { padding-right: 70px; }
 .calorie-input-row span {
   position: absolute;
@@ -343,11 +343,11 @@ textarea { min-height: 78px; resize: vertical; }
   font-weight: 950;
   pointer-events: none;
 }
-.nutrition-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.nutrition-grid .field { display: grid; gap: 7px; }
-.nutrition-grid .field > span { font-size: 10px; line-height: 1.2; min-height: 0; text-align: center; }
-.nutrition-grid input { text-align: center; font-weight: 900; }
-.unit-basis-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+.nutrition-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.nutrition-grid .field { display: grid; gap: 4px; }
+.nutrition-grid .field > span { font-size: 10px; line-height: 1.2; min-height: 0; text-align: left; margin-bottom: 0; }
+.nutrition-grid input { text-align: left; font-weight: 850; min-height: 50px; }
+.unit-basis-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; color: var(--muted); font-size: 11px; font-weight: 850; text-transform: uppercase; letter-spacing: .08em; }
 .unit-toggle-chip { display: inline-flex; background: #202020; border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
 .unit-toggle-chip button { min-height: 32px; border-radius: 999px; padding: 0 10px; background: transparent; color: #888; font-size: 12px; font-weight: 900; }
 .unit-toggle-chip button.active { background: color-mix(in srgb, var(--accent) 22%, #292929); color: var(--accent); }
