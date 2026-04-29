@@ -1,4 +1,4 @@
-const APP_VERSION = '2.0.0.6';
+const APP_VERSION = '2.0.0.8';
 const CACHE_PREFIX = 'nathans-calories-ledger';
 const CACHE_NAME = `${CACHE_PREFIX}-${APP_VERSION}`;
 const APP_SHELL = [

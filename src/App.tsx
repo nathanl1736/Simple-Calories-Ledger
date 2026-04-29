@@ -439,6 +439,7 @@ export function App() {
 
   const activeFood = state.foods.find(food => food.id === activeFoodId) || null;
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
+  const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 3);
 
   if (!loaded) {
     return <main className="app loading"><h1>Nathan&apos;s Calories Ledger</h1><p className="hint">Loading your local tracker...</p></main>;
@@ -679,7 +680,7 @@ export function App() {
       <Modal open={modal === 'version'} title="Version update available" onClose={() => setModal(null)}>
         <div className="version-badge">Version {availableUpdate?.version || APP_VERSION}</div>
         <p className="hint">{availableUpdate?.source === 'service-worker' ? 'A newer offline version is ready to install.' : `Installed version ${APP_VERSION}. Update to version ${availableUpdate?.version || APP_VERSION}.`}</p>
-        <ul className="update-list">{(availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).map(item => <li key={item}>{item}</li>)}</ul>
+        <ul className="update-list">{updateNotes.map(item => <li key={item}>{item}</li>)}</ul>
         <div className="actions vertical">
           <button className="primary" type="button" onClick={() => applyAppUpdate(availableUpdate)}>Update now</button>
           <button className="secondary" type="button" onClick={() => setModal(null)}>Later</button>
@@ -1636,7 +1637,7 @@ function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; st
       <div className="card-head"><h2>Weekly adherence</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
       <WeekRangeControl start={start} setStart={setStart} />
       {completed.length ? <div className="adherence-hero"><div className="label">Weekly adherence</div><div className={`score ${score >= 70 ? 'good' : 'warn'}`}>{fmt(score)}%</div><div className="bank-note">{success.length} of {completed.length} completed days on track - {statsRuleText(state.settings)}</div></div> : <div className="empty">Complete a day in this week to calculate adherence.</div>}
-      <div className="adherence-week">{rows.map(row => <div key={row.date} className={`adh-day ${row.status}`}><div className="adh-label">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3)}</div><div className="adh-icon">{statusLabel(row.status)}</div><div className="adh-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : 'Open'}</div></div>)}</div>
+      <div className="adherence-week">{rows.map(row => <div key={row.date} className={`adh-day ${row.status}`}><div className="adh-label">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3)}</div><div className="adh-icon">{row.complete ? statusLabel(row.status) : '-'}</div><div className="adh-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '-'}</div></div>)}</div>
     </section>
   );
 }

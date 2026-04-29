@@ -311,12 +311,14 @@ h2 { margin: 0 0 14px; font-size: 22px; letter-spacing: 0; }
 .consumption-value { color: #888; font-size: 11px; font-weight: 950; white-space: nowrap; }
 .consumption-day { color: #777; font-size: 12px; font-weight: 850; }
 .adherence-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }
-.adh-day { min-height: 76px; border-radius: 14px; background: #252525; border: 1px solid #333; padding: 8px 5px; text-align: center; display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+.adh-day { min-width: 0; min-height: 76px; border-radius: 14px; background: #252525; border: 1px solid #333; padding: 8px 4px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; overflow: hidden; }
 .adh-day.good { border-color: color-mix(in srgb, var(--accent) 55%, #333); background: color-mix(in srgb, var(--accent) 13%, #252525); }
 .adh-day.under { border-color: color-mix(in srgb, var(--carbs) 55%, #333); background: color-mix(in srgb, var(--carbs) 12%, #252525); }
 .adh-day.over { border-color: color-mix(in srgb, var(--danger) 55%, #333); background: color-mix(in srgb, var(--danger) 12%, #252525); }
 .adh-day.open { opacity: .55; }
-.adh-icon { font-size: 18px; font-weight: 950; }
+.adh-label, .adh-value { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adh-icon { width: 100%; min-width: 0; font-size: 18px; font-weight: 950; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adh-day.open .adh-icon { color: #888; font-size: 20px; }
 
 .form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .field { display: block; min-width: 0; }
