@@ -1,4 +1,4 @@
-const APP_VERSION = '2.0.0.0';
+const APP_VERSION = '2.0.0.1';
 const CACHE_PREFIX = 'nathans-calories-ledger';
 const CACHE_NAME = `${CACHE_PREFIX}-${APP_VERSION}`;
 const APP_SHELL = [
@@ -15,6 +15,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL))
   );
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {

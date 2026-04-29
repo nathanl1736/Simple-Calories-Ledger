@@ -1,11 +1,12 @@
 {
-  "version": "2.0.0.0",
+  "version": "2.0.0.1",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
     "Migrated the app to React, Vite, and TypeScript while preserving existing local data.",
     "Restored polished centered popup modals and improved iOS/PWA safe-area behavior.",
     "Rebuilt Stats, Journal, Food Log, quick picks, and meal cards for closer feature parity.",
     "Added kCal/kJ display and entry support while keeping saved calories normalized.",
-    "Updated the app icon, Cards tab icon, and 2.0.0.0 offline update cache."
+    "Updated the app icon, Cards tab icon, and 2.0.0.0 offline update cache.",
+    "Recovery release: forces a fresh 2.0.0.1 app shell for installed PWAs."
   ]
 }
