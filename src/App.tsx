@@ -1,5 +1,6 @@
 ﻿import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
+import { flushSync } from 'react-dom';
 import type { AppState, EnergyUnit, Entry, Food, Meal, Settings } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
@@ -302,9 +303,14 @@ export function App() {
 
   const openEntry = (meal: Meal = 'Snack', date = selectedDate) => {
     if (isDayComplete(state, date)) return notify('Reopen the day before changing food logs');
-    setEntryDraft(blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)));
-    setEntryOpenMode('manual');
-    setModal('entry');
+    flushSync(() => {
+      setEntryDraft(blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)));
+      setEntryOpenMode('manual');
+      setModal('entry');
+    });
+    const caloriesInput = document.getElementById('entryCalories') as HTMLInputElement | null;
+    caloriesInput?.focus({ preventScroll: true });
+    caloriesInput?.select();
   };
 
   const editEntry = (entry: Entry) => {
