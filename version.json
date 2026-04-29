@@ -1,7 +1,12 @@
 {
-  "version": "1.8.7.2",
-  "maintenanceNote": "When releasing app changes, bump APP_VERSION in index.html, APP_VERSION in sw.js, and this version value so Settings, service worker caches, and update checks stay in sync.",
+  "version": "2.0.0.0",
+  "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the public version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
+    "Migrated the app to React, Vite, and TypeScript while preserving existing local data.",
+    "Restored polished centered popup modals and improved iOS/PWA safe-area behavior.",
+    "Rebuilt Stats, Journal, Food Log, quick picks, and meal cards for closer feature parity.",
+    "Added kCal/kJ display and entry support while keeping saved calories normalized.",
+    "Updated the app icon, Cards tab icon, and 2.0.0.0 offline update cache.",
     "Applied shared modal safe-area handling to Meal Card and Meal Photo sheets",
     "Adjusted iOS PWA modal safe-area spacing so bottom sheets sit flush to the bottom",
     "Removed sticky modal headers so modal content scrolls as one sheet",

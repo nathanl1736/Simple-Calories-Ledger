@@ -1,0 +1,79 @@
+import type { AppState, Entry, Food, Settings } from './types';
+import { energyUnitValue, entryTotals, entryUnitModeValue, n, portionValue, validBackupReminderDays } from './utils';
+
+export const DEFAULT: AppState = {
+  settings: {
+    calories: 1800,
+    protein: 150,
+    carbs: 90,
+    fat: 50,
+    accent: '#9be7c4',
+    trackingMode: 'Cutting',
+    energyUnit: 'kcal',
+    lastBackupAt: null,
+    lastBackupMeta: null,
+    lastBackupReminderShownAt: null,
+    backupReminderDays: 7
+  },
+  entries: [],
+  foods: [],
+  completedDates: []
+};
+
+export function normalizeEntry(input: Partial<Entry>): Entry {
+  const entry = { ...input } as Entry;
+  const mode = entryUnitModeValue(entry.unitMode);
+  const portion = portionValue(entry.portion);
+  const multiplier = mode === '100g' ? portion / 100 : portion;
+  (['calories', 'protein', 'carbs', 'fat'] as const).forEach(key => {
+    const prop = `base${key[0].toUpperCase()}${key.slice(1)}` as keyof Entry;
+    if (entry[prop] == null) {
+      (entry as Record<string, unknown>)[prop] = multiplier !== 1 && entry[key] != null ? n(entry[key]) / multiplier : n(entry[key]);
+    }
+  });
+  entry.unitMode = mode;
+  entry.portion = portion;
+  Object.assign(entry, entryTotals(entry));
+  entry.sourceFoodId = entry.sourceFoodId || null;
+  entry.photo = entry.photo || null;
+  entry.meal = entry.meal || 'Snack';
+  entry.createdAt = entry.createdAt || Date.now();
+  entry.updatedAt = entry.updatedAt || entry.createdAt;
+  return entry;
+}
+
+export function normalizeFood(input: Partial<Food>): Food {
+  return {
+    id: String(input.id || crypto.randomUUID()),
+    name: String(input.name || 'Food'),
+    unitMode: entryUnitModeValue(input.unitMode),
+    calories: n(input.calories),
+    protein: n(input.protein),
+    carbs: n(input.carbs),
+    fat: n(input.fat),
+    favourite: !!input.favourite,
+    usageCount: n(input.usageCount),
+    lastUsedAt: n(input.lastUsedAt),
+    createdAt: n(input.createdAt) || Date.now(),
+    updatedAt: n(input.updatedAt) || Date.now()
+  };
+}
+
+export function normalizeStateShape(input: unknown): AppState {
+  const raw = (input && typeof input === 'object') ? input as Partial<AppState> : {};
+  const settings = { ...DEFAULT.settings, ...(raw.settings || {}) } as Settings;
+  settings.energyUnit = energyUnitValue(settings.energyUnit);
+  settings.backupReminderDays = validBackupReminderDays(settings.backupReminderDays);
+  if (settings.accent === '#efad7c' || settings.accent === '#ccb7f6') settings.accent = '#9be7c4';
+  if (settings.calories === 2000 && settings.protein === 150 && settings.carbs === 200 && settings.fat === 65) {
+    settings.calories = 1800;
+    settings.carbs = 90;
+    settings.fat = 50;
+  }
+  return {
+    settings,
+    entries: Array.isArray(raw.entries) ? raw.entries.map(entry => normalizeEntry(entry)) : [],
+    foods: Array.isArray(raw.foods) ? raw.foods.map(food => normalizeFood(food)) : [],
+    completedDates: Array.isArray(raw.completedDates) ? raw.completedDates.map(String) : []
+  };
+}
