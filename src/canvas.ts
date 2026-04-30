@@ -59,12 +59,12 @@ export async function renderMealCardCanvas(group: MealGroup) {
   canvas.height = H;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not create canvas');
-  const bg = cssVar('--bg', '#141414');
-  const card = cssVar('--card', '#1d1d1d');
-  const card2 = cssVar('--card2', '#252525');
+  const bg = cssVar('--bg', '#151713');
+  const card = cssVar('--card', '#1f211d');
+  const card2 = cssVar('--card2', '#262922');
   const ink = cssVar('--ink', '#f7f2ed');
-  const muted = cssVar('--muted', '#8b8b8b');
-  const accent = cssVar('--accent', '#9be7c4');
+  const muted = cssVar('--muted', '#a19b90');
+  const accent = cssVar('--accent', '#c9dc86');
   const font = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);

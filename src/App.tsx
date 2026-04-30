@@ -1,7 +1,7 @@
 ﻿import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { flushSync } from 'react-dom';
-import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings } from './types';
+import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
 import { compressImage, downloadBlob } from './image';
@@ -109,6 +109,25 @@ const draftEnergyText = (kcal: number, unit: EnergyUnit) => energyInputFromKcal(
 
 type Toast = { id: number; text: string } | null;
 type MacroChipKey = 'fat' | 'carbs' | 'protein';
+type EffectiveTheme = 'dark' | 'light';
+
+const THEME_COLORS: Record<EffectiveTheme, string> = {
+  dark: '#151713',
+  light: '#f8f3e9'
+};
+
+function resolvedTheme(theme: ThemePreference): EffectiveTheme {
+  if (theme === 'light' || theme === 'dark') return theme;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+function applyThemePreference(theme: ThemePreference) {
+  const effectiveTheme = resolvedTheme(theme);
+  document.documentElement.dataset.theme = effectiveTheme;
+  document.documentElement.dataset.themePreference = theme;
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = THEME_COLORS[effectiveTheme];
+}
 
 function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', 'protein'] }: { fat?: number; carbs?: number; protein?: number; show?: MacroChipKey[] }) {
   const chips: Record<MacroChipKey, { label: string; value: number; className: string }> = {
@@ -282,13 +301,28 @@ export function App() {
       setState(next);
       setGoalDraft(next.settings);
       setLoaded(true);
-      document.documentElement.style.setProperty('--accent', next.settings.accent || '#9be7c4');
+      document.documentElement.style.setProperty('--accent', next.settings.accent || '#c9dc86');
+      applyThemePreference(next.settings.theme || 'dark');
     });
   }, []);
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--accent', state.settings.accent || '#9be7c4');
+    document.documentElement.style.setProperty('--accent', state.settings.accent || '#c9dc86');
   }, [state.settings.accent]);
+
+  useEffect(() => {
+    const theme = state.settings.theme || 'dark';
+    applyThemePreference(theme);
+    if (theme !== 'system') return;
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => applyThemePreference(theme);
+    if (media.addEventListener) {
+      media.addEventListener('change', onChange);
+      return () => media.removeEventListener('change', onChange);
+    }
+    media.addListener(onChange);
+    return () => media.removeListener(onChange);
+  }, [state.settings.theme]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -725,6 +759,12 @@ export function App() {
           onAccent={color => updateState(draft => {
             draft.settings.accent = color;
           })}
+          onTheme={theme => {
+            if (goalsEditing) setGoalDraft(current => ({ ...current, theme }));
+            updateState(draft => {
+              draft.settings.theme = theme;
+            });
+          }}
           onEnergyUnit={unit => {
             const previousUnit = energyUnitValue(state.settings.energyUnit);
             if (goalsEditing) {
@@ -959,28 +999,54 @@ function TrackingView(props: {
   const goal = dayGoal.calories || 1;
   const remaining = goal - props.totals.calories;
   const deg = Math.min(360, Math.max(0, props.totals.calories) / goal * 360);
+  const weekSummary = homeWeekSummary(props.state, props.selectedDate);
+  const remainingLabel = dayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
   return (
     <>
       <header className="head">
-        <div className="kicker">Nathan&apos;s Calories Ledger</div>
-        <h1>Today&apos;s tracker</h1>
+        <div className="kicker brand-kicker">Dawni</div>
+        <h1>Today in your week</h1>
       </header>
       <DayNav value={props.selectedDate} onChange={props.setSelectedDate} />
-      <section className="hero">
-        <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Intake</span></div></div>
+      <section className="hero today-card">
         <div className="remaining">
-          <div className="label">{dayGoal.trackingMode === 'Bulking' ? 'Target remaining' : 'Budget remaining'}</div>
+          <div className="label">{remainingLabel}</div>
           <div className="value">{fmt(remaining)} <small>{energyLabel(props.state)}</small></div>
-          <div className="hint">Goal: {energyText(props.state, dayGoal.calories)}</div>
+          <div className="today-context">
+            <span>Logged {energyText(props.state, props.totals.calories)}</span>
+            <span>Daily target {energyText(props.state, dayGoal.calories)}</span>
+          </div>
+        </div>
+        <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Logged</span></div></div>
+      </section>
+      <section className="home-week-strip" aria-label="This week at a glance">
+        <div className="home-week-heading">
+          <span>Week at a glance</span>
+          <strong>{shortDate(weekSummary.days[0])} - {shortDate(weekSummary.days[6])}</strong>
+        </div>
+        <div className="home-week-stat">
+          <span>Week bank</span>
+          <strong>{weekSummary.completed.length ? weekSummary.bankText : 'Start with today'}</strong>
+        </div>
+        <div className="home-week-stat">
+          <span>Completed</span>
+          <strong>{weekSummary.completed.length}/7 days</strong>
+        </div>
+        <div className="home-week-stat">
+          <span>Projected</span>
+          <strong>{weekSummary.completed.length ? energyText(props.state, weekSummary.projected) : 'Open'}</strong>
         </div>
       </section>
-      <div className="macro-grid">
-        <Macro name="FAT" value={props.totals.fat} goal={dayGoal.fat} color="--fat" />
-        <Macro name="CARBS" value={props.totals.carbs} goal={dayGoal.carbs} color="--carbs" />
-        <Macro name="PROTEIN" value={props.totals.protein} goal={dayGoal.protein} color="--protein" />
+      <div className="macro-grid macro-summary">
+        <Macro name="Protein" value={props.totals.protein} goal={dayGoal.protein} color="--protein" featured />
+        <Macro name="Carbs" value={props.totals.carbs} goal={dayGoal.carbs} color="--carbs" />
+        <Macro name="Fat" value={props.totals.fat} goal={dayGoal.fat} color="--fat" />
       </div>
       {!props.complete && (
-        <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} onSaveDatabaseFood={props.onSaveDatabaseFood} compact browseToggle />
+        <section className="reuse-panel" aria-label="Reuse or search foods">
+          <div className="section">Reuse or search foods</div>
+          <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} onSaveDatabaseFood={props.onSaveDatabaseFood} compact browseToggle />
+        </section>
       )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
       {!props.complete && (
@@ -1008,8 +1074,8 @@ function TrackingView(props: {
   );
 }
 
-function Macro({ name, value, goal, color }: { name: string; value: number; goal: number; color: string }) {
-  return <div className="macro"><div className="name">{name}</div><div className="bar"><div style={{ background: `var(${color})`, width: `${Math.min(100, value / (goal || 1) * 100)}%` }} /></div><div className="num">{fmt(value)}g <span>/ {fmt(goal)}g</span></div></div>;
+function Macro({ name, value, goal, color, featured = false }: { name: string; value: number; goal: number; color: string; featured?: boolean }) {
+  return <div className={`macro ${featured ? 'featured' : ''}`}><div className="name">{name}</div><div className="bar"><div style={{ background: `var(${color})`, width: `${Math.min(100, value / (goal || 1) * 100)}%` }} /></div><div className="num">{fmt(value)}g <span>/ {fmt(goal)}g</span></div></div>;
 }
 
 function GroupedEntries(props: Parameters<typeof TrackingView>[0]) {
@@ -1021,8 +1087,8 @@ function GroupedEntries(props: Parameters<typeof TrackingView>[0]) {
           <div className="meal-group" key={meal}>
             <div className="meal-group-head"><div className="meal-group-title">{meal}</div><div className="meal-group-total">{energyText(props.state, sum(items).calories)}</div></div>
             <div className="meal-group-body">
-              {items.length ? <EntryList state={props.state} entries={items} complete={props.complete} onPhoto={props.onPhotoEntry} onEdit={props.onEditEntry} onRepeat={props.onRepeatEntry} onDelete={props.onDeleteEntry} /> : <div className="meal-empty">No food logged here yet.</div>}
-              {!props.complete && <button className="meal-log-btn" type="button" onClick={() => props.onOpenEntry(meal)}>+ Log Food</button>}
+              {items.length ? <EntryList state={props.state} entries={items} complete={props.complete} onPhoto={props.onPhotoEntry} onEdit={props.onEditEntry} onRepeat={props.onRepeatEntry} onDelete={props.onDeleteEntry} /> : <div className="meal-empty">Nothing logged yet.</div>}
+              {!props.complete && <button className="meal-log-btn" type="button" onClick={() => props.onOpenEntry(meal)}>Add {meal.toLowerCase()}</button>}
             </div>
           </div>
         );
@@ -2050,6 +2116,30 @@ function signedEnergyValue(state: AppState, kcal: number) {
   return `${value > 0 ? '+' : ''}${fmt(value)}`;
 }
 
+function homeWeekSummary(state: AppState, selectedDate: string) {
+  const start = weekStartMonday(selectedDate);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const rows = days.map(date => {
+    const total = sum(dayEntries(state, date)).calories;
+    const complete = isDayComplete(state, date);
+    const goal = goalForDate(state, date);
+    return { date, total, complete, goal, delta: complete ? goal.calories - total : 0, status: classifyCalorieDay(total, complete, goal) };
+  });
+  const completed = rows.filter(row => row.complete);
+  const banked = completed.reduce((acc, row) => acc + row.delta, 0);
+  const completedEaten = completed.reduce((acc, row) => acc + row.total, 0);
+  const completedAverage = completedEaten / (completed.length || 1);
+  const projected = completed.length ? completedAverage * 7 : 0;
+  return {
+    days,
+    rows,
+    completed,
+    banked,
+    projected,
+    bankText: signedEnergyText(state, banked)
+  };
+}
+
 function isGoodWeeklyAverage(rows: { goal: DailyGoalSnapshot; status: CalorieDayStatus }[]) {
   return rows.length ? rows.every(row => row.status === 'good') : false;
 }
@@ -2231,6 +2321,7 @@ function SettingsView(props: {
   setGoalsEditing: (on: boolean) => void;
   onSaveGoals: () => void;
   onAccent: (color: string) => void;
+  onTheme: (theme: ThemePreference) => void;
   onEnergyUnit: (unit: 'kcal' | 'kj') => void;
   onBackupDays: (days: number) => void;
   onRefreshFoodDatabase: () => Promise<void>;
@@ -2256,7 +2347,7 @@ function SettingsView(props: {
     <>
       <header className="head"><div className="kicker">Preferences</div><h1>Settings</h1></header>
       <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
-      <section className="card"><h2>Display</h2><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#9be7c4', '#a8d8ff', '#f5dd9d', '#ffb3ba', '#d8c3ff'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
+      <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || 'dark') === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes the built-in estimated food database from this app&apos;s files. This will not change your saved foods or food logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
       <section className="card custom-db-card"><div className="card-head"><h2>Custom Food Databases</h2><button className="help-btn" type="button" onClick={props.onCustomDatabaseHelp}>?</button></div><p className="hint">Import your own food database JSON. Enabled databases appear in food search.</p><div className="actions"><button className="primary" type="button" onClick={props.onImportCustomDatabase}>Import JSON</button></div>{props.state.customFoodDatabases.length ? <div className="custom-db-list">{props.state.customFoodDatabases.map(database => <div className="custom-db-row" key={database.id}><div className="custom-db-main"><strong>{database.name}</strong><span>{fmt(database.itemCount)} foods · Imported {new Date(database.importedAt).toLocaleDateString()} · {database.enabled ? 'Enabled' : 'Disabled'}</span></div><label className="toggle-line"><input type="checkbox" checked={database.enabled} onChange={event => props.onToggleCustomDatabase(database.id, event.target.checked)} /><span>{database.enabled ? 'On' : 'Off'}</span></label><button className="small-btn danger" type="button" onClick={() => props.onDeleteCustomDatabase(database.id)}>Delete</button></div>)}</div> : <div className="empty custom-db-empty">No custom databases imported yet.</div>}</section>
       <section className="card ai-prompt-card"><div className="card-head"><h2>AI Quick Log Prompt</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Copy this prompt into ChatGPT, Gemini, Claude, or another AI chatbot. Then enter your ingredients and paste the result into AI Quick Log.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div></section>

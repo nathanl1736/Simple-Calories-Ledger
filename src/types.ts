@@ -1,6 +1,7 @@
 export type Meal = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack' | 'Drink';
 export type EnergyUnit = 'kcal' | 'kj';
 export type TrackingMode = 'Cutting' | 'Maintaining' | 'Bulking';
+export type ThemePreference = 'system' | 'dark' | 'light';
 
 export type Settings = {
   calories: number;
@@ -8,6 +9,7 @@ export type Settings = {
   carbs: number;
   fat: number;
   accent: string;
+  theme: ThemePreference;
   trackingMode: TrackingMode;
   energyUnit: EnergyUnit;
   lastBackupAt: string | null;

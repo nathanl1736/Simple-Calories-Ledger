@@ -8,7 +8,8 @@ export const DEFAULT: AppState = {
     protein: 150,
     carbs: 90,
     fat: 50,
-    accent: '#9be7c4',
+    accent: '#c9dc86',
+    theme: 'dark',
     trackingMode: 'Cutting',
     energyUnit: 'kcal',
     lastBackupAt: null,
@@ -74,7 +75,8 @@ export function normalizeStateShape(input: unknown): AppState {
   const settings = { ...DEFAULT.settings, ...(raw.settings || {}) } as Settings;
   settings.energyUnit = energyUnitValue(settings.energyUnit);
   settings.backupReminderDays = validBackupReminderDays(settings.backupReminderDays);
-  if (settings.accent === '#efad7c' || settings.accent === '#ccb7f6') settings.accent = '#9be7c4';
+  if (!['system', 'dark', 'light'].includes(settings.theme)) settings.theme = 'dark';
+  if (settings.accent === '#efad7c' || settings.accent === '#ccb7f6') settings.accent = '#c9dc86';
   if (settings.calories === 2000 && settings.protein === 150 && settings.carbs === 200 && settings.fat === 65) {
     settings.calories = 1800;
     settings.carbs = 90;
