@@ -210,7 +210,7 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
     ['journal', 'Journal'],
     ['library', 'Library'],
     ['cards', 'Cards'],
-    ['stats', 'Stats'],
+    ['stats', 'Week'],
     ['settings', 'Settings']
   ];
 
@@ -943,12 +943,12 @@ export function App() {
 }`}</pre>
         </div>
       </Modal>
-      <Modal open={modal === 'bankHelp'} title="Calorie banking" onClose={() => setModal(null)}>
-        <p className="hint">Completed days count toward weekly balance. Open days stay out of the total until you lock them.</p>
-        <div className="help-callout">Cutting rewards calories saved, bulking tracks catch-up or surplus progress, and maintaining tracks distance from your weekly range.</div>
+      <Modal open={modal === 'bankHelp'} title="Weekly calorie bank" onClose={() => setModal(null)}>
+        <p className="hint">Completed days count toward your weekly balance. Open days stay out of the total until you mark them complete.</p>
+        <div className="help-callout">Cutting shows calories saved, bulking shows catch-up or surplus progress, and maintaining shows distance from your weekly range.</div>
       </Modal>
-      <Modal open={modal === 'adherenceHelp'} title="Weekly adherence" onClose={() => setModal(null)}>
-        <p className="hint">Adherence scores only completed days. Cutting succeeds at or under target, bulking succeeds from target to target +300, and maintaining succeeds within +/-150.</p>
+      <Modal open={modal === 'adherenceHelp'} title="Consistency this week" onClose={() => setModal(null)}>
+        <p className="hint">Consistency is based only on completed days. “On track” uses your saved targets for each day. Open days stay open.</p>
       </Modal>
       <Modal open={modal === 'version'} title="Version update available" onClose={() => setModal(null)}>
         <div className="version-badge">Version {availableUpdate?.version || APP_VERSION}</div>
@@ -2096,15 +2096,15 @@ function classifyCalorieDay(total: number, complete: boolean, goal: DailyGoalSna
 }
 
 function statsRuleText(goal: DailyGoalSnapshot, unit: EnergyUnit) {
-  if (goal.trackingMode === 'Bulking') return `Success = completed days from ${energyTextForUnit(goal.calories, unit)} to ${energyTextForUnit(goal.calories + 300, unit)}.`;
-  if (goal.trackingMode === 'Maintaining') return `Success = completed days within ${energyTextForUnit(goal.calories - 150, unit)}-${energyTextForUnit(goal.calories + 150, unit)}.`;
-  return `Success = completed days at or under ${energyTextForUnit(goal.calories, unit)}.`;
+  if (goal.trackingMode === 'Bulking') return `On track = completed days from ${energyTextForUnit(goal.calories, unit)} to ${energyTextForUnit(goal.calories + 300, unit)}.`;
+  if (goal.trackingMode === 'Maintaining') return `On track = completed days within ${energyTextForUnit(goal.calories - 150, unit)}-${energyTextForUnit(goal.calories + 150, unit)}.`;
+  return `On track = completed days at or under ${energyTextForUnit(goal.calories, unit)}.`;
 }
 
-function statusIcon(status: CalorieDayStatus) {
-  if (status === 'good') return '✓';
-  if (status === 'under' || status === 'over') return '✕';
-  return '-';
+function dayToneLabel(status: CalorieDayStatus, complete: boolean) {
+  if (!complete) return { label: 'Open', className: 'open' as const };
+  if (status === 'good') return { label: 'On track', className: 'good' as const };
+  return { label: 'Review', className: 'review' as const };
 }
 
 function signedEnergyText(state: AppState, kcal: number) {
@@ -2145,29 +2145,88 @@ function isGoodWeeklyAverage(rows: { goal: DailyGoalSnapshot; status: CalorieDay
 }
 
 function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, adherenceWeekStart, setAdherenceWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; adherenceWeekStart: string; setAdherenceWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
-  const days = Array.from({ length: 7 }, (_, i) => addDays(selectedDate, i - 6));
-  const rows = days.map(date => ({ date, totals: sum(dayEntries(state, date)), complete: isDayComplete(state, date), goal: goalForDate(state, date) }));
-  const loggedRows = rows.filter(row => row.totals.calories > 0);
-  const completed = rows.filter(row => row.complete);
-  const completedAvgCalories = completed.reduce((acc, row) => acc + row.totals.calories, 0) / (completed.length || 1);
-  const completedAvgProtein = completed.reduce((acc, row) => acc + row.totals.protein, 0) / (completed.length || 1);
-  const completedAvgCalorieGoal = completed.reduce((acc, row) => acc + row.goal.calories, 0) / (completed.length || 1);
-  const completedAvgProteinGoal = completed.reduce((acc, row) => acc + row.goal.protein, 0) / (completed.length || 1);
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(bankingWeekStart, i));
+  const weekRows = weekDays.map(date => {
+    const totals = sum(dayEntries(state, date));
+    const complete = isDayComplete(state, date);
+    const goal = goalForDate(state, date);
+    const delta = complete ? goal.calories - totals.calories : 0;
+    return { date, totals, complete, goal, delta, status: classifyCalorieDay(totals.calories, complete, goal) };
+  });
+  const weekCompleted = weekRows.filter(row => row.complete);
+  const weekCompletedEaten = weekCompleted.reduce((acc, row) => acc + row.totals.calories, 0);
+  const weekCompletedGoal = weekCompleted.reduce((acc, row) => acc + row.goal.calories, 0);
+  const weekCompletedAvgCalories = weekCompletedEaten / (weekCompleted.length || 1);
+  const weekCompletedAvgProtein = weekCompleted.reduce((acc, row) => acc + row.totals.protein, 0) / (weekCompleted.length || 1);
+  const weekCompletedAvgCalorieGoal = weekCompletedGoal / (weekCompleted.length || 1);
+  const weekCompletedAvgProteinGoal = weekCompleted.reduce((acc, row) => acc + row.goal.protein, 0) / (weekCompleted.length || 1);
+  const projectedWeek = weekCompleted.length ? weekCompletedAvgCalories * 7 : 0;
+
+  const last7Days = Array.from({ length: 7 }, (_, i) => addDays(selectedDate, i - 6));
+  const last7Rows = last7Days.map(date => ({ date, totals: sum(dayEntries(state, date)), complete: isDayComplete(state, date), goal: goalForDate(state, date) }));
+  const last7Logged = last7Rows.filter(row => row.totals.calories > 0);
+  const last7Completed = last7Rows.filter(row => row.complete);
   return (
     <>
-      <header className="head"><div className="kicker">Trends</div><h1>Stats</h1></header>
+      <header className="head"><div className="kicker">This week</div><h1>Week</h1></header>
       <RichBanking state={state} start={bankingWeekStart} setStart={setBankingWeekStart} onHelp={onBankHelp} />
-      <RichAdherence state={state} start={adherenceWeekStart} setStart={setAdherenceWeekStart} onHelp={onAdherenceHelp} />
-      <section className="card stats-card">
-        <div className="card-head"><h2>Last 7 days</h2></div>
-        {completed.length ? (
+
+      <section className="card stats-card week-summary-card" aria-label="Week summary">
+        <div className="card-head"><h2>Week summary</h2></div>
+        {weekCompleted.length ? (
           <>
-            <div className="stat"><span>Avg calories (completed)</span><strong>{energyText(state, completedAvgCalories)} / {energyText(state, completedAvgCalorieGoal)}</strong></div>
-            <div className="stat"><span>Avg protein (completed)</span><strong>{fmt(completedAvgProtein)}g / {fmt(completedAvgProteinGoal)}g</strong></div>
-            <div className="stat"><span>Completed days</span><strong>{completed.length} / 7</strong></div>
+            <div className="week-summary-grid" role="list">
+              <div className="week-summary-item" role="listitem">
+                <div className="label">Projected week</div>
+                <div className="value">{energyText(state, projectedWeek)}</div>
+                <div className="note">At your current pace. Open days stay open.</div>
+              </div>
+              <div className="week-summary-item" role="listitem">
+                <div className="label">Completed-day average</div>
+                <div className="value">{energyText(state, weekCompletedAvgCalories)}<span className="unit">/day</span></div>
+                <div className="note">Only days you mark complete are used here.</div>
+              </div>
+              <div className="week-summary-item" role="listitem">
+                <div className="label">Completed days</div>
+                <div className="value">{weekCompleted.length}<span className="unit">/7</span></div>
+                <div className="note">Open days aren’t treated as failed days.</div>
+              </div>
+            </div>
+            <details className="extra-info" style={{ marginTop: 10 }}>
+              <summary>Week details</summary>
+              <div className="extra-info-body">
+                <div>
+                  <div className="section" style={{ marginBottom: 6 }}>Calories</div>
+                  <div className="stat"><span>Avg calories (completed)</span><strong>{energyText(state, weekCompletedAvgCalories)} / {energyText(state, weekCompletedAvgCalorieGoal)}</strong></div>
+                  <div className="stat"><span>Total calories (completed)</span><strong>{energyText(state, weekCompletedEaten)}</strong></div>
+                  <div className="stat"><span>Goal total (completed)</span><strong>{energyText(state, weekCompletedGoal)}</strong></div>
+                </div>
+                <div>
+                  <div className="section" style={{ marginBottom: 6 }}>Protein</div>
+                  <div className="stat"><span>Avg protein (completed)</span><strong>{fmt(weekCompletedAvgProtein)}g / {fmt(weekCompletedAvgProteinGoal)}g</strong></div>
+                </div>
+              </div>
+            </details>
           </>
-        ) : <div className="empty">{loggedRows.length ? 'Lock a day in this window to calculate completed averages.' : 'No logged days in this window yet.'}</div>}
-        <ConsumptionBars state={state} rows={rows.map(row => ({ date: row.date, total: row.totals.calories, complete: row.complete, goal: row.goal }))} />
+        ) : (
+          <div className="empty">
+            <strong>Nothing to average yet.</strong>
+            <div>Mark one day complete this week to see projections and averages. Open days stay open.</div>
+          </div>
+        )}
+      </section>
+
+      <RichAdherence state={state} start={adherenceWeekStart} setStart={setAdherenceWeekStart} onHelp={onAdherenceHelp} />
+
+      <section className="card stats-card">
+        <div className="card-head"><h2>Patterns</h2></div>
+        {last7Completed.length ? (
+          <>
+            <div className="stat"><span>Completed-day average (past 7)</span><strong>{energyText(state, last7Completed.reduce((acc, row) => acc + row.totals.calories, 0) / (last7Completed.length || 1))}</strong></div>
+            <div className="stat"><span>Completed days (past 7)</span><strong>{last7Completed.length} / 7</strong></div>
+          </>
+        ) : <div className="empty">{last7Logged.length ? 'Mark a day complete to see completed-day patterns.' : 'No logged days in this window yet.'}</div>}
+        <ConsumptionBars state={state} rows={last7Rows.map(row => ({ date: row.date, total: row.totals.calories, complete: row.complete, goal: row.goal }))} />
       </section>
     </>
   );
@@ -2271,11 +2330,11 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
   const bankHeroText = bankMode === 'Bulking' && banked > 0 ? energyText(state, bankValue) : signedEnergyText(state, bankValue);
   return (
     <section className="card stats-card">
-      <div className="card-head"><h2>Calories Bank</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
+      <div className="card-head"><h2>Weekly calorie bank</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
       <WeekRangeControl start={start} setStart={setStart} />
       {completed.length ? (
         <>
-          <div className="bank-hero"><div className="label">{bankLabel}</div><div className={`value ${completedBalanceGood ? 'good' : 'warn'}`}>{bankHeroText}</div><div className="bank-note">{completed.length} completed day{completed.length === 1 ? '' : 's'} - Open days do not count yet</div></div>
+          <div className="bank-hero"><div className="label">{bankLabel}</div><div className={`value ${completedBalanceGood ? 'good' : 'warn'}`}>{bankHeroText}</div><div className="bank-note">Based on {completed.length} completed day{completed.length === 1 ? '' : 's'}. Open days don’t count yet.</div></div>
           <div className="stat"><span>Weekly budget</span><strong>{energyText(state, weekBudget)}</strong></div>
           <div className="stat"><span>Eaten from completed days</span><strong>{energyText(state, completedEaten)}</strong></div>
           <div className="stat"><span>Remaining this week</span><strong className={weekBudget - completedEaten >= 0 ? 'good' : 'warn'}>{energyText(state, weekBudget - completedEaten)}</strong></div>
@@ -2303,13 +2362,36 @@ function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; st
   const score = completed.length ? Math.round(success.length / completed.length * 100) : 0;
   const firstGoal = completed[0]?.goal || goalForDate(state, todayKey());
   const oneRule = completed.every(row => row.goal.trackingMode === firstGoal.trackingMode && row.goal.calories === firstGoal.calories);
-  const ruleText = oneRule ? statsRuleText(firstGoal, state.settings.energyUnit) : 'Success = each completed day against its saved goal.';
+  const ruleText = oneRule ? statsRuleText(firstGoal, state.settings.energyUnit) : 'On track = each completed day against its saved goal.';
   return (
     <section className="card stats-card">
-      <div className="card-head"><h2>Weekly adherence</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
+      <div className="card-head"><h2>Consistency this week</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
       <WeekRangeControl start={start} setStart={setStart} />
-      {completed.length ? <div className="adherence-hero"><div className="label">Weekly adherence</div><div className={`score ${score >= 70 ? 'good' : 'warn'}`}>{fmt(score)}%</div><div className="bank-note">{success.length} of {completed.length} completed days on track - {ruleText}</div></div> : <div className="empty">Complete a day in this week to calculate adherence.</div>}
-      <div className="adherence-week">{rows.map(row => <div key={row.date} className={`adh-day ${row.status}`}><div className="adh-label">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3)}</div><div className="adh-icon" aria-label={row.complete ? row.status : 'open'}>{statusIcon(row.status)}</div><div className="adh-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '-'}</div></div>)}</div>
+      {completed.length ? (
+        <div className="adherence-hero">
+          <div className="label">On-track completed days</div>
+          <div className={`score ${score >= 70 ? 'good' : ''}`}>{success.length}<span className="unit">/{completed.length}</span></div>
+          <div className="bank-note">{ruleText} Open days stay open.</div>
+        </div>
+      ) : (
+        <div className="empty">Complete a day in this week to see consistency.</div>
+      )}
+      <div className="consistency-week" aria-label="Consistency by day">
+        {rows.map(row => {
+          const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
+          const tone = dayToneLabel(row.status, row.complete);
+          return (
+            <div key={row.date} className="consistency-day">
+              <div className="consistency-label">{weekday}</div>
+              <div className={`consistency-pill ${tone.className}`} aria-label={tone.label}>
+                <span className="dot" aria-hidden="true" />
+                {tone.label}
+              </div>
+              <div className="consistency-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '—'}</div>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
