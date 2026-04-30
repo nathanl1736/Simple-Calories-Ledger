@@ -63,12 +63,39 @@ export type Food = {
   updatedAt: number;
 };
 
+export type FoodDatabaseRecord = {
+  id: string;
+  name: string;
+  brand?: string;
+  unitMode: 'serving' | '100g';
+  servingLabel?: string;
+  servingGrams?: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  category?: string;
+  tags: string[];
+  searchText: string;
+};
+
+export type CustomFoodDatabase = {
+  id: string;
+  name: string;
+  version: string;
+  importedAt: string;
+  enabled: boolean;
+  itemCount: number;
+  items: FoodDatabaseRecord[];
+};
+
 export type AppState = {
   settings: Settings;
   entries: Entry[];
   foods: Food[];
   completedDates: string[];
   dailyGoals: Record<string, DailyGoalSnapshot>;
+  customFoodDatabases: CustomFoodDatabase[];
 };
 
 export type Totals = {
@@ -84,6 +111,8 @@ export type BackupMeta = {
   foods: number;
   completedDates: number;
   photos: number;
+  customFoodDatabases?: number;
+  customFoodItems?: number;
 };
 
 export type BackupPayload = {

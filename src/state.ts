@@ -1,4 +1,5 @@
 import type { AppState, Entry, Food, Settings } from './types';
+import { normalizeCustomFoodDatabases } from './customFoodDatabases';
 import { energyUnitValue, entryTotals, entryUnitModeValue, goalSnapshotFromSettings, lockPastGoals, n, normalizeDateKey, normalizeGoalSnapshot, portionValue, validBackupReminderDays } from './utils';
 
 export const DEFAULT: AppState = {
@@ -18,7 +19,8 @@ export const DEFAULT: AppState = {
   entries: [],
   foods: [],
   completedDates: [],
-  dailyGoals: {}
+  dailyGoals: {},
+  customFoodDatabases: []
 };
 
 export function normalizeEntry(input: Partial<Entry>): Entry {
@@ -83,7 +85,8 @@ export function normalizeStateShape(input: unknown): AppState {
     entries: Array.isArray(raw.entries) ? raw.entries.map(entry => normalizeEntry(entry)) : [],
     foods: Array.isArray(raw.foods) ? raw.foods.map(food => normalizeFood(food)) : [],
     completedDates: Array.isArray(raw.completedDates) ? raw.completedDates.map(String) : [],
-    dailyGoals: {}
+    dailyGoals: {},
+    customFoodDatabases: normalizeCustomFoodDatabases((raw as { customFoodDatabases?: unknown }).customFoodDatabases)
   };
   const rawDailyGoals = raw.dailyGoals && typeof raw.dailyGoals === 'object' ? raw.dailyGoals : {};
   Object.entries(rawDailyGoals).forEach(([key, value]) => {

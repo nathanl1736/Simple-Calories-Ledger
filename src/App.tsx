@@ -9,6 +9,7 @@ import { backupCounts, exportBackup, parseBackup } from './backup';
 import { applyAppUpdate, checkForAppUpdate, registerServiceWorker, type UpdateInfo } from './pwa';
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
+import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
 import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import {
@@ -50,7 +51,7 @@ import {
 } from './utils';
 
 type Tab = 'tracking' | 'journal' | 'library' | 'cards' | 'stats' | 'settings';
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'customDbHelp' | null;
 type EntryOpenMode = 'manual' | 'prefill' | 'edit';
 type JournalDayViewMode = 'list' | 'collage';
 type JournalLabelMode = 'photo' | 'calories' | 'nameCalories';
@@ -260,6 +261,7 @@ export function App() {
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
   const [aiQuickLogMeal, setAiQuickLogMeal] = useState<Meal>('Snack');
   const importRef = useRef<HTMLInputElement>(null);
+  const customDatabaseImportRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const entryPhotoInputRef = useRef<HTMLInputElement>(null);
 
@@ -430,13 +432,13 @@ export function App() {
 
   const touchFoodAfterLog = (draftState: AppState, entry: Entry) => {
     if (entry.autoNamed) return;
-    const isEstimateDatabaseFood = entryDraft.source === 'foodEstimateDatabase';
+    const isDatabaseFood = entryDraft.source === 'foodEstimateDatabase' || entryDraft.source === 'customFoodDatabase';
     const base = {
       unitMode: entryUnitModeValue(entry.unitMode),
       brand: entryDraft.brand.trim() || undefined,
       servingLabel: entryDraft.servingLabel.trim() || undefined,
       servingGrams: n(entryDraft.servingGrams) || undefined,
-      source: isEstimateDatabaseFood ? undefined : entryDraft.source.trim() || undefined,
+      source: isDatabaseFood ? undefined : entryDraft.source.trim() || undefined,
       sourceId: entryDraft.sourceId.trim() || undefined,
       category: entryDraft.category.trim() || undefined,
       tags: entryDraft.tags.length ? entryDraft.tags : undefined,
@@ -452,7 +454,7 @@ export function App() {
       if (entryDraft.favourite) Object.assign(source, { name: entry.name, ...base, favourite: true, updatedAt: Date.now() });
       return;
     }
-    if (isEstimateDatabaseFood && !entryDraft.favourite) return;
+    if (isDatabaseFood && !entryDraft.favourite) return;
     const existing = draftState.foods.find(food => food.name.toLowerCase().trim() === entry.name.toLowerCase().trim());
     if (existing) {
       existing.usageCount = (existing.usageCount || 0) + 1;
@@ -571,6 +573,38 @@ export function App() {
   const copyAiPrompt = () => navigator.clipboard
     ? navigator.clipboard.writeText(AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
     : (notify('Clipboard is not available'), Promise.resolve());
+  const importCustomFoodDatabase = async (file: File) => {
+    try {
+      const result = parseCustomFoodDatabaseText(await file.text(), file.name);
+      const incoming = result.database;
+      const existing = state.customFoodDatabases.find(database => database.id === incoming.id || database.name.toLowerCase() === incoming.name.toLowerCase());
+      if (existing && !confirm(`Replace "${existing.name}" with "${incoming.name}"?`)) {
+        notify('Custom database import cancelled');
+        return;
+      }
+      await updateState(draft => {
+        draft.customFoodDatabases = [
+          ...draft.customFoodDatabases.filter(database => database.id !== incoming.id && database.name.toLowerCase() !== incoming.name.toLowerCase()),
+          incoming
+        ].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      const skipped = result.skippedCount + result.duplicateCount;
+      notify(`${existing ? 'Replaced' : 'Imported'} ${incoming.name}: ${fmt(incoming.itemCount)} foods${skipped ? `, skipped ${fmt(skipped)}` : ''}`);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not import that food database');
+    }
+  };
+  const setCustomDatabaseEnabled = (id: string, enabled: boolean) => updateState(draft => {
+    const database = draft.customFoodDatabases.find(item => item.id === id);
+    if (database) database.enabled = enabled;
+  }).then(() => notify(enabled ? 'Custom database enabled' : 'Custom database disabled'));
+  const deleteCustomDatabase = (id: string) => {
+    const database = state.customFoodDatabases.find(item => item.id === id);
+    if (!database || !confirm(`Delete "${database.name}" from this browser?`)) return;
+    updateState(draft => {
+      draft.customFoodDatabases = draft.customFoodDatabases.filter(item => item.id !== id);
+    }).then(() => notify('Custom database deleted'));
+  };
 
   if (!loaded) {
     return <main className="app loading"><h1>Nathan&apos;s Calories Ledger</h1><p className="hint">Loading your local tracker...</p></main>;
@@ -710,6 +744,10 @@ export function App() {
           onRefreshFoodDatabase={() => refreshFoodEstimateDatabase()
             .then(result => notify(`Loaded ${fmt(result.validCount)} food estimates`))
             .catch(() => notify('Could not update local food estimates'))}
+          onImportCustomDatabase={() => customDatabaseImportRef.current?.click()}
+          onToggleCustomDatabase={setCustomDatabaseEnabled}
+          onDeleteCustomDatabase={deleteCustomDatabase}
+          onCustomDatabaseHelp={() => setModal('customDbHelp')}
           onCopyAiPrompt={copyAiPrompt}
           onAiPromptHelp={() => setModal('aiQuickLogHelp')}
           onExport={() => exportBackup(state).then(next => persist(next)).then(() => notify('Backup exported')).catch(err => err?.name !== 'AbortError' && notify('Could not export backup'))}
@@ -735,6 +773,13 @@ export function App() {
           return persist(next).then(() => notify(`Backup imported: ${counts.entries} entries`));
         }).catch(err => alert(err.message)).finally(() => {
           if (importRef.current) importRef.current.value = '';
+        });
+      }} />
+      <input ref={customDatabaseImportRef} hidden type="file" accept="application/json" onChange={event => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        importCustomFoodDatabase(file).finally(() => {
+          if (customDatabaseImportRef.current) customDatabaseImportRef.current.value = '';
         });
       }} />
       <input ref={photoInputRef} hidden type="file" accept="image/*" onChange={event => {
@@ -828,6 +873,35 @@ export function App() {
           <li>Tap AI Quick Log in the tracker.</li>
           <li>Paste, review the Log Food form, then save normally.</li>
         </ol>
+      </Modal>
+      <Modal open={modal === 'customDbHelp'} title="Custom Food Database Help" onClose={() => setModal(null)}>
+        <div className="custom-db-help">
+          <ol className="update-list ai-help-list">
+            <li>Create a JSON file on your device.</li>
+            <li>Add foods using the supported fields.</li>
+            <li>Import it from Settings.</li>
+            <li>Enabled databases will appear in Quick Picks search.</li>
+            <li>You can disable or delete databases anytime.</li>
+          </ol>
+          <pre className="json-example">{`{
+  "id": "my_custom_database",
+  "name": "My Custom Foods",
+  "version": "1.0.0",
+  "items": [
+    {
+      "id": "sample_food",
+      "name": "Sample Food",
+      "unitMode": "serving",
+      "servingLabel": "1 serving",
+      "calories": 100,
+      "protein": 10,
+      "carbs": 10,
+      "fat": 2,
+      "tags": ["sample"]
+    }
+  ]
+}`}</pre>
+        </div>
       </Modal>
       <Modal open={modal === 'bankHelp'} title="Calorie banking" onClose={() => setModal(null)}>
         <p className="hint">Completed days count toward weekly balance. Open days stay out of the total until you lock them.</p>
@@ -1123,7 +1197,8 @@ function rankDatabaseFoods(items: FoodDatabaseItem[], query: string, foods: Food
     .map(item => item.item);
 }
 
-function databaseSourceChip(tags: string[] = []) {
+function databaseSourceChip(tags: string[] = [], sourceKind?: FoodDatabaseItem['sourceKind']) {
+  if (sourceKind === 'custom') return 'Custom';
   const tagSet = new Set(tags.map(tag => tag.toLowerCase()));
   if (tagSet.has('verified-sample')) return 'Verified sample';
   if (tagSet.has('label-sample')) return 'Label sample';
@@ -1145,9 +1220,9 @@ function databaseServingText(item: FoodDatabaseItem | Food) {
   return item.servingLabel || (item.servingGrams ? `${fmtGram(item.servingGrams)}g` : 'per serving');
 }
 
-function QuickFoodResultRow({ state, food, databaseSuggestion = false, sourceChip = '', onChoose }: { state: AppState; food: Food; databaseSuggestion?: boolean; sourceChip?: string; onChoose: (food: Food) => void }) {
+function QuickFoodResultRow({ state, food, databaseSuggestion = false, sourceChip = '', sourceName = '', onChoose }: { state: AppState; food: Food; databaseSuggestion?: boolean; sourceChip?: string; sourceName?: string; onChoose: (food: Food) => void }) {
   const meta = databaseSuggestion
-    ? [food.brand || 'Generic', databaseServingText(food), food.category].filter(Boolean).join(' · ')
+    ? [food.brand || 'Generic', databaseServingText(food), food.category, sourceName].filter(Boolean).join(' · ')
     : [food.brand, food.servingLabel, foodUnitText(food), food.category].filter(Boolean).join(' · ');
   return (
     <button className={`quick-food-result ${databaseSuggestion ? 'database' : 'user-food'}`} type="button" onClick={() => onChoose(food)}>
@@ -1202,8 +1277,10 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
     loadFoodDatabaseWithStatus()
       .then(result => {
         if (cancelled) return;
-        setDatabaseMatches(rankDatabaseFoods(result.items, trimmedDatabaseQuery, foods));
-        setDatabaseMessage(result.message || (!result.items.length ? 'Food estimate database is not available right now.' : ''));
+        const customItems = flattenEnabledCustomDatabaseItems(state.customFoodDatabases);
+        const matches = rankDatabaseFoods([...result.items, ...customItems], trimmedDatabaseQuery, foods);
+        setDatabaseMatches(matches);
+        setDatabaseMessage(result.message && !customItems.length ? result.message : (!result.items.length && !customItems.length ? 'Food estimate database is not available right now.' : ''));
       })
       .catch(() => {
         if (!cancelled) {
@@ -1214,7 +1291,7 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
     return () => {
       cancelled = true;
     };
-  }, [foods, trimmedDatabaseQuery]);
+  }, [foods, state.customFoodDatabases, trimmedDatabaseQuery]);
 
   const choose = (food: Food) => {
     setDatabaseOpen(false);
@@ -1242,7 +1319,7 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
   );
   const dbRows = (items: FoodDatabaseItem[]) => items.map(item => {
     const food = databaseItemToFood(item);
-    return <QuickFoodResultRow key={item.id} state={state} food={food} sourceChip={databaseSourceChip(item.tags)} databaseSuggestion onChoose={() => previewDatabase(item)} />;
+    return <QuickFoodResultRow key={item.id} state={state} food={food} sourceChip={databaseSourceChip(item.tags, item.sourceKind)} sourceName={item.customDatabaseName} databaseSuggestion onChoose={() => previewDatabase(item)} />;
   });
   const browsePanels = (
     <>
@@ -1299,13 +1376,13 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
 
 function FoodDatabasePreviewModal({ state, item, onUse, onSave, onClose }: { state: AppState; item: FoodDatabaseItem | null; onUse: (item: FoodDatabaseItem) => void; onSave: (item: FoodDatabaseItem) => Promise<void> | void; onClose: () => void }) {
   if (!item) return null;
-  const chip = databaseSourceChip(item.tags);
+  const chip = databaseSourceChip(item.tags, item.sourceKind);
   return (
     <Modal open title="Food estimate" onClose={onClose}>
       <div className="database-preview">
         <div>
           <h3>{item.name}</h3>
-          <p className="hint">{[item.brand, item.category].filter(Boolean).join(' · ') || item.category || 'Generic food estimate'}</p>
+          <p className="hint">{[item.brand, item.category, item.customDatabaseName].filter(Boolean).join(' · ') || item.category || 'Generic food estimate'}</p>
         </div>
         <div className="meta-chips">
           {chip && <span className="meta-chip source-chip">{chip}</span>}
@@ -2157,6 +2234,10 @@ function SettingsView(props: {
   onEnergyUnit: (unit: 'kcal' | 'kj') => void;
   onBackupDays: (days: number) => void;
   onRefreshFoodDatabase: () => Promise<void>;
+  onImportCustomDatabase: () => void;
+  onToggleCustomDatabase: (id: string, enabled: boolean) => Promise<void>;
+  onDeleteCustomDatabase: (id: string) => void;
+  onCustomDatabaseHelp: () => void;
   onCopyAiPrompt: () => Promise<void>;
   onAiPromptHelp: () => void;
   onExport: () => void;
@@ -2177,8 +2258,9 @@ function SettingsView(props: {
       <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#9be7c4', '#a8d8ff', '#f5dd9d', '#ffb3ba', '#d8c3ff'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes the built-in estimated food database from this app&apos;s files. This will not change your saved foods or food logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
+      <section className="card custom-db-card"><div className="card-head"><h2>Custom Food Databases</h2><button className="help-btn" type="button" onClick={props.onCustomDatabaseHelp}>?</button></div><p className="hint">Import your own food database JSON. Enabled databases appear in food search.</p><div className="actions"><button className="primary" type="button" onClick={props.onImportCustomDatabase}>Import JSON</button></div>{props.state.customFoodDatabases.length ? <div className="custom-db-list">{props.state.customFoodDatabases.map(database => <div className="custom-db-row" key={database.id}><div className="custom-db-main"><strong>{database.name}</strong><span>{fmt(database.itemCount)} foods · Imported {new Date(database.importedAt).toLocaleDateString()} · {database.enabled ? 'Enabled' : 'Disabled'}</span></div><label className="toggle-line"><input type="checkbox" checked={database.enabled} onChange={event => props.onToggleCustomDatabase(database.id, event.target.checked)} /><span>{database.enabled ? 'On' : 'Off'}</span></label><button className="small-btn danger" type="button" onClick={() => props.onDeleteCustomDatabase(database.id)}>Delete</button></div>)}</div> : <div className="empty custom-db-empty">No custom databases imported yet.</div>}</section>
       <section className="card ai-prompt-card"><div className="card-head"><h2>AI Quick Log Prompt</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Copy this prompt into ChatGPT, Gemini, Claude, or another AI chatbot. Then enter your ingredients and paste the result into AI Quick Log.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div></section>
-      <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup exported: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}` : 'No backup exported yet.'} Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
+      <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup exported: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}` : 'No backup exported yet.'} Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos, {counts.customFoodDatabases || 0} custom databases.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
       <section className="card"><h2>App</h2><p className="hint"><strong>Nathan&apos;s Calories Ledger</strong><br />Version {APP_VERSION}<br /><span className="project-note">A project by Nathan.</span></p><div className="actions"><button className="secondary" type="button" onClick={props.onCheckUpdates}>Check for updates</button><button className="secondary danger" type="button" onClick={props.onClear}>Clear local data</button></div></section>
     </>
   );

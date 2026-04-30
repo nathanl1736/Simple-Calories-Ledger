@@ -1,20 +1,10 @@
-import type { Food } from './types';
+import type { Food, FoodDatabaseRecord } from './types';
 import { readValue, saveValue } from './storage';
 
-export type FoodDatabaseItem = {
-  id: string;
-  name: string;
-  brand?: string;
-  unitMode: 'serving' | '100g';
-  servingLabel?: string;
-  servingGrams?: number;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  category?: string;
-  tags: string[];
-  searchText: string;
+export type FoodDatabaseItem = FoodDatabaseRecord & {
+  sourceKind?: 'builtin' | 'custom';
+  customDatabaseId?: string;
+  customDatabaseName?: string;
 };
 
 export type FoodDatabaseSource = {
@@ -228,7 +218,7 @@ export function databaseItemToFood(item: FoodDatabaseItem): Food {
     unitMode: item.unitMode,
     servingLabel: item.servingLabel,
     servingGrams: item.servingGrams,
-    source: 'foodEstimateDatabase',
+    source: item.sourceKind === 'custom' ? 'customFoodDatabase' : 'foodEstimateDatabase',
     sourceId: item.id,
     category: item.category,
     tags: item.tags,

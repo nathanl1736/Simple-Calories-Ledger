@@ -1,5 +1,6 @@
 import { APP_VERSION } from './version';
 import type { AppState, BackupPayload } from './types';
+import { customFoodItemCount } from './customFoodDatabases';
 import { downloadBlob } from './image';
 import { normalizeStateShape } from './state';
 import { toKey, validBackupReminderDays } from './utils';
@@ -9,7 +10,9 @@ export function backupCounts(state: AppState) {
     entries: state.entries.length,
     foods: state.foods.length,
     completedDates: state.completedDates.length,
-    photos: state.entries.filter(entry => !!entry.photo).length
+    photos: state.entries.filter(entry => !!entry.photo).length,
+    customFoodDatabases: state.customFoodDatabases.length,
+    customFoodItems: customFoodItemCount(state.customFoodDatabases)
   };
 }
 

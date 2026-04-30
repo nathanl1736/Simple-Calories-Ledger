@@ -1,9 +1,10 @@
 {
-  "version": "2.0.0.18",
+  "version": "2.0.0.19",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the public version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Hid the bottom navigation while typing in food and settings fields.",
-    "Kept the navigation clear of the mobile keyboard and active inputs.",
-    "Restored the bottom navigation automatically after input focus ends."
+    "Added custom food database JSON imports.",
+    "Added Settings management for custom databases.",
+    "Enabled custom database foods in Quick Picks/search.",
+    "Included custom databases in backup/restore."
   ]
 }
