@@ -10,6 +10,7 @@ import { applyAppUpdate, checkForAppUpdate, registerServiceWorker, type UpdateIn
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
+import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import {
   addDays,
   dayEntries,
@@ -49,7 +50,7 @@ import {
 } from './utils';
 
 type Tab = 'tracking' | 'journal' | 'library' | 'cards' | 'stats' | 'settings';
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | null;
 type EntryOpenMode = 'manual' | 'prefill' | 'edit';
 type JournalDayViewMode = 'list' | 'collage';
 type JournalLabelMode = 'photo' | 'calories' | 'nameCalories';
@@ -235,6 +236,7 @@ export function App() {
   const [goalsEditing, setGoalsEditing] = useState(false);
   const [goalDraft, setGoalDraft] = useState<Settings>(DEFAULT.settings);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
+  const [aiQuickLogMeal, setAiQuickLogMeal] = useState<Meal>('Snack');
   const importRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const entryPhotoInputRef = useRef<HTMLInputElement>(null);
@@ -330,6 +332,12 @@ export function App() {
     const caloriesInput = document.getElementById('entryCalories') as HTMLInputElement | null;
     caloriesInput?.focus({ preventScroll: true });
     caloriesInput?.select();
+  };
+
+  const openAiQuickLog = (meal: Meal = 'Snack') => {
+    if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
+    setAiQuickLogMeal(meal);
+    setModal('aiQuickLog');
   };
 
   const editEntry = (entry: Entry) => {
@@ -486,6 +494,25 @@ export function App() {
     setModal('entry');
   };
 
+  const prefillAiQuickLog = (entry: AiQuickLogEntry) => {
+    const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
+    flushSync(() => {
+      setEntryDraft({
+        ...blankEntryDraft(entry.meal, entryEnergyUnit),
+        name: entry.name,
+        servingLabel: entry.amount,
+        calories: draftEnergyText(entry.calories, entryEnergyUnit),
+        protein: draftNumberText(entry.protein),
+        carbs: draftNumberText(entry.carbs),
+        fat: draftNumberText(entry.fat),
+        portion: amountPortionValue(entry.amount),
+        notes: entry.notes
+      });
+      setEntryOpenMode('prefill');
+      setModal('entry');
+    });
+  };
+
   const saveDatabaseFood = async (item: FoodDatabaseItem) => {
     let added = false;
     await updateState(draft => {
@@ -550,6 +577,7 @@ export function App() {
           onToggleComplete={() => updateState(draft => setDayComplete(draft, selectedDate, !complete)).then(() => notify(complete ? 'Day reopened' : 'Day completed'))}
           onPrefillFood={prefillFood}
           onSaveDatabaseFood={saveDatabaseFood}
+          onOpenAiQuickLog={openAiQuickLog}
         />
       )}
       {tab === 'journal' && (
@@ -647,6 +675,10 @@ export function App() {
           onRefreshFoodDatabase={() => refreshFoodEstimateDatabase()
             .then(result => notify(`Loaded ${fmt(result.validCount)} food estimates`))
             .catch(() => notify('Could not update local food estimates'))}
+          onCopyAiPrompt={() => navigator.clipboard
+            ? navigator.clipboard.writeText(AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
+            : (notify('Clipboard is not available'), Promise.resolve())}
+          onAiPromptHelp={() => setModal('aiQuickLogHelp')}
           onExport={() => exportBackup(state).then(next => persist(next)).then(() => notify('Backup exported')).catch(err => err?.name !== 'AbortError' && notify('Could not export backup'))}
           onImport={() => importRef.current?.click()}
           onCheckUpdates={() => checkForAppUpdate(update => {
@@ -748,6 +780,22 @@ export function App() {
       <Modal open={modal === 'photo'} title="Meal photo" onClose={() => setModal(null)} wide>
         <div className="photo-preview-shell">{photoPreview ? <img className="photo-preview-large" src={photoPreview} alt="Meal" /> : <div className="empty">No photo available.</div>}</div>
       </Modal>
+      <AiQuickLogModal
+        open={modal === 'aiQuickLog'}
+        fallbackMeal={aiQuickLogMeal}
+        onClose={() => setModal(null)}
+        onParsed={prefillAiQuickLog}
+      />
+      <Modal open={modal === 'aiQuickLogHelp'} title="AI Quick Log Help" onClose={() => setModal(null)}>
+        <ol className="update-list ai-help-list">
+          <li>Copy the prompt.</li>
+          <li>Paste it into your AI chatbot.</li>
+          <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
+          <li>Copy the returned JSON.</li>
+          <li>Tap AI Quick Log in the tracker.</li>
+          <li>Paste, review the Log Food form, then save normally.</li>
+        </ol>
+      </Modal>
       <Modal open={modal === 'bankHelp'} title="Calorie banking" onClose={() => setModal(null)}>
         <p className="hint">Completed days count toward weekly balance. Open days stay out of the total until you lock them.</p>
         <div className="help-callout">Cutting rewards calories saved, bulking tracks catch-up or surplus progress, and maintaining tracks distance from your weekly range.</div>
@@ -797,6 +845,7 @@ function TrackingView(props: {
   onToggleComplete: () => void;
   onPrefillFood: (food: Food) => void;
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
+  onOpenAiQuickLog: (meal?: Meal) => void;
 }) {
   const dayGoal = goalForDate(props.state, props.selectedDate);
   const goal = dayGoal.calories || 1;
@@ -826,6 +875,7 @@ function TrackingView(props: {
         <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} onSaveDatabaseFood={props.onSaveDatabaseFood} compact browseToggle />
       )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
+      {!props.complete && <button className="ai-quick-log-btn" type="button" onClick={() => props.onOpenAiQuickLog()}>AI Quick Log</button>}
       <section className="card">
         <div className="card-head">
           <h2>Food log</h2>
@@ -1235,6 +1285,69 @@ function FoodDatabasePreviewModal({ state, item, onUse, onSave, onClose }: { sta
           <button className="secondary" type="button" onClick={() => onSave(item)}>Add to My Foods</button>
           <button className="secondary" type="button" onClick={onClose}>Cancel</button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: boolean; fallbackMeal: Meal; onClose: () => void; onParsed: (entry: AiQuickLogEntry) => void }) {
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setText('');
+      setError('');
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setError('');
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const parsed = parseAiQuickLog(trimmed, fallbackMeal);
+      if (parsed) {
+        onParsed(parsed);
+      } else if (trimmed.length > 12) {
+        setError('Couldn\u2019t read that format. Check the prompt output and try again.');
+      }
+    }, 550);
+    return () => window.clearTimeout(timer);
+  }, [fallbackMeal, onParsed, open, text]);
+
+  const pasteFromClipboard = async () => {
+    if (!navigator.clipboard?.readText) {
+      setError('Clipboard paste is not available here. Paste manually instead.');
+      return;
+    }
+    try {
+      const next = await navigator.clipboard.readText();
+      setText(next);
+      const parsed = parseAiQuickLog(next, fallbackMeal);
+      if (parsed) onParsed(parsed);
+      else setError('Couldn\u2019t read that format. Check the prompt output and try again.');
+    } catch {
+      setError('Could not read from clipboard. Paste manually instead.');
+    }
+  };
+
+  return (
+    <Modal open={open} title="AI Quick Log" onClose={onClose}>
+      <div className="ai-quick-log-modal">
+        <p className="hint">Paste an AI-generated quick log. If the format is correct, it will fill the Log Food form for you.</p>
+        <div className="help-callout">AI estimates can be wrong. Review before saving.</div>
+        <div className="actions">
+          <button className="secondary" type="button" onClick={pasteFromClipboard}>Paste from clipboard</button>
+          <button className="secondary" type="button" onClick={() => { setText(''); setError(''); }}>Clear</button>
+        </div>
+        <Field label="Quick log JSON" full>
+          <textarea className="ai-quick-log-textarea" value={text} onChange={event => setText(event.target.value)} placeholder='{"name":"Beef mince bowl","amount":"1 bowl","meal":"Dinner","calories":520,"protein":45,"carbs":18,"fat":28,"notes":"Ingredients and estimate notes"}' />
+        </Field>
+        {error && <p className="ai-quick-log-error">{error}</p>}
       </div>
     </Modal>
   );
@@ -1983,6 +2096,8 @@ function SettingsView(props: {
   onEnergyUnit: (unit: 'kcal' | 'kj') => void;
   onBackupDays: (days: number) => void;
   onRefreshFoodDatabase: () => Promise<void>;
+  onCopyAiPrompt: () => Promise<void>;
+  onAiPromptHelp: () => void;
   onExport: () => void;
   onImport: () => void;
   onCheckUpdates: () => void;
@@ -2001,6 +2116,7 @@ function SettingsView(props: {
       <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#9be7c4', '#a8d8ff', '#f5dd9d', '#ffb3ba', '#d8c3ff'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes the built-in estimated food database from this app&apos;s files. This will not change your saved foods or food logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
+      <section className="card ai-prompt-card"><div className="card-head"><h2>AI Quick Log Prompt</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Copy this prompt into ChatGPT, Gemini, Claude, or another AI chatbot. Then enter your ingredients and paste the result into AI Quick Log.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div></section>
       <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup exported: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}` : 'No backup exported yet.'} Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
       <section className="card"><h2>App</h2><p className="hint"><strong>Nathan&apos;s Calories Ledger</strong><br />Version {APP_VERSION}<br /><span className="project-note">A project by Nathan.</span></p><div className="actions"><button className="secondary" type="button" onClick={props.onCheckUpdates}>Check for updates</button><button className="secondary danger" type="button" onClick={props.onClear}>Clear local data</button></div></section>
     </>
