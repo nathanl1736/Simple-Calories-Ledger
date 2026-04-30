@@ -1,9 +1,9 @@
 {
-  "version": "2.0.0.16",
+  "version": "2.0.0.17",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the public version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Improved AI Quick Log JSON paste parsing reliability.",
-    "Cleared stale AI Quick Log errors when valid JSON is pasted.",
-    "Kept AI Quick Log entries in the normal review-before-save flow."
+    "Added Tracking-page access to copy the AI Quick Log prompt.",
+    "Updated the AI prompt to support product photos and nutrition labels.",
+    "Made the Track tab scroll back to the top."
   ]
 }

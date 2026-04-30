@@ -296,7 +296,16 @@ export function App() {
   }, [loaded, modal]);
 
   const setTab = (next: Tab) => {
-    if (next === 'tracking') setSelectedDate(todayKey());
+    if (next === 'tracking') {
+      setSelectedDate(todayKey());
+      requestAnimationFrame(() => {
+        try {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch {
+          window.scrollTo(0, 0);
+        }
+      });
+    }
     if (next === 'journal' && tab === 'journal') {
       setJournalDay(null);
       setJournalMonth(new Date());
@@ -537,6 +546,9 @@ export function App() {
   const activeFood = state.foods.find(food => food.id === activeFoodId) || null;
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
   const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 3);
+  const copyAiPrompt = () => navigator.clipboard
+    ? navigator.clipboard.writeText(AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
+    : (notify('Clipboard is not available'), Promise.resolve());
 
   if (!loaded) {
     return <main className="app loading"><h1>Nathan&apos;s Calories Ledger</h1><p className="hint">Loading your local tracker...</p></main>;
@@ -578,6 +590,7 @@ export function App() {
           onPrefillFood={prefillFood}
           onSaveDatabaseFood={saveDatabaseFood}
           onOpenAiQuickLog={openAiQuickLog}
+          onCopyAiPrompt={copyAiPrompt}
         />
       )}
       {tab === 'journal' && (
@@ -675,9 +688,7 @@ export function App() {
           onRefreshFoodDatabase={() => refreshFoodEstimateDatabase()
             .then(result => notify(`Loaded ${fmt(result.validCount)} food estimates`))
             .catch(() => notify('Could not update local food estimates'))}
-          onCopyAiPrompt={() => navigator.clipboard
-            ? navigator.clipboard.writeText(AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
-            : (notify('Clipboard is not available'), Promise.resolve())}
+          onCopyAiPrompt={copyAiPrompt}
           onAiPromptHelp={() => setModal('aiQuickLogHelp')}
           onExport={() => exportBackup(state).then(next => persist(next)).then(() => notify('Backup exported')).catch(err => err?.name !== 'AbortError' && notify('Could not export backup'))}
           onImport={() => importRef.current?.click()}
@@ -846,6 +857,7 @@ function TrackingView(props: {
   onPrefillFood: (food: Food) => void;
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   onOpenAiQuickLog: (meal?: Meal) => void;
+  onCopyAiPrompt: () => Promise<void>;
 }) {
   const dayGoal = goalForDate(props.state, props.selectedDate);
   const goal = dayGoal.calories || 1;
@@ -875,7 +887,12 @@ function TrackingView(props: {
         <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} onSaveDatabaseFood={props.onSaveDatabaseFood} compact browseToggle />
       )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
-      {!props.complete && <button className="ai-quick-log-btn" type="button" onClick={() => props.onOpenAiQuickLog()}>AI Quick Log</button>}
+      {!props.complete && (
+        <div className="tracking-ai-actions">
+          <button className="ai-quick-log-btn" type="button" onClick={() => props.onOpenAiQuickLog()}>AI Quick Log</button>
+          <button className="secondary ai-copy-prompt-btn" type="button" onClick={() => props.onCopyAiPrompt()}>Copy prompt</button>
+        </div>
+      )}
       <section className="card">
         <div className="card-head">
           <h2>Food log</h2>

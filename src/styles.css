@@ -112,7 +112,9 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
 .macro .num span { color: #888; font-size: 13px; font-weight: 650; }
 
 .log-btn, .complete-day-btn { width: 100%; min-height: 62px; border-radius: 18px; background: var(--accent); color: #151515; font-weight: 950; font-size: 18px; margin-bottom: 22px; }
-.ai-quick-log-btn { width: 100%; min-height: 52px; border-radius: var(--radius-control); background: #2b2b2b; color: #eee; font-size: var(--type-button); font-weight: var(--weight-strong); margin: -10px 0 22px; }
+.tracking-ai-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: stretch; margin: -10px 0 22px; }
+.ai-quick-log-btn { width: 100%; min-height: 52px; border-radius: var(--radius-control); background: #2b2b2b; color: #eee; font-size: var(--type-button); font-weight: var(--weight-strong); }
+.ai-copy-prompt-btn { min-height: 52px; padding: 0 12px; white-space: nowrap; font-size: 13px; }
 .quick-picks { padding: 0; overflow: hidden; margin-bottom: 12px; }
 .quick-picks[open] { padding-bottom: 12px; }
 .quick-picks-summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: var(--gap-row); min-height: 54px; padding: 13px var(--space-card); border-radius: var(--radius-card); background: var(--card); }

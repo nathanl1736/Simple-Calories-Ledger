@@ -14,7 +14,7 @@ export type AiQuickLogEntry = {
 
 export const AI_QUICK_LOG_PROMPT = `You are helping me estimate a meal for my calorie tracker.
 
-I will tell you the ingredients, amounts, sauces, oils, and cooking method.
+I will tell you the ingredients, amounts, sauces, oils, cooking method, meal details, or show you a product photo or nutrition label.
 
 Estimate the meal as one combined food log entry.
 
@@ -35,6 +35,7 @@ Use this exact JSON shape:
 
 Rules:
 - Create only one combined entry.
+- If I provide a product photo or nutrition label, identify the product and use the visible label details where possible.
 - Use kcal for calories.
 - Use grams for protein, carbs, and fat.
 - Use numbers only for calories, protein, carbs, and fat.
