@@ -1,7 +1,7 @@
 {
-  "name": "Nathan's Calories Ledger",
-  "short_name": "Calories",
-  "description": "A simple local-first calorie tracker by Nathan for quick food logging, daily journaling, and personal progress tracking.",
+  "name": "Dawni",
+  "short_name": "Dawni",
+  "description": "Weekly Calorie Tracker. A calm weekly calorie tracker and food journal for sustainable consistency.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
