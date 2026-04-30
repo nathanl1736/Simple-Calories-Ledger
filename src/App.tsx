@@ -1293,13 +1293,35 @@ function FoodDatabasePreviewModal({ state, item, onUse, onSave, onClose }: { sta
 function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: boolean; fallbackMeal: Meal; onClose: () => void; onParsed: (entry: AiQuickLogEntry) => void }) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
+  const parsedRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
       setText('');
       setError('');
     }
+    parsedRef.current = false;
   }, [open]);
+
+  const tryParse = (value: string, showError: boolean) => {
+    if (parsedRef.current) return true;
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setError('');
+      return false;
+    }
+    const parsed = parseAiQuickLog(trimmed, fallbackMeal);
+    if (parsed) {
+      parsedRef.current = true;
+      setError('');
+      onParsed(parsed);
+      return true;
+    }
+    if (showError && trimmed.length > 12) {
+      setError('Couldn\u2019t read that format. Check the prompt output and try again.');
+    }
+    return false;
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -1309,15 +1331,16 @@ function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: bool
       return;
     }
     const timer = window.setTimeout(() => {
-      const parsed = parseAiQuickLog(trimmed, fallbackMeal);
-      if (parsed) {
-        onParsed(parsed);
-      } else if (trimmed.length > 12) {
-        setError('Couldn\u2019t read that format. Check the prompt output and try again.');
-      }
+      tryParse(trimmed, true);
     }, 550);
     return () => window.clearTimeout(timer);
-  }, [fallbackMeal, onParsed, open, text]);
+  }, [open, text]);
+
+  const updateText = (next: string) => {
+    setText(next);
+    setError('');
+    tryParse(next, false);
+  };
 
   const pasteFromClipboard = async () => {
     if (!navigator.clipboard?.readText) {
@@ -1327,9 +1350,8 @@ function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: bool
     try {
       const next = await navigator.clipboard.readText();
       setText(next);
-      const parsed = parseAiQuickLog(next, fallbackMeal);
-      if (parsed) onParsed(parsed);
-      else setError('Couldn\u2019t read that format. Check the prompt output and try again.');
+      setError('');
+      tryParse(next, true);
     } catch {
       setError('Could not read from clipboard. Paste manually instead.');
     }
@@ -1345,7 +1367,7 @@ function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: bool
           <button className="secondary" type="button" onClick={() => { setText(''); setError(''); }}>Clear</button>
         </div>
         <Field label="Quick log JSON" full>
-          <textarea className="ai-quick-log-textarea" value={text} onChange={event => setText(event.target.value)} placeholder='{"name":"Beef mince bowl","amount":"1 bowl","meal":"Dinner","calories":520,"protein":45,"carbs":18,"fat":28,"notes":"Ingredients and estimate notes"}' />
+          <textarea className="ai-quick-log-textarea" value={text} onChange={event => updateText(event.target.value)} placeholder='{"name":"Beef mince bowl","amount":"1 bowl","meal":"Dinner","calories":520,"protein":45,"carbs":18,"fat":28,"notes":"Ingredients and estimate notes"}' />
         </Field>
         {error && <p className="ai-quick-log-error">{error}</p>}
       </div>

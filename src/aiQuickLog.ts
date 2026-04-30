@@ -47,8 +47,15 @@ Rules:
 
 const mealValues = new Set<string>(MEALS);
 
+function cleanInput(value: string) {
+  return value
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u200B-\u200D\u2060]/g, '')
+    .trim();
+}
+
 function stripCodeFence(value: string) {
-  const trimmed = value.trim();
+  const trimmed = cleanInput(value);
   const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   return (match ? match[1] : trimmed).trim();
 }
@@ -78,6 +85,22 @@ function extractJsonObject(value: string) {
   return source;
 }
 
+function repairJsonText(value: string) {
+  return value
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/,\s*([}\]])/g, '$1');
+}
+
+function parseJsonObject(value: string) {
+  const jsonText = extractJsonObject(value);
+  try {
+    return JSON.parse(jsonText) as unknown;
+  } catch {
+    return JSON.parse(repairJsonText(jsonText)) as unknown;
+  }
+}
+
 function numberValue(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -99,19 +122,22 @@ function mealValue(value: unknown, fallbackMeal: Meal): Meal {
 
 export function parseAiQuickLog(text: string, fallbackMeal: Meal = 'Snack'): AiQuickLogEntry | null {
   try {
-    const parsed = JSON.parse(extractJsonObject(text)) as Record<string, unknown>;
+    const parsed = parseJsonObject(text) as Record<string, unknown>;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const name = stringValue(parsed.name);
     const calories = numberValue(parsed.calories);
     if (!name || !Number.isFinite(calories)) return null;
+    const protein = numberValue(parsed.protein);
+    const carbs = numberValue(parsed.carbs);
+    const fat = numberValue(parsed.fat);
     return {
       name,
       amount: stringValue(parsed.amount) || '1 serve',
       meal: mealValue(parsed.meal, fallbackMeal),
       calories,
-      protein: Number.isFinite(numberValue(parsed.protein)) ? numberValue(parsed.protein) : 0,
-      carbs: Number.isFinite(numberValue(parsed.carbs)) ? numberValue(parsed.carbs) : 0,
-      fat: Number.isFinite(numberValue(parsed.fat)) ? numberValue(parsed.fat) : 0,
+      protein: Number.isFinite(protein) ? protein : 0,
+      carbs: Number.isFinite(carbs) ? carbs : 0,
+      fat: Number.isFinite(fat) ? fat : 0,
       notes: stringValue(parsed.notes)
     };
   } catch {

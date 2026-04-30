@@ -1,9 +1,9 @@
 {
-  "version": "2.0.0.15",
+  "version": "2.0.0.16",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Added AI Quick Log for pasting JSON meal estimates into Log Food.",
-    "Added a Settings prompt and help guide for external AI chatbots.",
-    "Kept AI Quick Log local-only with normal review before saving."
+    "Improved AI Quick Log JSON paste parsing reliability.",
+    "Cleared stale AI Quick Log errors when valid JSON is pasted.",
+    "Kept AI Quick Log entries in the normal review-before-save flow."
   ]
 }
