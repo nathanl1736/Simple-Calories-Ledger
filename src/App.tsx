@@ -999,9 +999,9 @@ function TrackingView(props: {
   const remainingLabel = dayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
   return (
     <>
-      <header className="head">
-        <div className="kicker brand-kicker">Dawni</div>
-        <h1>Today in your week</h1>
+      <header className="page-header">
+        <div className="page-kicker">Dawni</div>
+        <h1 className="page-title">Today in your week</h1>
       </header>
       <DayNav value={props.selectedDate} onChange={props.setSelectedDate} />
       <section className="hero today-card">
@@ -1771,20 +1771,22 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
         : { title: 'Nothing here yet.', body: 'Your usual foods will appear here as you reuse them.' };
   return (
     <>
-      <header className="head">
-        <div className="kicker">Reuse</div>
-        <h1>Your usual foods</h1>
-        <p className="hint library-hint">Reuse favourites, recent meals, and saved foods in a tap. The more you log, the faster Dawni gets.</p>
+      <header className="page-header has-helper">
+        <div className="page-kicker">Reuse</div>
+        <h1 className="page-title">Your usual foods</h1>
+        <p className="hint page-subtitle library-hint">Reuse favourites, recent meals, and saved foods.</p>
       </header>
-      <div className="seg" role="tablist" aria-label="Saved foods">
-        <button className={sub === 'history' ? 'active' : ''} onClick={() => setSub('history')} type="button" role="tab" aria-selected={sub === 'history'}>
-          Recent
-        </button>
-        <button className={sub === 'favourites' ? 'active' : ''} onClick={() => setSub('favourites')} type="button" role="tab" aria-selected={sub === 'favourites'}>
-          Favourites
-        </button>
+      <div className="page-controls">
+        <div className="seg" role="tablist" aria-label="Saved foods">
+          <button className={sub === 'history' ? 'active' : ''} onClick={() => setSub('history')} type="button" role="tab" aria-selected={sub === 'history'}>
+            Recent
+          </button>
+          <button className={sub === 'favourites' ? 'active' : ''} onClick={() => setSub('favourites')} type="button" role="tab" aria-selected={sub === 'favourites'}>
+            Favourites
+          </button>
+        </div>
+        <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your usual foods" />
       </div>
-      <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your usual foods" />
       <section className="card">
         {shown.length ? (
           shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onManage={onManage} />)
@@ -1888,7 +1890,10 @@ function JournalView({
     };
     return (
       <>
-        <header className="head"><div className="kicker">Journal</div><h1>{readable(journalDay)}</h1></header>
+        <header className="page-header">
+          <div className="page-kicker">Food journal</div>
+          <h1 className="page-title">{readable(journalDay)}</h1>
+        </header>
         <div className="journal-day-nav">
           <DayNav value={journalDay} onChange={setDay} />
           <button className="journal-month-btn" type="button" onClick={returnToMonth}>
@@ -1940,9 +1945,10 @@ function JournalView({
   const days = Array.from({ length: 42 }, (_, i) => new Date(year, month, i - offset + 1));
   return (
     <>
-      <header className="head">
-        <div className="kicker">Reflect</div>
-        <h1>Journal</h1>
+      <header className="page-header has-helper">
+        <div className="page-kicker">Food journal</div>
+        <h1 className="page-title">Journal</h1>
+        <p className="hint page-subtitle">Meal photos, organised by day.</p>
       </header>
       <MonthNav value={journalMonth} onChange={setJournalMonth} />
       <div className="calendar journal-month-surface">
@@ -2019,7 +2025,11 @@ function CardsView({
   const datedGroups = groups.filter(group => group.date === selectedDate);
   return (
     <>
-      <header className="head"><div className="kicker">Cards</div><h1>Meal cards</h1></header>
+      <header className="page-header has-helper">
+        <div className="page-kicker">Reflect</div>
+        <h1 className="page-title">Cards</h1>
+        <p className="hint page-subtitle">Create simple meal snapshots.</p>
+      </header>
       <DayNav value={selectedDate} onChange={setSelectedDate} />
       <section className="card meal-card-intro"><p className="hint">Pick a logged meal group and open a simple screenshot-ready meal summary card.</p></section>
       {datedGroups.length ? <div className="cards-list">{datedGroups.map(group => {
@@ -2235,8 +2245,11 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
   const last7Completed = last7Rows.filter(row => row.complete);
   return (
     <>
-      <header className="head"><div className="kicker">This week</div><h1>Week</h1></header>
-      <p className="hint">Today is one part of the week. Open days stay open.</p>
+      <header className="page-header has-helper">
+        <div className="page-kicker">This week</div>
+        <h1 className="page-title">Week</h1>
+        <p className="hint page-subtitle">See how your week is tracking.</p>
+      </header>
       <RichBanking state={state} start={bankingWeekStart} setStart={setBankingWeekStart} onHelp={onBankHelp} />
 
       <section className="card stats-card week-summary-card" aria-label="Week summary">
@@ -2495,7 +2508,11 @@ function SettingsView(props: {
   const toggleEnergyUnit = () => props.onEnergyUnit(goalUnit === 'kcal' ? 'kj' : 'kcal');
   return (
     <>
-      <header className="head"><div className="kicker">Preferences</div><h1>Settings</h1></header>
+      <header className="page-header has-helper">
+        <div className="page-kicker">Dawni</div>
+        <h1 className="page-title">Settings</h1>
+        <p className="hint page-subtitle">Targets, display, local data, and backup.</p>
+      </header>
       <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || 'dark') === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes the built-in estimated food database from this app&apos;s files. This will not change your saved foods or food logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>

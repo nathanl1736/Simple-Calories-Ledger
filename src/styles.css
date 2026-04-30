@@ -116,12 +116,33 @@ img { max-width: 100%; display: block; }
   padding: calc(24px + env(safe-area-inset-top)) 16px calc(118px + env(safe-area-inset-bottom));
 }
 .loading { display: grid; align-content: center; gap: 10px; }
-.head { margin-bottom: 18px; }
-.kicker { color: var(--color-accent-text); font-size: var(--type-eyebrow); font-weight: var(--weight-label); letter-spacing: var(--tracking-label); text-transform: uppercase; margin-bottom: 8px; }
+.head, .page-header {
+  margin-bottom: 16px;
+  display: grid;
+  gap: 6px;
+}
+.page-header.has-helper { margin-bottom: 12px; }
+.kicker, .page-kicker, .page-eyebrow {
+  color: var(--color-accent-text);
+  font-size: 13px;
+  font-weight: var(--weight-label);
+  letter-spacing: .02em;
+  text-transform: none;
+  margin: 0;
+}
 .brand-kicker { text-transform: none; letter-spacing: .02em; font-size: 13px; }
-h1 { margin: 0; font-size: var(--type-page-title); line-height: 1.05; letter-spacing: 0; font-weight: 820; }
+h1, .page-title { margin: 0; font-size: var(--type-page-title); line-height: 1.05; letter-spacing: 0; font-weight: 820; }
 h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; letter-spacing: 0; font-weight: 800; }
-.hint { color: var(--muted); font-size: var(--type-helper); line-height: 1.45; }
+.hint, .page-helper { color: var(--muted); font-size: var(--type-helper); line-height: 1.45; }
+.page-subtitle { margin: 0; }
+.page-controls {
+  margin-top: 6px;
+  margin-bottom: 10px;
+  display: grid;
+  gap: 8px;
+}
+.page-controls .seg,
+.page-controls .search { margin-bottom: 0; }
 .spaced { margin-top: 18px; }
 
 .date-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) 48px; gap: var(--gap-row); align-items: center; margin-bottom: 10px; }
@@ -409,7 +430,7 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
   object-position: center;
 }
 .calendar.journal-month-surface .daybox-quiet .daynum-quiet { opacity: 0.9; }
-.library-hint { margin: 10px 0 0; max-width: 36em; }
+.library-hint { max-width: 36em; }
 .month-tools, .week-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .month-title, .week-title { flex: 1; min-width: 0; min-height: var(--tap); border-radius: var(--radius-card); background: var(--color-surface-raised); border: 1px solid var(--line); color: var(--ink); display: grid; place-items: center; gap: 1px; padding: 5px 10px; text-align: center; }
 .month-title span, .week-title span { color: var(--muted); font-size: 11px; font-weight: var(--weight-label); letter-spacing: var(--tracking-label); text-transform: uppercase; }

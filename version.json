@@ -1,5 +1,5 @@
 {
-  "version": "2.1.0.0",
+  "version": "2.1.1.0",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the public version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
     "Added custom food database JSON imports.",
