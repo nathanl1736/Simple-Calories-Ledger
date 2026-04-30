@@ -1,0 +1,216 @@
+Calories Tracker Product Design Document
+Calories Tracker Product Design Document
+
+App Name: Dawni: Weekly Calorie Tracker
+Subtitle: A calm, local-first calorie tracking companion for sustainable weekly consistency
+Document version: 0.1
+Created: 2026-04-30
+Product stage: PWA-to-Capacitor planning
+
+1. Executive Summary
+This product is not trying to become the most advanced AI calorie tracker. Its stronger identity is a calm, practical, local-first calorie tracking companion that helps users build a sustainable lifestyle through weekly planning, repeatable routines, and low-stress progress feedback.
+The app should make users feel in control even when individual days are imperfect. Its strongest differentiator is not food-recognition technology. It is the ability to help users understand their week, reuse common routines, protect their data, and avoid the guilt cycle that many tracking apps create.
+DecisionDirectionPrimary positioningA sustainable lifestyle companion for calorie and macro tracking.Core differentiatorWeekly flexibility: calorie banking, weekly budget, adherence, and routine reuse.Free product promiseA complete manual calorie/macro tracker that is useful without payment.Pro product promisePlanning, speed, backup confidence, native convenience, and reflection tools.What to avoidOverpromising AI accuracy, selling unreliable data, or locking basic tracking behind payment.
+2. Product Vision
+Build a simple, local-first calorie tracker that helps people stay consistent across real-life weeks rather than chase perfect daily tracking.
+2.1 One-sentence product promise
+Track your food, reuse your routines, manage your weekly calorie bank, and build a lifestyle that survives real days out.
+2.2 Product identity
+This app isThis app is notA calm calorie ledgerA medical nutrition appA sustainable weekly planning toolA strict daily punishment/streak appA local-first personal trackerA social fitness networkA practical routine builderA flashy AI-first noveltyA transparent estimatorA fake-precision nutrition authority2.3 Product north star
+The user should be able to open the app and quickly answer:
+• What have I eaten today?
+• How much room do I have left today?
+• Am I still on track this week?
+• What routine meal can I log quickly?
+• Is my data safe?
+
+3. Target User
+User segmentDescriptionMain needPrimaryPeople who already understand basic calories/macros and want a calmer way to stay consistent.Know whether they are on track across the week.SecondaryGym/cutting/maintenance users who eat repeat meals and need low-friction logging.Reuse common meals quickly.TertiaryPeople trying to become more mindful with food without a heavy fitness app identity.Build sustainable habits without guilt.3.1 User anxieties the app should reduce
+• “I went over today. Did I ruin the week?”
+• “How much can I eat for the rest of the week?”
+• “Am I actually consistent or just guessing?”
+• “Can I enjoy a meal out without revenge cardio?”
+• “Why does every tracker feel like homework?”
+3.2 User assumptions
+The app can assume the user:
+• Knows or can set a calorie goal.
+• Understands that food tracking involves estimates.
+• Wants speed more than perfect database coverage.
+• Values privacy and data ownership.
+• May be cutting, maintaining, or bulking.
+The app should not assume the user:
+• Wants a strict diet coach.
+• Wants social comparison.
+• Wants subscription-heavy AI features.
+• Trusts unverified barcode or food database results.
+
+4. Design Principles
+PrincipleMeaningReduce anxietyTracking should answer “am I okay?” without shame language.Weekly consistency over daily perfectionThe app should make banking and weekly averages easy to understand.Core tracking stays freeManual calorie/macro tracking should not be crippled.No fake precisionEstimated data should be clearly labelled and editable.Local-first trustUsers should feel they own their data and can back it up.Pro must save time or improve planningPaid features should feel useful, not randomly withheld.Avoid dependency trapsDo not launch paid features that require unreliable data sources or ongoing AI cost.4.1 Decision filter for new features
+Before building a feature, ask:
+1. Does this help the user track, reuse, plan, reflect, or protect their data?
+2. Is the output deterministic and explainable?
+3. Does this reduce friction or reduce anxiety?
+4. Does this create a support burden or hidden cost?
+5. Would this still be useful without AI or a backend?
+If the answer is mostly no, defer it.
+
+5. Emotional Tone and UX Language
+Use this toneAvoid this toneCalm, practical, reassuringPunitive, alarmist, obsessive“You are still on track this week.”“You failed your goal.”“Today can be balanced across the week.”“Burn this off tomorrow.”“Estimated — adjust if needed.”“Accurate AI result.”“Build a routine.”“Never miss a day.”5.1 UX copy rules
+• Avoid guilt language.
+• Avoid fake certainty around estimates.
+• Use “remaining”, “projected”, “average”, and “on track” carefully.
+• Explain weekly banking with plain language.
+• Treat incomplete days differently from completed days.
+• Make data ownership visible in Settings.
+
+6. Core User Loop
+1. Open app and check today’s remaining calories/protein.
+2. Log food manually, from saved foods, or from a reusable meal/template.
+3. See today’s progress without shame language.
+4. Use weekly bank/projection to understand the bigger picture.
+5. Complete the day or leave it editable.
+6. Reflect through stats, journal, photos, or weekly adherence.
+7. Back up/export data when prompted or through auto-backup/native sharing.
+6.1 Daily loop
+The daily loop is about logging quickly and keeping the day understandable.
+• Add food.
+• Check meal group summaries.
+• Watch calories and protein progress.
+• Repeat common entries.
+• Complete day when finished.
+6.2 Weekly loop
+The weekly loop is the product’s strongest differentiator.
+• Review calorie bank.
+• Check projected week.
+• Understand completed-day averages.
+• See adherence without punishment.
+• Make practical adjustments instead of overcorrecting.
+
+7. Feature Pillars
+PillarScopeTrackDaily calorie/macro tracking, meal categories, edit/delete, per-serving/per-100g, kcal/kJ.ReuseRecent foods, favourites, saved foods, meal templates, copy day, quick-add presets.PlanCalories Bank, weekly budget, projected week, adherence score, cutting/maintaining/bulking success rules.ReflectStats, photo journal, meal cards, collage, progress summary, completed-day averages.ProtectLocal-first storage, export/import, auto latest backup, restore preview, backup reminders.7.1 Track
+The Track pillar is the core free product. It should always be reliable, fast, and understandable. It includes manual logging, macro tracking, meal grouping, date navigation, unit support, and editing.
+7.2 Reuse
+The Reuse pillar reduces friction. The more often a user tracks, the more value they get from saved foods, favourites, templates, copy day, and quick-add presets.
+7.3 Plan
+The Plan pillar gives the app its identity. The goal is to help users manage real-life eating across a week, not punish them for an individual day.
+7.4 Reflect
+The Reflect pillar turns logged data into personal insight. It should help users notice patterns, celebrate consistency, and export/share progress if they want to.
+7.5 Protect
+The Protect pillar builds trust. Because the app is local-first, backup clarity is a product feature, not a technical afterthought.
+
+8. Free vs Pro Strategy
+The free tier should feel like a complete tracker. Pro should upgrade planning, speed, reflection, and backup confidence.
+8.1 Free tier
+Free areaIncluded featuresCore trackingDaily calories/macros, date navigation, manual logging, meal categories.Food log controlEdit, delete, repeat entry to today, grouped/list views.Saved foods basicsRecent foods, favourites, search, manage saved nutrition.Basic databaseSmall estimate database with estimated labels and editable values.Basic statsLast 7 days, completed-day averages, completed-day count.PhotosAdd/view/remove basic meal photo.BackupManual JSON export/import.SettingsGoals, mode, energy unit, update checker, version modal.8.2 Pro tier
+Pro areaIncluded featuresAdvanced planningCalories Bank, weekly budget, projected week, adherence score, mode-specific success rules.Faster routinesMeal templates, copy day, repeat meal, quick-add presets, time-of-day suggestions.Advanced journalPhoto collage, journal list/calendar modes, custom labels, meal/progress card exports.Backup confidenceAuto latest backup, backup health, restore preview, backup reminders.Native convenienceLocal reminders, native share sheet, haptics, better camera/photo picker.PersonalisationTheme presets, custom accent, card styles, compact/comfortable mode.8.3 Pro positioning
+Pro should not be sold as “more accurate tracking”. It should be sold as:
+A planning and convenience upgrade for people who track often and want the app to reduce friction.
+Suggested Pro message:
+Upgrade to Pro to plan your week, reuse meals faster, protect your data, and turn your logs into useful progress insight.
+
+9. Current App Audit
+FeatureDecisionNotesDaily trackingKeepPolish UI consistency and reduce friction.Macro trackingKeepMake protein progress especially clear.Saved foods/favourites/recentKeepImprove reuse pathways and template conversion.Built-in estimate databaseKeep cautiouslyKeep clearly labelled as estimates; avoid paid accuracy claims.Custom food database importSimplifyUseful for power users, but may be too complex for first App Store MVP.AI Quick LogRepositionTreat as BYO assistant/helper parser, not guaranteed paid intelligence.Photos/journalEnhance laterBasic photos free; collage/cards can be Pro.StatsReframeMove from generic charts to weekly lifestyle/planning feedback.Backup/exportStrengthenLocal-first trust needs obvious backup status and restore preview.Update checkerKeep freeReliability/maintenance feature, not a paid feature.9.1 Highest-value UX improvements
+1. Make weekly planning language clearer.
+2. Explain Calories Bank and adherence in friendly help modals.
+3. Reduce visual inconsistency in typography and spacing.
+4. Make repeat workflows more obvious.
+5. Make backup status visible and reassuring.
+6. Ensure estimate database items are clearly labelled.
+7. Make the Settings version and update system easy to verify.
+
+10. Risks and Deferred Features
+FeatureDecisionReasonBarcode scannerDeferScanning is easy; trustworthy barcode-to-nutrition data is the hard part.AI label photo helperDeferRequires OCR/AI API cost and accuracy controls.Expanded branded AU databaseDefer or curate slowlyNeeds verified source/date fields and clear disclaimers.Full cloud syncLaterRequires auth, conflict resolution, privacy/security decisions.iCloud backup/syncLaterStrong native feature but more complex than first Capacitor wrapper.Apple HealthLaterUseful but privacy-heavy and not essential to core promise.Social featuresAvoid for nowNot aligned with calm/private tracker identity.Medical coaching claimsAvoidThis app should support lifestyle tracking, not provide medical advice.10.1 Data-source rule
+Do not charge users for a feature that depends on nutrition data the app cannot verify or explain.
+This means:
+• Barcode scanning should not be launched as a paid accuracy feature without a trustworthy data source.
+• Branded food databases should include source/date fields if added.
+• AI-generated nutrition should be positioned as a helper, not a guarantee.
+• Users must be able to edit imported or estimated values.
+
+11. Capacitor / Native App Opportunities
+PhaseFeaturesPhase 1: Native reliabilityAuto latest backup, save on app background, native share/export, local backup reminders, safe-area/keyboard polish.Phase 2: Native convenienceBetter camera/photo picker, haptics, local meal reminders, native share for meal cards/progress cards.Phase 3: Premium native featuresFace ID app lock, Home Screen widgets, iOS Shortcuts, iCloud backup/sync.11.1 Capacitor feature rule
+Do not add native features just because Capacitor makes them possible. Add them only if they support one of the five product pillars:
+• Track
+• Reuse
+• Plan
+• Reflect
+• Protect
+11.2 Best first Capacitor features
+1. Auto latest backup file.
+2. Save on app background.
+3. Native share/export backup.
+4. Local backup reminders.
+5. Better camera/photo picker.
+6. Haptic feedback.
+7. Safe-area and keyboard polish.
+
+12. App Store MVP Definition
+The first App Store/TestFlight-ready version should prove that the app works reliably as an iPhone app before adding ambitious native features.
+Minimum success criteria:
+• React/Vite app successfully wrapped with Capacitor and running in iOS simulator and on a real iPhone.
+• Data persists after close/reopen and after iOS app lifecycle changes.
+• Core logging, saved foods, stats, settings, photos, and backup work reliably in the native shell.
+• No major notch/home-indicator/keyboard layout issues.
+• Clear onboarding or Settings explanation: local-first, manual backup, estimate data editable.
+• Free tier complete and useful; Pro tier scoped but not necessarily all implemented before first TestFlight.
+12.1 First TestFlight checklist
+• Add Capacitor iOS shell.
+• Confirm Vite build path and asset paths.
+• Confirm IndexedDB/local storage persistence.
+• Test add/edit/delete food entries.
+• Test saved foods and favourites.
+• Test stats and date navigation.
+• Test photo upload/compression/viewing.
+• Test manual export/import.
+• Test update checker behaviour in native shell.
+• Check safe areas, bottom navigation, modals, and keyboard.
+
+13. Roadmap
+StageGoalNowDocument vision, audit current app, fix UI/UX inconsistencies, simplify confusing advanced flows.Next buildImprove weekly stats language, Calories Bank clarity, help modals, and backup confidence.Capacitor prototypeAdd iOS shell, test persistence, safe areas, keyboard, photos, and share/export.First Pro candidateAdvanced planning + templates + auto backup + reminders + journal/card exports.Post-launchEvaluate user feedback before adding barcode, AI, cloud sync, Health, widgets, or iCloud.13.1 Suggested implementation order
+1. Lock product language and design principles.
+2. Audit current app against this PDD.
+3. Clean up typography, spacing, and navigation consistency.
+4. Improve weekly planning explanations.
+5. Add/strengthen templates and repeat workflows.
+6. Add auto backup and restore preview.
+7. Wrap with Capacitor and test iOS shell.
+8. Add native share, local reminders, camera/photo improvements, and haptics.
+9. Decide initial Pro unlock scope.
+10. Prepare TestFlight/App Store materials.
+
+14. Success Metrics
+Metric typeDefinitionPersonal/product metricCan the creator use the app daily without wanting to switch to another tracker?Usability metricCan a new user log a basic meal in under 30 seconds?Retention signalUsers return across multiple weeks, not just a day or two.Planning valueUsers understand whether they are on track weekly.Trust signalUsers know where their data is stored and how to back it up.Portfolio signalThe project tells a strong story: shipped app, local-first data, native wrapper, paid-tier thinking.14.1 Qualitative success signal
+The app is succeeding if users say things like:
+• “This makes tracking feel less stressful.”
+• “I like seeing the whole week instead of panicking about today.”
+• “It is faster to log my usual meals.”
+• “I trust where my data is stored.”
+• “It does not feel bloated.”
+
+15. Implementation Guidance for Codex
+When asking Codex to work on the app, give it the product principles first, then the exact feature scope. Avoid broad prompts like “make it more premium”.
+Suggested Codex instruction:
+Use the Product Design Document as the source of truth. Do not add AI, barcode, cloud sync, or large branded database features unless explicitly requested. Improve the app around sustainable weekly tracking, local-first data ownership, low-friction repeat logging, and calm progress feedback. Keep core manual tracking free and complete. Pro features should focus on planning, speed, backup confidence, native convenience, and reflection.
+15.1 Codex prompt for current app audit
+Review the current calorie tracker app against the Product Design Document. Produce a practical audit with four columns: Keep, Improve, Move to Pro, Defer. Focus on sustainable weekly tracking, repeat workflows, local-first data trust, and App Store readiness. Do not suggest barcode scanning, AI label reading, cloud sync, or large branded databases unless listed as deferred roadmap items.
+
+16. GitHub Merge Comment
+Define product vision around sustainable weekly calorie tracking, local-first data ownership, practical lifestyle support, and realistic Pro features that avoid AI-first accuracy claims.
+
+17. Appendix: Versioning Discipline
+Every app update should keep the app bundle and update metadata aligned.
+• index.html should include the latest APP_VERSION.
+• version.json should contain the same version number.
+• Settings should display the current app version.
+• version.json should include clear release notes.
+• The update checker should point to ./version.json.
+• Future feature branches should include both files when the update system depends on both files.
+
+18. Appendix: One-page Product Summary
+Product: Local-first calorie and macro tracker.
+Positioning: A calm companion for sustainable weekly consistency.
+Not competing on: AI, barcode coverage, or perfect branded databases.
+Competing on: Weekly planning, fast reuse, data ownership, practical reflection, native convenience.
+Free: Complete manual tracker.
+Pro: Planning, speed, backup confidence, native convenience, and journal/card reflection.
+Core phrase: Weekly consistency over daily perfection.

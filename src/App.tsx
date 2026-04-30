@@ -274,7 +274,6 @@ export function App() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [activeMealCard, setActiveMealCard] = useState<MealGroup | null>(null);
   const [bankingWeekStart, setBankingWeekStart] = useState(() => weekStartMonday(todayKey()));
-  const [adherenceWeekStart, setAdherenceWeekStart] = useState(() => weekStartMonday(todayKey()));
   const [goalsEditing, setGoalsEditing] = useState(false);
   const [goalDraft, setGoalDraft] = useState<Settings>(DEFAULT.settings);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
@@ -372,7 +371,6 @@ export function App() {
     if (next === 'stats' && tab === 'stats') {
       setSelectedDate(todayKey());
       setBankingWeekStart(weekStartMonday(todayKey()));
-      setAdherenceWeekStart(weekStartMonday(todayKey()));
     }
     setTabState(next);
     localStorage.setItem('calorie-tracker-active-tab', next);
@@ -641,7 +639,7 @@ export function App() {
   };
 
   if (!loaded) {
-    return <main className="app loading"><h1>Nathan&apos;s Calories Ledger</h1><p className="hint">Loading your local tracker...</p></main>;
+    return <main className="app loading"><h1>Dawni</h1><p className="hint">Loading your local tracker...</p></main>;
   }
 
   return (
@@ -735,8 +733,6 @@ export function App() {
           selectedDate={selectedDate}
           bankingWeekStart={bankingWeekStart}
           setBankingWeekStart={setBankingWeekStart}
-          adherenceWeekStart={adherenceWeekStart}
-          setAdherenceWeekStart={setAdherenceWeekStart}
           onBankHelp={() => setModal('bankHelp')}
           onAdherenceHelp={() => setModal('adherenceHelp')}
         />
@@ -1098,7 +1094,7 @@ function GroupedEntries(props: Parameters<typeof TrackingView>[0]) {
 }
 
 function EntryList({ state, entries, complete, onPhoto, onEdit, onRepeat, onDelete }: { state: AppState; entries: Entry[]; complete: boolean; onPhoto: (entry: Entry) => void; onEdit: (entry: Entry) => void; onRepeat: (entry: Entry) => void; onDelete: (id: string) => void }) {
-  if (!entries.length) return <div className="empty">No food logged for this day yet.</div>;
+  if (!entries.length) return <div className="empty">Nothing logged yet.</div>;
   return <>{entries.map(entry => <EntryRow key={entry.id} state={state} entry={entry} complete={complete} onPhoto={onPhoto} onEdit={onEdit} onRepeat={onRepeat} onDelete={onDelete} />)}</>;
 }
 
@@ -1773,7 +1769,7 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
       <header className="head"><div className="kicker">Saved foods</div><h1>Library</h1></header>
       <div className="seg"><button className={sub === 'history' ? 'active' : ''} onClick={toggleSub} type="button">History</button><button className={sub === 'favourites' ? 'active' : ''} onClick={toggleSub} type="button">Favourites</button></div>
       <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search saved foods" />
-      <section className="card">{shown.length ? shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onManage={onManage} />) : <div className="empty">No matching foods.</div>}</section>
+      <section className="card">{shown.length ? shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onManage={onManage} />) : <div className="empty"><strong>No matches yet.</strong><div>Try a different food name.</div></div>}</section>
     </>
   );
 }
@@ -1882,7 +1878,7 @@ function JournalView({
           ? shuffledPhotos.length ? <div className={`journal-collage-grid label-${labelMode}`}>{shuffledPhotos.map((entry, index) => {
             const featured = index === featureOffset || ((index + featureOffset) % 7 === 0 && index < photos.length - 1);
             return <button className={`journal-photo-card ${featured ? 'featured' : ''}`} key={entry.id} type="button" onClick={() => onPhoto(entry)}><img src={entry.photo || ''} alt="" />{labelText(entry)}</button>;
-          })}</div> : <div className="empty">No photos for this day.</div>
+          })}</div> : <div className="empty"><strong>No photos yet.</strong><div>Add a meal photo while logging to build your journal.</div></div>
           : entries.length ? <div className="journal-day-list">{entries.map(entry => {
             const totals = entryTotals(entry);
             return (
@@ -1899,7 +1895,7 @@ function JournalView({
                 </div>
               </button>
             );
-          })}</div> : <div className="empty">No food logged for this day.</div>}
+          })}</div> : <div className="empty"><strong>Nothing logged yet.</strong><div>Log something when you&apos;re ready.</div></div>}
       </>
     );
   }
@@ -1977,7 +1973,7 @@ function CardsView({
             <button className="secondary show-card-btn" type="button" onClick={() => onOpen(group)}>Show card</button>
           </article>
         );
-      })}</div> : <div className="empty">No meal cards for this date.<br /><button className="empty-action" type="button" onClick={onStartLog}>Log food</button></div>}
+      })}</div> : <div className="empty"><strong>No meal cards yet.</strong><div>Log a meal to make a simple share card.</div><button className="empty-action" type="button" onClick={onStartLog}>Log food</button></div>}
     </>
   );
 }
@@ -2070,8 +2066,8 @@ function EntryPhotoModal({ entry, open, onClose, onReplace, onRemove, onShare }:
   return <Modal open={open} title="Meal photo" onClose={onClose}>{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
 }
 
-function StatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, adherenceWeekStart, setAdherenceWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; adherenceWeekStart: string; setAdherenceWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
-  return <RichStatsView state={state} selectedDate={selectedDate} bankingWeekStart={bankingWeekStart} setBankingWeekStart={setBankingWeekStart} adherenceWeekStart={adherenceWeekStart} setAdherenceWeekStart={setAdherenceWeekStart} onBankHelp={onBankHelp} onAdherenceHelp={onAdherenceHelp} />;
+function StatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
+  return <RichStatsView state={state} selectedDate={selectedDate} bankingWeekStart={bankingWeekStart} setBankingWeekStart={setBankingWeekStart} onBankHelp={onBankHelp} onAdherenceHelp={onAdherenceHelp} />;
 }
 
 type CalorieDayStatus = 'open' | 'good' | 'under' | 'over';
@@ -2144,7 +2140,7 @@ function isGoodWeeklyAverage(rows: { goal: DailyGoalSnapshot; status: CalorieDay
   return rows.length ? rows.every(row => row.status === 'good') : false;
 }
 
-function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, adherenceWeekStart, setAdherenceWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; adherenceWeekStart: string; setAdherenceWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
+function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(bankingWeekStart, i));
   const weekRows = weekDays.map(date => {
     const totals = sum(dayEntries(state, date));
@@ -2169,6 +2165,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
   return (
     <>
       <header className="head"><div className="kicker">This week</div><h1>Week</h1></header>
+      <p className="hint">Today is one part of the week. Open days stay open.</p>
       <RichBanking state={state} start={bankingWeekStart} setStart={setBankingWeekStart} onHelp={onBankHelp} />
 
       <section className="card stats-card week-summary-card" aria-label="Week summary">
@@ -2216,7 +2213,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
         )}
       </section>
 
-      <RichAdherence state={state} start={adherenceWeekStart} setStart={setAdherenceWeekStart} onHelp={onAdherenceHelp} />
+      <RichAdherence state={state} start={bankingWeekStart} setStart={setBankingWeekStart} onHelp={onAdherenceHelp} />
 
       <section className="card stats-card">
         <div className="card-head"><h2>Patterns</h2></div>
