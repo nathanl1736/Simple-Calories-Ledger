@@ -2217,8 +2217,16 @@ function homeWeekSummary(state: AppState, selectedDate: string) {
   };
 }
 
-function isGoodWeeklyAverage(rows: { goal: DailyGoalSnapshot; status: CalorieDayStatus }[]) {
-  return rows.length ? rows.every(row => row.status === 'good') : false;
+type MetricTone = 'good' | 'warn' | '';
+
+function budgetDeltaTone(delta: number): MetricTone {
+  if (delta > 0) return 'good';
+  if (delta < 0) return 'warn';
+  return '';
+}
+
+function upperBudgetTone(value: number, budget: number): MetricTone {
+  return value <= budget ? 'good' : 'warn';
 }
 
 function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
@@ -2367,10 +2375,11 @@ function BankBars({ state, rows }: { state: AppState; rows: { date: string; tota
         const barHeight = row.complete ? Math.min(46, Math.max(8, Math.abs(delta) / maxGoal * 54)) : 6;
         const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
         const direction = delta >= 0 ? 'up' : 'down';
-        const tone = row.status === 'good' ? 'good-fill' : 'warn-fill';
+        const tone = delta >= 0 ? 'good-fill' : 'warn-fill';
+        const deltaTone = row.complete ? budgetDeltaTone(delta) : '';
         return (
           <div className="bank-col" key={row.date}>
-            <div className="bank-delta">{row.complete ? signedEnergyValue(state, delta) : 'Open'}</div>
+            <div className={`bank-delta ${deltaTone}`}>{row.complete ? signedEnergyValue(state, delta) : 'Open'}</div>
             <div className="bank-track"><span className="bank-midline" />{row.complete ? <div className={`bank-fill ${tone} ${direction}`} style={{ height: barHeight }} /> : <div className="bank-open-mark" />}</div>
             <div className="bank-day">{weekday}</div>
           </div>
@@ -2392,16 +2401,15 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
   const banked = completed.reduce((acc, row) => acc + row.delta, 0);
   const completedEaten = completed.reduce((acc, row) => acc + row.total, 0);
   const weekBudget = rows.reduce((acc, row) => acc + row.goal.calories, 0);
-  const weekBand = rows.reduce((acc, row) => {
-    const band = getCalorieBand(row.goal);
-    acc.lower += band.lower;
-    acc.upper += band.upper;
-    return acc;
-  }, { lower: 0, upper: 0 });
   const completedAverage = completedEaten / (completed.length || 1);
   const projected = completed.length ? completedAverage * 7 : 0;
   const completedExpected = completed.reduce((acc, row) => acc + row.goal.calories, 0);
-  const completedBalanceGood = isGoodWeeklyAverage(completed);
+  const completedDailyGoal = completedExpected / (completed.length || 1);
+  const remainingWeek = weekBudget - completedEaten;
+  const bankTone = budgetDeltaTone(banked);
+  const remainingTone = budgetDeltaTone(remainingWeek);
+  const completedAverageTone = upperBudgetTone(completedAverage, completedDailyGoal);
+  const projectedTone = upperBudgetTone(projected, weekBudget);
   const firstCompletedMode = completed[0]?.goal.trackingMode;
   const bankMode = firstCompletedMode && completed.every(row => row.goal.trackingMode === firstCompletedMode) ? firstCompletedMode : null;
   const bankLabel = bankMode === 'Bulking'
@@ -2415,13 +2423,13 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
       <WeekRangeControl start={start} setStart={setStart} />
       {completed.length ? (
         <>
-          <div className="bank-hero"><div className="label">{bankLabel}</div><div className={`value ${completedBalanceGood ? 'good' : 'warn'}`}>{bankHeroText}</div><div className="bank-note">Based on {completed.length} completed day{completed.length === 1 ? '' : 's'}. Open days don’t count yet.</div></div>
+          <div className="bank-hero"><div className="label">{bankLabel}</div><div className={`value ${bankTone}`}>{bankHeroText}</div><div className="bank-note">Based on {completed.length} completed day{completed.length === 1 ? '' : 's'}. Open days don’t count yet.</div></div>
           <div className="stat"><span>Weekly budget</span><strong>{energyText(state, weekBudget)}</strong></div>
           <div className="stat"><span>Eaten from completed days</span><strong>{energyText(state, completedEaten)}</strong></div>
-          <div className="stat"><span>Remaining this week</span><strong className={weekBudget - completedEaten >= 0 ? 'good' : 'warn'}>{energyText(state, weekBudget - completedEaten)}</strong></div>
+          <div className="stat"><span>Remaining this week</span><strong className={remainingTone}>{energyText(state, remainingWeek)}</strong></div>
           <div className="stat"><span>Completed goal total</span><strong>{energyText(state, completedExpected)}</strong></div>
-          <div className="stat"><span>Completed-day average</span><strong className={completedBalanceGood ? 'good' : 'warn'}>{energyText(state, completedAverage)}/day</strong></div>
-          <div className="stat"><span>Projected week</span><strong className={projected && projected >= weekBand.lower && projected <= weekBand.upper ? 'good' : 'warn'}>{energyText(state, projected)}</strong></div>
+          <div className="stat"><span>Completed-day average</span><strong className={completedAverageTone}>{energyText(state, completedAverage)}/day</strong></div>
+          <div className="stat"><span>Projected week</span><strong className={projectedTone}>{energyText(state, projected)}</strong></div>
           <BankBars state={state} rows={rows} />
         </>
       ) : <div className="empty">Complete a day in this week to calculate banking.</div>}
@@ -2466,7 +2474,7 @@ function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; st
               <div className="consistency-label">{weekday}</div>
               <div className={`consistency-pill ${tone.className}`} aria-label={tone.label}>
                 <span className="dot" aria-hidden="true" />
-                {tone.label}
+                <span className="pill-text">{tone.label}</span>
               </div>
               <div className="consistency-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '—'}</div>
             </div>

@@ -1,10 +1,8 @@
 {
-  "version": "2.1.1.0",
+  "version": "2.1.1.1",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Added custom food database JSON imports.",
-    "Added Settings management for custom databases.",
-    "Enabled custom database foods in Quick Picks/search.",
-    "Included custom databases in backup/restore."
+    "Fixed Weekly calorie bank status colors for under-budget days.",
+    "Aligned weekly projection and completed-average tones with calorie budgets."
   ]
 }
