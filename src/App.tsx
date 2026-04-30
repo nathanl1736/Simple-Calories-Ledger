@@ -184,6 +184,7 @@ function MonthNav({ value, onChange }: { value: Date; onChange: (date: Date) => 
 }
 
 function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => void; children: ReactNode }) {
+  const [navHidden, setNavHidden] = useState(false);
   const tabs: [Tab, string][] = [
     ['tracking', 'Track'],
     ['journal', 'Journal'],
@@ -192,10 +193,31 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
     ['stats', 'Stats'],
     ['settings', 'Settings']
   ];
+
+  useEffect(() => {
+    const inputTypesWithoutKeyboard = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
+    const isTextEntryElement = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      if (target.matches('textarea, select, [contenteditable="true"]')) return true;
+      if (!(target instanceof HTMLInputElement)) return false;
+      return !inputTypesWithoutKeyboard.has(target.type);
+    };
+    const refresh = () => setNavHidden(isTextEntryElement(document.activeElement));
+    const onFocusIn = (event: FocusEvent) => setNavHidden(isTextEntryElement(event.target));
+    const onFocusOut = () => window.setTimeout(refresh, 0);
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+    refresh();
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
+
   return (
     <>
       <main className="app">{children}</main>
-      <nav className="nav" aria-label="Main tabs">
+      <nav className={`nav ${navHidden ? 'hidden' : ''}`} aria-label="Main tabs" aria-hidden={navHidden}>
         <div className="nav-inner">
           {tabs.map(([id, label]) => (
             <button key={id} className={`tab ${tab === id ? 'active' : ''}`} type="button" onClick={() => setTab(id)}>
