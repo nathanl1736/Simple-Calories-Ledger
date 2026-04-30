@@ -145,7 +145,7 @@ function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', '
   );
 }
 
-function Modal({ open, title, children, onClose, wide = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+function Modal({ open, title, children, onClose, wide = false, className = '' }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string }) {
   useEffect(() => {
     if (!open) return;
     const previous = document.body.style.overflow;
@@ -157,7 +157,7 @@ function Modal({ open, title, children, onClose, wide = false }: { open: boolean
   if (!open) return null;
   return (
     <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-      <section className={`modal-panel ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+      <section className={`modal-panel ${wide ? 'wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="close" type="button" onClick={onClose} aria-label="Close"><span aria-hidden="true" /></button>
@@ -208,7 +208,7 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
   const tabs: [Tab, string][] = [
     ['tracking', 'Track'],
     ['journal', 'Journal'],
-    ['library', 'Library'],
+    ['library', 'Foods'],
     ['cards', 'Cards'],
     ['stats', 'Week'],
     ['settings', 'Settings']
@@ -891,7 +891,7 @@ export function App() {
         onClose={() => setModal(null)}
         onShare={() => activeMealCard && shareMealCard(activeMealCard, notify)}
       />
-      <Modal open={modal === 'photo'} title="Meal photo" onClose={() => setModal(null)} wide>
+      <Modal open={modal === 'photo'} title="Meal photo" onClose={() => setModal(null)} className="lightbox">
         <div className="photo-preview-shell">{photoPreview ? <img className="photo-preview-large" src={photoPreview} alt="Meal" /> : <div className="empty">No photo available.</div>}</div>
       </Modal>
       <AiQuickLogModal
@@ -1763,13 +1763,38 @@ function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }: { food
 function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage }: { state: AppState; sub: string; setSub: (sub: string) => void; query: string; setQuery: (q: string) => void; onPrefill: (food: Food) => void; onManage: (food: Food) => void }) {
   const foods = state.foods.filter(food => !query || food.name.toLowerCase().includes(query.toLowerCase())).sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0));
   const shown = sub === 'favourites' ? foods.filter(food => food.favourite) : foods;
-  const toggleSub = () => setSub(sub === 'history' ? 'favourites' : 'history');
+  const emptyCopy =
+    sub === 'favourites'
+      ? { title: 'No favourites yet.', body: 'Favourite foods you use often to make logging faster.' }
+      : query.trim()
+        ? { title: 'No matches yet.', body: 'Try a different food name.' }
+        : { title: 'Nothing here yet.', body: 'Your usual foods will appear here as you reuse them.' };
   return (
     <>
-      <header className="head"><div className="kicker">Saved foods</div><h1>Library</h1></header>
-      <div className="seg"><button className={sub === 'history' ? 'active' : ''} onClick={toggleSub} type="button">History</button><button className={sub === 'favourites' ? 'active' : ''} onClick={toggleSub} type="button">Favourites</button></div>
-      <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search saved foods" />
-      <section className="card">{shown.length ? shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onManage={onManage} />) : <div className="empty"><strong>No matches yet.</strong><div>Try a different food name.</div></div>}</section>
+      <header className="head">
+        <div className="kicker">Reuse</div>
+        <h1>Your usual foods</h1>
+        <p className="hint library-hint">Reuse favourites, recent meals, and saved foods in a tap. The more you log, the faster Dawni gets.</p>
+      </header>
+      <div className="seg" role="tablist" aria-label="Saved foods">
+        <button className={sub === 'history' ? 'active' : ''} onClick={() => setSub('history')} type="button" role="tab" aria-selected={sub === 'history'}>
+          Recent
+        </button>
+        <button className={sub === 'favourites' ? 'active' : ''} onClick={() => setSub('favourites')} type="button" role="tab" aria-selected={sub === 'favourites'}>
+          Favourites
+        </button>
+      </div>
+      <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your usual foods" />
+      <section className="card">
+        {shown.length ? (
+          shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onManage={onManage} />)
+        ) : (
+          <div className="empty">
+            <strong>{emptyCopy.title}</strong>
+            <div>{emptyCopy.body}</div>
+          </div>
+        )}
+      </section>
     </>
   );
 }
@@ -1805,6 +1830,12 @@ function shuffleEntries<T extends { id: string }>(items: T[], seed: number) {
     [list[i], list[j]] = [list[j], list[i]];
   }
   return list;
+}
+
+/** Stable preview order for journal month tiles (same day keeps the same thumbnails until entries change). */
+function journalMonthPreviewEntries(photos: Entry[]): Entry[] {
+  if (!photos.length) return [];
+  return [...photos].sort((a, b) => a.id.localeCompare(b.id)).slice(0, 4);
 }
 
 function JournalView({
@@ -1860,7 +1891,10 @@ function JournalView({
         <header className="head"><div className="kicker">Journal</div><h1>{readable(journalDay)}</h1></header>
         <div className="journal-day-nav">
           <DayNav value={journalDay} onChange={setDay} />
-          <button className="journal-month-btn" type="button" aria-label="Return to month view" onClick={returnToMonth}><span aria-hidden="true" /></button>
+          <button className="journal-month-btn" type="button" onClick={returnToMonth}>
+            <span className="month-ico" aria-hidden="true" />
+            <span className="month-label">Month</span>
+          </button>
         </div>
         <div className="journal-day-toolbar">
           <div className="seg journal-toggle" role="group" aria-label="Journal day view">
@@ -1906,14 +1940,51 @@ function JournalView({
   const days = Array.from({ length: 42 }, (_, i) => new Date(year, month, i - offset + 1));
   return (
     <>
-      <header className="head"><div className="kicker">Photo Journal</div><h1>Journal</h1></header>
+      <header className="head">
+        <div className="kicker">Reflect</div>
+        <h1>Journal</h1>
+      </header>
       <MonthNav value={journalMonth} onChange={setJournalMonth} />
-      <div className="calendar">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={`${d}${i}`} className="dow">{d}</div>)}{days.map(day => {
-        const key = toKey(day);
-        const entries = dayEntries(state, key);
-        const photos = entries.filter(entry => entry.photo);
-        return <button key={key} className={`daybox ${day.getMonth() !== month ? 'mutedday' : ''} ${key === todayKey() ? 'today' : ''}`} type="button" onClick={() => setJournalDay(key)}><span className="daynum">{day.getDate()}</span><span className="photo-stack">{photos.slice(0, 2).map(entry => <img key={entry.id} src={entry.photo || ''} alt="" />)}</span>{photos.length > 0 && <span className="photo-count">{photos.length} photo{photos.length === 1 ? '' : 's'}</span>}</button>;
-      })}</div>
+      <div className="calendar journal-month-surface">
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+          <div key={`${d}${i}`} className="dow">
+            {d}
+          </div>
+        ))}
+        {days.map(day => {
+          const key = toKey(day);
+          const entries = dayEntries(state, key);
+          const photos = entries.filter(entry => entry.photo);
+          const preview = journalMonthPreviewEntries(photos);
+          const inMonth = day.getMonth() === month;
+          const isPhotoDay = preview.length > 0;
+          const count = Math.min(preview.length, 4) as 1 | 2 | 3 | 4;
+          return (
+            <button
+              key={key}
+              className={`daybox ${inMonth ? '' : 'mutedday'} ${key === todayKey() ? 'today' : ''} ${isPhotoDay ? 'daybox-photo' : 'daybox-quiet'}`}
+              type="button"
+              onClick={() => setJournalDay(key)}
+              aria-label={`Open journal for ${readable(key)}`}
+            >
+              {isPhotoDay ? (
+                <>
+                  <span className={`journal-month-collage jmc-${count}`} aria-hidden="true">
+                    {preview.map(entry => (
+                      <span key={entry.id} className="journal-month-thumb">
+                        <img src={entry.photo || ''} alt="" loading="lazy" decoding="async" />
+                      </span>
+                    ))}
+                  </span>
+                  <span className="daynum daynum-overlay">{day.getDate()}</span>
+                </>
+              ) : (
+                <span className="daynum daynum-quiet">{day.getDate()}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </>
   );
 }
@@ -2063,7 +2134,7 @@ async function sharePhotoBlob(blob: Blob, filename: string, title: string, notif
 }
 
 function EntryPhotoModal({ entry, open, onClose, onReplace, onRemove, onShare }: { entry: Entry | null; open: boolean; onClose: () => void; onReplace: () => void; onRemove: () => void; onShare: () => void }) {
-  return <Modal open={open} title="Meal photo" onClose={onClose}>{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
+  return <Modal open={open} title="Meal photo" onClose={onClose} className="lightbox">{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
 }
 
 function StatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
