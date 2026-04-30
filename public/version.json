@@ -1,9 +1,9 @@
 {
-  "version": "2.0.0.13",
+  "version": "2.0.0.14",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Added bundled food estimate database support with a Settings refresh action.",
-    "Added database result previews, source chips, and cleaner subtitles.",
-    "Quick Picks search now clears after selecting a food."
+    "Added fuzzy token-based food search with improved database ranking.",
+    "Improved Chobani Greek Yoghurt database search results.",
+    "Added yoghurt and yogurt spelling support."
   ]
 }

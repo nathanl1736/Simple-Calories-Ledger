@@ -9,6 +9,7 @@ import { backupCounts, exportBackup, parseBackup } from './backup';
 import { applyAppUpdate, checkForAppUpdate, registerServiceWorker, type UpdateInfo } from './pwa';
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
+import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
 import {
   addDays,
   dayEntries,
@@ -997,51 +998,25 @@ function SwipeConfirm({ label, confirmLabel, className = '', onConfirm }: { labe
   );
 }
 
-function searchNeedle(value: string) {
-  return value.trim().toLowerCase();
-}
-
 function compactKey(value: string | undefined) {
-  return searchNeedle(value || '').replace(/[^a-z0-9]+/g, '');
-}
-
-function userFoodSearchText(food: Food) {
-  return [food.name, food.brand, food.servingLabel, food.category, ...(food.tags || [])].filter(Boolean).join(' ').toLowerCase();
+  return normaliseSearchText(value || '').replace(/[^a-z0-9]+/g, '');
 }
 
 function userFoodRank(food: Food, query: string) {
-  const q = searchNeedle(query);
-  const name = food.name.toLowerCase();
-  const text = userFoodSearchText(food);
-  if (!q) return 0;
-  if (name === q) return 0;
-  if (name.startsWith(q)) return 1;
-  if (text.includes(q)) return 2;
-  return 99;
+  return scoreFoodSearch(food, query);
 }
 
 function databaseRank(item: FoodDatabaseItem, query: string) {
-  const q = searchNeedle(query);
-  const name = item.name.toLowerCase();
-  const brand = (item.brand || '').toLowerCase();
-  const category = (item.category || '').toLowerCase();
-  const searchText = item.searchText.toLowerCase();
-  if (!q) return 99;
-  if (name === q) return 0;
-  if (name.startsWith(q)) return 1;
-  if (brand && (brand === q || brand.startsWith(q) || brand.includes(q))) return 2;
-  if (searchText.includes(q) || name.includes(q)) return 3;
-  if (category.includes(q) || item.tags.some(tag => tag.toLowerCase().includes(q))) return 4;
-  return 99;
+  return scoreFoodSearch(item, query);
 }
 
 function rankUserFoods(foods: Food[], query: string) {
   return [...foods]
     .map(food => ({ food, rank: userFoodRank(food, query) }))
-    .filter(item => item.rank < 99)
+    .filter(item => item.rank >= 0)
     .sort((a, b) =>
       Number(b.food.favourite) - Number(a.food.favourite)
-      || a.rank - b.rank
+      || b.rank - a.rank
       || (b.food.lastUsedAt || 0) - (a.food.lastUsedAt || 0)
       || (b.food.usageCount || 0) - (a.food.usageCount || 0)
       || a.food.name.localeCompare(b.food.name)
@@ -1054,8 +1029,8 @@ function rankDatabaseFoods(items: FoodDatabaseItem[], query: string, foods: Food
   const userNames = new Set(foods.map(food => compactKey(food.name)).filter(Boolean));
   return [...items]
     .map(item => ({ item, rank: databaseRank(item, query) }))
-    .filter(({ item, rank }) => rank < 99 && !sourceIds.has(item.id) && !userNames.has(compactKey(item.name)))
-    .sort((a, b) => a.rank - b.rank || a.item.name.localeCompare(b.item.name))
+    .filter(({ item, rank }) => rank >= 0 && !sourceIds.has(item.id) && !userNames.has(compactKey(item.name)))
+    .sort((a, b) => b.rank - a.rank || a.item.name.localeCompare(b.item.name))
     .map(item => item.item);
 }
 
