@@ -1,4 +1,4 @@
-const APP_VERSION = '2.0.0.12';
+const APP_VERSION = '2.0.0.13';
 const CACHE_PREFIX = 'nathans-calories-ledger';
 const CACHE_NAME = `${CACHE_PREFIX}-${APP_VERSION}`;
 const APP_SHELL = [
@@ -58,7 +58,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (url.origin !== location.origin) return;
 
-  if (url.pathname.endsWith('/version.json')) {
+  if (url.pathname.endsWith('/version.json') || url.pathname.includes('/commonfooddb/')) {
     event.respondWith(networkFirst(event.request));
     return;
   }

@@ -1,11 +1,10 @@
 // Release checklist: always bump APP_VERSION here, sw.js, public/sw.js, package.json,
 // package-lock.json, version.json, and public/version.json for user-visible app changes.
 // Keep RELEASE_NOTES to the latest release only, ideally one to three short bullets.
-export const APP_VERSION = '2.0.0.12';
+export const APP_VERSION = '2.0.0.13';
 
 export const RELEASE_NOTES = [
-  'Improved Quick Picks search layout.',
-  'Added grouped search results for user foods and database suggestions.',
-  'Added mock local database suggestions for testing future food database UX.',
-  'Kept database suggestions limited so search stays clean.'
+  'Added bundled food estimate database support with a Settings refresh action.',
+  'Added database result previews, source chips, and cleaner subtitles.',
+  'Quick Picks search now clears after selecting a food.'
 ];

@@ -161,6 +161,7 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
 .meta-chip { min-height: 26px; border-radius: var(--radius-pill); padding: 5px 8px 4px; background: #252525; color: #d9d9d9; font-size: var(--type-chip); font-weight: 950; line-height: 1.1; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .meta-chip.neutral { color: #e8e8e8; background: #2a2a2a; }
 .meta-chip.accent { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, #292929); }
+.meta-chip.source-chip { color: #cfcfcf; background: #292929; border: 1px solid #3b3b3b; }
 .macro-chip.fat { color: var(--fat); background: color-mix(in srgb, var(--fat) 14%, #292929); }
 .macro-chip.carb { color: var(--carbs); background: color-mix(in srgb, var(--carbs) 14%, #292929); }
 .macro-chip.protein { color: var(--protein); background: color-mix(in srgb, var(--protein) 14%, #292929); }
@@ -402,6 +403,11 @@ textarea { min-height: 78px; resize: vertical; }
 .quick-picker { background: #1b1b1b; border: 1px solid #303030; border-radius: 18px; padding: 14px; display: grid; gap: 12px; }
 .quick-picker.compact { grid-column: 1 / -1; }
 .quick-picker input { margin-bottom: 0; }
+.quick-picker.tracking-search { margin-bottom: 22px; }
+.quick-search-row { display: grid; grid-template-columns: minmax(0, 1fr) var(--tap); gap: 8px; align-items: center; }
+.quick-browse-toggle { position: relative; width: var(--tap); height: var(--tap); border-radius: var(--radius-control); background: #2b2b2b; color: var(--accent); border: 1px solid #3a3a3a; }
+.quick-browse-toggle span { position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; border-right: 3px solid currentColor; border-bottom: 3px solid currentColor; transform: translate(-50%, -65%) rotate(45deg); transition: transform .16s ease; }
+.quick-browse-toggle.open span { transform: translate(-50%, -35%) rotate(225deg); }
 .quick-picker details { border-top: 1px solid #303030; padding-top: 12px; }
 .quick-picker details:first-of-type { margin-top: 0; }
 .quick-picker summary { list-style: none; display: flex; justify-content: space-between; align-items: center; min-height: var(--tap); color: #aaa; font-size: 12px; font-weight: 950; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
@@ -420,12 +426,23 @@ textarea { min-height: 78px; resize: vertical; }
 .quick-food-main small { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 800; }
 .quick-food-macros { display: flex; gap: 4px; flex-wrap: wrap; min-width: 0; }
 .quick-food-macros .meta-chip { min-height: 21px; padding: 3px 6px 2px; font-size: 10px; }
+.quick-food-macros .source-chip { color: #bdbdbd; background: #252525; border-color: #3a3a3a; }
 .quick-food-cal { color: var(--accent); font-size: 13px; font-weight: 950; white-space: nowrap; align-self: start; padding-top: 2px; }
 .quick-empty { display: grid; gap: 3px; border-top: 1px solid #303030; padding-top: 12px; color: var(--muted); font-size: 13px; line-height: 1.35; }
 .quick-empty strong { color: #ddd; font-size: 14px; }
 .quick-more-btn { min-height: 42px; border-radius: 12px; background: #2b2b2b; color: var(--accent); font-size: 13px; font-weight: 950; }
 .database-query { margin: 0 0 12px; }
+.database-load-message { margin: 0; border-top: 1px solid #303030; padding-top: 10px; }
 .modal-results { padding-bottom: 6px; }
+.database-preview { display: grid; gap: 14px; }
+.database-preview h3 { margin: 0 0 4px; font-size: 22px; line-height: 1.1; font-weight: 950; }
+.database-preview p { margin: 0; }
+.database-preview-nutrition { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.database-preview-nutrition div { min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: #242424; padding: 10px; }
+.database-preview-nutrition span { display: block; color: var(--muted); font-size: 10px; font-weight: 950; letter-spacing: var(--tracking-label); text-transform: uppercase; margin-bottom: 3px; }
+.database-preview-nutrition strong { display: block; font-size: 18px; line-height: 1.1; font-weight: 950; color: #f0f0f0; overflow-wrap: anywhere; }
+.tag-chip-row { display: flex; flex-wrap: wrap; gap: 6px; max-height: 132px; overflow: auto; padding-right: 2px; -webkit-overflow-scrolling: touch; }
+.tag-chip { display: inline-flex; align-items: center; min-height: 28px; border-radius: var(--radius-pill); background: #262626; border: 1px solid #343434; color: #c8c8c8; padding: 5px 8px 4px; font-size: 11px; font-weight: 850; line-height: 1.1; }
 .food-basis-toggle { width: max-content; max-width: 100%; }
 .portion-help { color: var(--muted); font-size: 13px; font-weight: 850; line-height: 1.35; margin-top: -4px; }
 .check-pill { position: relative; display: inline-flex; align-items: center; width: max-content; max-width: 100%; color: var(--muted); font-size: 13px; font-weight: 900; cursor: pointer; }

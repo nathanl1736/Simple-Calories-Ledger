@@ -8,7 +8,7 @@ import { compressImage, downloadBlob } from './image';
 import { backupCounts, exportBackup, parseBackup } from './backup';
 import { applyAppUpdate, checkForAppUpdate, registerServiceWorker, type UpdateInfo } from './pwa';
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
-import { databaseItemToFood, loadFoodDatabase, type FoodDatabaseItem } from './foodDatabase';
+import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import {
   addDays,
   dayEntries,
@@ -390,12 +390,13 @@ export function App() {
 
   const touchFoodAfterLog = (draftState: AppState, entry: Entry) => {
     if (entry.autoNamed) return;
+    const isEstimateDatabaseFood = entryDraft.source === 'foodEstimateDatabase';
     const base = {
       unitMode: entryUnitModeValue(entry.unitMode),
       brand: entryDraft.brand.trim() || undefined,
       servingLabel: entryDraft.servingLabel.trim() || undefined,
       servingGrams: n(entryDraft.servingGrams) || undefined,
-      source: entryDraft.source.trim() || undefined,
+      source: isEstimateDatabaseFood ? undefined : entryDraft.source.trim() || undefined,
       sourceId: entryDraft.sourceId.trim() || undefined,
       category: entryDraft.category.trim() || undefined,
       tags: entryDraft.tags.length ? entryDraft.tags : undefined,
@@ -411,6 +412,7 @@ export function App() {
       if (entryDraft.favourite) Object.assign(source, { name: entry.name, ...base, favourite: true, updatedAt: Date.now() });
       return;
     }
+    if (isEstimateDatabaseFood && !entryDraft.favourite) return;
     const existing = draftState.foods.find(food => food.name.toLowerCase().trim() === entry.name.toLowerCase().trim());
     if (existing) {
       existing.usageCount = (existing.usageCount || 0) + 1;
@@ -483,6 +485,27 @@ export function App() {
     setModal('entry');
   };
 
+  const saveDatabaseFood = async (item: FoodDatabaseItem) => {
+    let added = false;
+    await updateState(draft => {
+      if (draft.foods.some(food => food.sourceId === item.id)) return;
+      const now = Date.now();
+      draft.foods.push(normalizeFood({
+        ...databaseItemToFood(item),
+        id: uid(),
+        source: undefined,
+        sourceId: item.id,
+        favourite: false,
+        usageCount: 0,
+        lastUsedAt: 0,
+        createdAt: now,
+        updatedAt: now
+      }));
+      added = true;
+    });
+    notify(added ? 'Food added to My Foods' : 'Food is already in My Foods');
+  };
+
   const activeFood = state.foods.find(food => food.id === activeFoodId) || null;
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
   const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 3);
@@ -525,6 +548,7 @@ export function App() {
           }}
           onToggleComplete={() => updateState(draft => setDayComplete(draft, selectedDate, !complete)).then(() => notify(complete ? 'Day reopened' : 'Day completed'))}
           onPrefillFood={prefillFood}
+          onSaveDatabaseFood={saveDatabaseFood}
         />
       )}
       {tab === 'journal' && (
@@ -619,6 +643,9 @@ export function App() {
           onBackupDays={days => updateState(draft => {
             draft.settings.backupReminderDays = validBackupReminderDays(days);
           })}
+          onRefreshFoodDatabase={() => refreshFoodEstimateDatabase()
+            .then(result => notify(`Loaded ${fmt(result.validCount)} food estimates`))
+            .catch(() => notify('Could not update local food estimates'))}
           onExport={() => exportBackup(state).then(next => persist(next)).then(() => notify('Backup exported')).catch(err => err?.name !== 'AbortError' && notify('Could not export backup'))}
           onImport={() => importRef.current?.click()}
           onCheckUpdates={() => checkForAppUpdate(update => {
@@ -672,6 +699,7 @@ export function App() {
         onClose={() => setModal(null)}
         onSave={saveEntry}
         onPickPhoto={() => photoInputRef.current?.click()}
+        onSaveDatabaseFood={saveDatabaseFood}
       />
       <FoodModal
         food={activeFood}
@@ -767,6 +795,7 @@ function TrackingView(props: {
   onPhotoEntry: (entry: Entry) => void;
   onToggleComplete: () => void;
   onPrefillFood: (food: Food) => void;
+  onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
 }) {
   const dayGoal = goalForDate(props.state, props.selectedDate);
   const goal = dayGoal.calories || 1;
@@ -793,14 +822,7 @@ function TrackingView(props: {
         <Macro name="PROTEIN" value={props.totals.protein} goal={dayGoal.protein} color="--protein" />
       </div>
       {!props.complete && (
-        <details className="card quick-picks">
-          <summary className="quick-picks-summary">
-            <div>
-              <h2>Quick picks</h2>
-            </div>
-          </summary>
-          <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} compact />
-        </details>
+        <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} onSaveDatabaseFood={props.onSaveDatabaseFood} compact browseToggle />
       )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
       <section className="card">
@@ -1003,11 +1025,12 @@ function databaseRank(item: FoodDatabaseItem, query: string) {
   const name = item.name.toLowerCase();
   const brand = (item.brand || '').toLowerCase();
   const category = (item.category || '').toLowerCase();
+  const searchText = item.searchText.toLowerCase();
   if (!q) return 99;
   if (name === q) return 0;
   if (name.startsWith(q)) return 1;
   if (brand && (brand === q || brand.startsWith(q) || brand.includes(q))) return 2;
-  if (item.searchText.includes(q) || name.includes(q)) return 3;
+  if (searchText.includes(q) || name.includes(q)) return 3;
   if (category.includes(q) || item.tags.some(tag => tag.toLowerCase().includes(q))) return 4;
   return 99;
 }
@@ -1036,15 +1059,42 @@ function rankDatabaseFoods(items: FoodDatabaseItem[], query: string, foods: Food
     .map(item => item.item);
 }
 
-function QuickFoodResultRow({ state, food, sourceLabel, databaseSuggestion = false, onChoose }: { state: AppState; food: Food; sourceLabel?: string; databaseSuggestion?: boolean; onChoose: (food: Food) => void }) {
-  const meta = [food.brand, food.servingLabel, foodUnitText(food), sourceLabel || food.category].filter(Boolean).join(' · ');
+function databaseSourceChip(tags: string[] = []) {
+  const tagSet = new Set(tags.map(tag => tag.toLowerCase()));
+  if (tagSet.has('verified-sample')) return 'Verified sample';
+  if (tagSet.has('label-sample')) return 'Label sample';
+  if (tagSet.has('partial-label')) return 'Partial label';
+  if (tagSet.has('macro-checked') || tagSet.has('macro-checked-generic')) return 'Macro checked';
+  if (tagSet.has('estimate') || tagSet.has('alcohol-estimate')) return 'Estimated';
+  return '';
+}
+
+function readableTag(tag: string) {
+  return tag.replace(/[-_]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function databaseServingText(item: FoodDatabaseItem | Food) {
+  if (entryUnitModeValue(item.unitMode) === '100g') return 'per 100g';
+  if (item.servingLabel && item.servingGrams && !String(item.servingLabel).includes(`${item.servingGrams}`)) {
+    return `${item.servingLabel} (${fmtGram(item.servingGrams)}g)`;
+  }
+  return item.servingLabel || (item.servingGrams ? `${fmtGram(item.servingGrams)}g` : 'per serving');
+}
+
+function QuickFoodResultRow({ state, food, databaseSuggestion = false, sourceChip = '', onChoose }: { state: AppState; food: Food; databaseSuggestion?: boolean; sourceChip?: string; onChoose: (food: Food) => void }) {
+  const meta = databaseSuggestion
+    ? [food.brand || 'Generic', databaseServingText(food), food.category].filter(Boolean).join(' · ')
+    : [food.brand, food.servingLabel, foodUnitText(food), food.category].filter(Boolean).join(' · ');
   return (
     <button className={`quick-food-result ${databaseSuggestion ? 'database' : 'user-food'}`} type="button" onClick={() => onChoose(food)}>
       <span className={`quick-food-icon ${food.favourite ? 'fav' : ''}`}>{food.favourite ? <span className="star-icon" aria-hidden="true" /> : databaseSuggestion ? 'DB' : ''}</span>
       <span className="quick-food-main">
         <strong>{food.name}</strong>
         <small>{meta || foodUnitText(food)}</small>
-        <span className="quick-food-macros"><MacroChips fat={food.fat} carbs={food.carbs} protein={food.protein} /></span>
+        <span className="quick-food-macros">
+          {sourceChip && <span className="meta-chip source-chip">{sourceChip}</span>}
+          <MacroChips fat={food.fat} carbs={food.carbs} protein={food.protein} />
+        </span>
       </span>
       <span className="quick-food-cal">{energyText(state, food.calories)}</span>
     </button>
@@ -1055,40 +1105,71 @@ function QuickResultSection({ title, children }: { title: string; children: Reac
   return <div className="quick-result-section"><div className="quick-section-label">{title}</div><div className="quick-result-list">{children}</div></div>;
 }
 
-function SavedFoodPicker({ state, foods, onChoose, compact = false }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; compact?: boolean }) {
+function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact = false, browseToggle = false }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void; compact?: boolean; browseToggle?: boolean }) {
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [browseOpen, setBrowseOpen] = useState(false);
   const [favouritesOpen, setFavouritesOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const [databaseMatches, setDatabaseMatches] = useState<FoodDatabaseItem[]>([]);
   const [databaseOpen, setDatabaseOpen] = useState(false);
+  const [databasePreview, setDatabasePreview] = useState<FoodDatabaseItem | null>(null);
+  const [databaseMessage, setDatabaseMessage] = useState('');
   const recentFoods = [...foods].sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0));
   const favourites = recentFoods.filter(food => food.favourite).slice(0, 12);
   const recent = recentFoods.slice(0, 14);
   const trimmedQuery = query.trim();
+  const trimmedDatabaseQuery = debouncedQuery.trim();
   const userResults = useMemo(() => trimmedQuery ? rankUserFoods(recentFoods, trimmedQuery).slice(0, 5) : [], [recentFoods, trimmedQuery]);
   const shownDatabase = databaseMatches.slice(0, 3);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 120);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
     let cancelled = false;
-    if (trimmedQuery.length < 2) {
+    if (trimmedDatabaseQuery.length < 2) {
       setDatabaseMatches([]);
+      setDatabaseMessage('');
       return;
     }
-    loadFoodDatabase()
-      .then(items => {
-        if (!cancelled) setDatabaseMatches(rankDatabaseFoods(items, trimmedQuery, foods));
+    loadFoodDatabaseWithStatus()
+      .then(result => {
+        if (cancelled) return;
+        setDatabaseMatches(rankDatabaseFoods(result.items, trimmedDatabaseQuery, foods));
+        setDatabaseMessage(result.message || (!result.items.length ? 'Food estimate database is not available right now.' : ''));
       })
       .catch(() => {
-        if (!cancelled) setDatabaseMatches([]);
+        if (!cancelled) {
+          setDatabaseMatches([]);
+          setDatabaseMessage('Food estimate database could not be loaded.');
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [foods, trimmedQuery]);
+  }, [foods, trimmedDatabaseQuery]);
 
   const choose = (food: Food) => {
     setDatabaseOpen(false);
+    setQuery('');
     onChoose(food);
+  };
+  const previewDatabase = (item: FoodDatabaseItem) => {
+    setDatabaseOpen(false);
+    setDatabasePreview(item);
+  };
+  const useDatabaseFood = (item: FoodDatabaseItem) => {
+    setDatabasePreview(null);
+    setDatabaseOpen(false);
+    setQuery('');
+    onChoose(databaseItemToFood(item));
+  };
+  const saveDatabaseFood = async (item: FoodDatabaseItem) => {
+    await onSaveDatabaseFood(item);
+    setDatabasePreview(null);
   };
   const rows = (items: Food[], empty: string) => (
     <div className="quick-result-list">
@@ -1097,11 +1178,30 @@ function SavedFoodPicker({ state, foods, onChoose, compact = false }: { state: A
   );
   const dbRows = (items: FoodDatabaseItem[]) => items.map(item => {
     const food = databaseItemToFood(item);
-    return <QuickFoodResultRow key={item.id} state={state} food={food} sourceLabel="Database suggestion" databaseSuggestion onChoose={choose} />;
+    return <QuickFoodResultRow key={item.id} state={state} food={food} sourceChip={databaseSourceChip(item.tags)} databaseSuggestion onChoose={() => previewDatabase(item)} />;
   });
+  const browsePanels = (
+    <>
+      <details open={favouritesOpen} onToggle={event => setFavouritesOpen(event.currentTarget.open)}>
+        <summary>Favourites</summary>
+        {rows(favourites, 'No favourites yet.')}
+      </details>
+      <details open={recentOpen} onToggle={event => setRecentOpen(event.currentTarget.open)}>
+        <summary>Recent foods</summary>
+        {rows(recent, 'Recent foods appear after saving entries.')}
+      </details>
+    </>
+  );
   return (
-    <section className={`quick-picker ${compact ? 'compact' : ''}`}>
-      <input type="search" placeholder="Search saved foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
+    <section className={`quick-picker ${compact ? 'compact' : ''} ${browseToggle ? 'tracking-search' : ''}`}>
+      {browseToggle ? (
+        <div className="quick-search-row">
+          <input type="search" aria-label="Search foods" placeholder="Search foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
+          <button className={`quick-browse-toggle ${browseOpen ? 'open' : ''}`} type="button" aria-label={browseOpen ? 'Hide favourites and recent foods' : 'Show favourites and recent foods'} aria-expanded={browseOpen} onClick={() => setBrowseOpen(open => !open)}><span aria-hidden="true" /></button>
+        </div>
+      ) : (
+        <input type="search" placeholder="Search saved foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
+      )}
       {trimmedQuery ? (
         <>
           {userResults.length ? (
@@ -1115,24 +1215,53 @@ function SavedFoodPicker({ state, foods, onChoose, compact = false }: { state: A
               {databaseMatches.length > shownDatabase.length && <button className="quick-more-btn" type="button" onClick={() => setDatabaseOpen(true)}>Show more database results</button>}
             </QuickResultSection>
           )}
+          {databaseMessage && <p className="hint database-load-message">{databaseMessage}</p>}
         </>
-      ) : (
-        <>
-          <details open={favouritesOpen} onToggle={event => setFavouritesOpen(event.currentTarget.open)}>
-            <summary>Favourites</summary>
-            {rows(favourites, 'No favourites yet.')}
-          </details>
-          <details open={recentOpen} onToggle={event => setRecentOpen(event.currentTarget.open)}>
-            <summary>Recent foods</summary>
-            {rows(recent, 'Recent foods appear after saving entries.')}
-          </details>
-        </>
-      )}
+      ) : browseToggle ? (browseOpen ? browsePanels : null) : browsePanels}
       <Modal open={databaseOpen} title="Food database results" onClose={() => setDatabaseOpen(false)} wide>
         <p className="hint database-query">Results for “{trimmedQuery}”</p>
         <div className="quick-result-list modal-results">{dbRows(databaseMatches.slice(0, 20))}</div>
       </Modal>
+      <FoodDatabasePreviewModal
+        state={state}
+        item={databasePreview}
+        onUse={useDatabaseFood}
+        onSave={saveDatabaseFood}
+        onClose={() => setDatabasePreview(null)}
+      />
     </section>
+  );
+}
+
+function FoodDatabasePreviewModal({ state, item, onUse, onSave, onClose }: { state: AppState; item: FoodDatabaseItem | null; onUse: (item: FoodDatabaseItem) => void; onSave: (item: FoodDatabaseItem) => Promise<void> | void; onClose: () => void }) {
+  if (!item) return null;
+  const chip = databaseSourceChip(item.tags);
+  return (
+    <Modal open title="Food estimate" onClose={onClose}>
+      <div className="database-preview">
+        <div>
+          <h3>{item.name}</h3>
+          <p className="hint">{[item.brand, item.category].filter(Boolean).join(' · ') || item.category || 'Generic food estimate'}</p>
+        </div>
+        <div className="meta-chips">
+          {chip && <span className="meta-chip source-chip">{chip}</span>}
+          <span className="meta-chip neutral">{databaseServingText(item)}</span>
+          {item.servingGrams && entryUnitModeValue(item.unitMode) === 'serving' && !String(item.servingLabel || '').includes(`${item.servingGrams}`) && <span className="meta-chip neutral">{fmtGram(item.servingGrams)}g</span>}
+        </div>
+        <div className="database-preview-nutrition">
+          <div><span>Calories</span><strong>{energyText(state, item.calories)}</strong></div>
+          <div><span>Protein</span><strong>{fmt(item.protein)}g</strong></div>
+          <div><span>Carbs</span><strong>{fmt(item.carbs)}g</strong></div>
+          <div><span>Fat</span><strong>{fmt(item.fat)}g</strong></div>
+        </div>
+        {item.tags.length > 0 && <div className="tag-chip-row">{item.tags.map(tag => <span key={tag} className="tag-chip">{readableTag(tag)}</span>)}</div>}
+        <div className="actions vertical">
+          <button className="primary" type="button" onClick={() => onUse(item)}>Use this food</button>
+          <button className="secondary" type="button" onClick={() => onSave(item)}>Add to My Foods</button>
+          <button className="secondary" type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -1145,7 +1274,8 @@ function EntryModal({
   setDraft,
   onClose,
   onSave,
-  onPickPhoto
+  onPickPhoto,
+  onSaveDatabaseFood
 }: {
   open: boolean;
   openMode: EntryOpenMode;
@@ -1156,6 +1286,7 @@ function EntryModal({
   onClose: () => void;
   onSave: (keepOpen?: boolean) => void;
   onPickPhoto: () => void;
+  onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
 }) {
   const [additionalOpen, setAdditionalOpen] = useState(false);
   const caloriesPanelRef = useRef<HTMLDivElement>(null);
@@ -1222,7 +1353,7 @@ function EntryModal({
   return (
     <Modal open={open} title={draft.editingId ? 'Edit entry' : `Log ${draft.meal.toLowerCase()}`} onClose={onClose} wide>
       <form className="form entry-form" onSubmit={(event: FormEvent) => { event.preventDefault(); onSave(false); }}>
-        <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} compact />
+        <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} onSaveDatabaseFood={onSaveDatabaseFood} compact />
         <div ref={caloriesPanelRef} className="calories-priority full">
           <label>
             <span>Calories & Macros</span>
@@ -1876,11 +2007,13 @@ function SettingsView(props: {
   onAccent: (color: string) => void;
   onEnergyUnit: (unit: 'kcal' | 'kj') => void;
   onBackupDays: (days: number) => void;
+  onRefreshFoodDatabase: () => Promise<void>;
   onExport: () => void;
   onImport: () => void;
   onCheckUpdates: () => void;
   onClear: () => void;
 }) {
+  const [foodDatabaseUpdating, setFoodDatabaseUpdating] = useState(false);
   const counts = backupCounts(props.state);
   const goalUnit = energyUnitValue(props.state.settings.energyUnit);
   const visibleSettings = { ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) };
@@ -1892,6 +2025,7 @@ function SettingsView(props: {
       <header className="head"><div className="kicker">Preferences</div><h1>Settings</h1></header>
       <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#9be7c4', '#a8d8ff', '#f5dd9d', '#ffb3ba', '#d8c3ff'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
+      <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes the built-in estimated food database from this app&apos;s files. This will not change your saved foods or food logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
       <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup exported: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}` : 'No backup exported yet.'} Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
       <section className="card"><h2>App</h2><p className="hint"><strong>Nathan&apos;s Calories Ledger</strong><br />Version {APP_VERSION}<br /><span className="project-note">A project by Nathan.</span></p><div className="actions"><button className="secondary" type="button" onClick={props.onCheckUpdates}>Check for updates</button><button className="secondary danger" type="button" onClick={props.onClear}>Clear local data</button></div></section>
     </>

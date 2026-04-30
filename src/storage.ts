@@ -47,3 +47,25 @@ export async function saveState(state: AppState) {
     request.onerror = () => reject(request.error);
   });
 }
+
+export async function readValue<T>(key: string): Promise<T | null> {
+  try {
+    const objectStore = await store('readonly');
+    return await new Promise(resolve => {
+      const request = objectStore.get(key);
+      request.onsuccess = () => resolve((request.result ?? null) as T | null);
+      request.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function saveValue<T>(key: string, value: T) {
+  const objectStore = await store('readwrite');
+  await new Promise<void>((resolve, reject) => {
+    const request = objectStore.put(value, key);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}

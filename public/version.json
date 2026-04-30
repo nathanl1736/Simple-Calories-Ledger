@@ -1,10 +1,9 @@
 {
-  "version": "2.0.0.12",
+  "version": "2.0.0.13",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Improved Quick Picks search layout.",
-    "Added grouped search results for user foods and database suggestions.",
-    "Added mock local database suggestions for testing future food database UX.",
-    "Kept database suggestions limited so search stays clean."
+    "Added bundled food estimate database support with a Settings refresh action.",
+    "Added database result previews, source chips, and cleaner subtitles.",
+    "Quick Picks search now clears after selecting a food."
   ]
 }
