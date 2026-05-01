@@ -236,13 +236,16 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       overflow: document.body.style.overflow,
       position: document.body.style.position,
       top: document.body.style.top,
-      width: document.body.style.width
+      width: document.body.style.width,
+      htmlOverflow: document.documentElement.style.overflow
     };
+    document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
     document.body.style.position = 'fixed';
     document.body.style.top = `-${scrollY}px`;
     document.body.style.width = '100%';
     return () => {
+      document.documentElement.style.overflow = previous.htmlOverflow;
       document.body.style.overflow = previous.overflow;
       document.body.style.position = previous.position;
       document.body.style.top = previous.top;
@@ -363,6 +366,8 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
   useEffect(() => {
     const inputTypesWithoutKeyboard = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
     const isInsideAppModal = (el: EventTarget | null) => el instanceof HTMLElement && !!el.closest('.modal-backdrop');
+    /** True while any modal backdrop is mounted (including during close animation). */
+    const isModalLayerPresent = () => !!document.querySelector('.modal-backdrop');
     const isTextEntryElement = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false;
       if (isInsideAppModal(target)) return false;
@@ -370,9 +375,19 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
       if (!(target instanceof HTMLInputElement)) return false;
       return !inputTypesWithoutKeyboard.has(target.type);
     };
-    const refresh = () => setNavHidden(isTextEntryElement(document.activeElement));
-    const onFocusIn = (event: FocusEvent) => setNavHidden(isTextEntryElement(event.target));
-    const onFocusOut = () => window.setTimeout(refresh, 0);
+    const refresh = () => {
+      if (isModalLayerPresent()) return;
+      setNavHidden(isTextEntryElement(document.activeElement));
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (isModalLayerPresent()) return;
+      setNavHidden(isTextEntryElement(event.target));
+    };
+    const onFocusOut = () => {
+      const hadModal = !!document.querySelector('.modal-backdrop');
+      window.setTimeout(refresh, 0);
+      if (hadModal) window.setTimeout(refresh, 400);
+    };
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
     refresh();
