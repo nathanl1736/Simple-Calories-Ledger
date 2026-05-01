@@ -353,7 +353,6 @@ function MonthNav({ value, onChange }: { value: Date; onChange: (date: Date) => 
 }
 
 function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => void; children: ReactNode }) {
-  const [navHidden, setNavHidden] = useState(false);
   const tabs: [Tab, string][] = [
     ['tracking', 'Track'],
     ['stats', 'Week'],
@@ -363,44 +362,10 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
     ['settings', 'Settings']
   ];
 
-  useEffect(() => {
-    const inputTypesWithoutKeyboard = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
-    const isInsideAppModal = (el: EventTarget | null) => el instanceof HTMLElement && !!el.closest('.modal-backdrop');
-    /** True while any modal backdrop is mounted (including during close animation). */
-    const isModalLayerPresent = () => !!document.querySelector('.modal-backdrop');
-    const isTextEntryElement = (target: EventTarget | null) => {
-      if (!(target instanceof HTMLElement)) return false;
-      if (isInsideAppModal(target)) return false;
-      if (target.matches('textarea, select, [contenteditable="true"]')) return true;
-      if (!(target instanceof HTMLInputElement)) return false;
-      return !inputTypesWithoutKeyboard.has(target.type);
-    };
-    const refresh = () => {
-      if (isModalLayerPresent()) return;
-      setNavHidden(isTextEntryElement(document.activeElement));
-    };
-    const onFocusIn = (event: FocusEvent) => {
-      if (isModalLayerPresent()) return;
-      setNavHidden(isTextEntryElement(event.target));
-    };
-    const onFocusOut = () => {
-      const hadModal = !!document.querySelector('.modal-backdrop');
-      window.setTimeout(refresh, 0);
-      if (hadModal) window.setTimeout(refresh, 400);
-    };
-    document.addEventListener('focusin', onFocusIn);
-    document.addEventListener('focusout', onFocusOut);
-    refresh();
-    return () => {
-      document.removeEventListener('focusin', onFocusIn);
-      document.removeEventListener('focusout', onFocusOut);
-    };
-  }, []);
-
   return (
     <>
       <main className="app">{children}</main>
-      <nav className={`nav ${navHidden ? 'hidden' : ''}`} aria-label="Main tabs" aria-hidden={navHidden}>
+      <nav className="nav" aria-label="Main tabs">
         <div className="nav-inner">
           {tabs.map(([id, label]) => (
             <button key={id} className={`tab ${tab === id ? 'active' : ''}`} type="button" onClick={() => setTab(id)}>
