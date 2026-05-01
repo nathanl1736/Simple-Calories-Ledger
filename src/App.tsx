@@ -104,6 +104,14 @@ const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kc
   entryEnergyUnit
 });
 
+function defaultMealForCurrentTime(): Meal {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return 'Breakfast';
+  if (hour >= 12 && hour < 15) return 'Lunch';
+  if (hour >= 17 && hour < 22) return 'Dinner';
+  return 'Snack';
+}
+
 const draftNumberText = (value: unknown) => String(Number.isFinite(Number(value)) ? Number(value) : 0);
 const draftEnergyText = (kcal: number, unit: EnergyUnit) => energyInputFromKcal(kcal, unit) || '0';
 
@@ -298,10 +306,10 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
   const [navHidden, setNavHidden] = useState(false);
   const tabs: [Tab, string][] = [
     ['tracking', 'Track'],
+    ['stats', 'Week'],
     ['journal', 'Journal'],
     ['library', 'Foods'],
     ['cards', 'Cards'],
-    ['stats', 'Week'],
     ['settings', 'Settings']
   ];
 
@@ -478,7 +486,7 @@ export function App() {
   const complete = isDayComplete(state, selectedDate);
   const mealGroups = useMemo(() => getMealGroups(state), [state]);
 
-  const openEntry = (meal: Meal = 'Snack', date = selectedDate) => {
+  const openEntry = (meal: Meal = defaultMealForCurrentTime(), date = selectedDate) => {
     if (isDayComplete(state, date)) return notify('Reopen the day before changing food logs');
     flushSync(() => {
       setEntryDraft(blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)));
@@ -490,7 +498,7 @@ export function App() {
     caloriesInput?.select();
   };
 
-  const openAiQuickLog = (meal: Meal = 'Snack') => {
+  const openAiQuickLog = (meal: Meal = defaultMealForCurrentTime()) => {
     if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
     setAiQuickLogMeal(meal);
     setModal('aiQuickLog');
@@ -628,7 +636,7 @@ export function App() {
   const prefillFood = (food: Food) => {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
     setEntryDraft({
-      ...blankEntryDraft('Snack', entryEnergyUnit),
+      ...blankEntryDraft(defaultMealForCurrentTime(), entryEnergyUnit),
       sourceFoodId: food.source ? '' : food.id,
       name: food.name,
       unitMode: entryUnitModeValue(food.unitMode),
@@ -991,13 +999,13 @@ export function App() {
         onClose={() => setModal(null)}
         onParsed={prefillAiQuickLog}
       />
-      <Modal open={modal === 'aiQuickLogHelp'} title="AI Quick Log Help" onClose={() => setModal(null)}>
+      <Modal open={modal === 'aiQuickLogHelp'} title="AI estimate helper" onClose={() => setModal(null)}>
         <ol className="update-list ai-help-list">
           <li>Copy the prompt.</li>
           <li>Paste it into your AI chatbot.</li>
           <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
           <li>Copy the returned JSON.</li>
-          <li>Tap AI Quick Log in the tracker.</li>
+          <li>Tap AI estimate helper in Track.</li>
           <li>Paste, review the Log Food form, then save normally.</li>
         </ol>
       </Modal>
@@ -1085,12 +1093,15 @@ function TrackingView(props: {
   const dayGoal = goalForDate(props.state, props.selectedDate);
   const goal = dayGoal.calories || 1;
   const remaining = goal - props.totals.calories;
+  const overTarget = remaining < 0;
+  const displayedRemaining = overTarget ? Math.abs(remaining) : remaining;
   const deg = Math.min(360, Math.max(0, props.totals.calories) / goal * 360);
   const weekSummary = homeWeekSummary(props.state, props.selectedDate);
   const weekCalorieBudget = weekSummary.rows.reduce((acc, row) => acc + row.goal.calories, 0);
   const bankStatTone = weekSummary.completed.length ? budgetDeltaTone(weekSummary.banked) : '';
   const projectedStatTone = weekSummary.completed.length ? upperBudgetTone(weekSummary.projected, weekCalorieBudget) : '';
-  const remainingLabel = dayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
+  const remainingLabel = overTarget ? (dayGoal.trackingMode === 'Bulking' ? 'Above target by' : 'Over today by') : dayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
+  const trackingTitle = props.selectedDate === todayKey() ? 'Today in your week' : 'This day in your week';
   const swipeNavigation = useSafeSwipeNavigation({
     onPrevious: () => props.setSelectedDate(addDays(props.selectedDate, -1)),
     onNext: () => props.setSelectedDate(addDays(props.selectedDate, 1))
@@ -1099,16 +1110,16 @@ function TrackingView(props: {
     <div className="screen-swipe-zone view-transition" key={props.selectedDate} {...swipeNavigation}>
       <header className="page-header">
         <div className="page-kicker">Dawni</div>
-        <h1 className="page-title">Today in your week</h1>
+        <h1 className="page-title">{trackingTitle}</h1>
       </header>
       <DayNav value={props.selectedDate} onChange={props.setSelectedDate} />
-      <section className="hero today-card">
+      <section className={`hero today-card ${overTarget ? 'over-target' : ''}`}>
         <div className="remaining">
           <div className="label">{remainingLabel}</div>
-          <div className="value">{fmt(remaining)} <small>{energyLabel(props.state)}</small></div>
+          <div className="value">{fmt(displayedRemaining)} <small>{energyLabel(props.state)}</small></div>
           <div className="today-context">
-            <span>Logged {energyText(props.state, props.totals.calories)}</span>
-            <span>Daily target {energyText(props.state, dayGoal.calories)}</span>
+            <span className="today-context-chip">Daily target {energyText(props.state, dayGoal.calories)}</span>
+            {overTarget && <span className="today-context-chip today-context-chip--balance">Week can still balance</span>}
           </div>
         </div>
         <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Logged</span></div></div>
@@ -1145,7 +1156,7 @@ function TrackingView(props: {
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
       {!props.complete && (
         <div className="tracking-ai-actions">
-          <button className="ai-quick-log-btn" type="button" onClick={() => props.onOpenAiQuickLog()}>AI Quick Log</button>
+          <button className="ai-quick-log-btn" type="button" onClick={() => props.onOpenAiQuickLog()}>AI estimate helper</button>
           <button className="secondary ai-copy-prompt-btn" type="button" onClick={() => props.onCopyAiPrompt()}>Copy prompt</button>
         </div>
       )}
@@ -1649,9 +1660,9 @@ function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: bool
   };
 
   return (
-    <Modal open={open} title="AI Quick Log" onClose={onClose}>
+    <Modal open={open} title="AI estimate helper" onClose={onClose}>
       <div className="ai-quick-log-modal">
-        <p className="hint">Paste an AI-generated quick log. If the format is correct, it will fill the Log Food form for you.</p>
+        <p className="hint">Paste an AI-generated estimate. If the format is correct, it will fill the Log Food form for review.</p>
         <div className="help-callout">AI estimates can be wrong. Review before saving.</div>
         <div className="actions">
           <button className="secondary" type="button" onClick={pasteFromClipboard}>Paste from clipboard</button>
@@ -1887,7 +1898,7 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
       <header className="page-header has-helper">
         <div className="page-kicker">Reuse</div>
         <h1 className="page-title">Your usual foods</h1>
-        <p className="hint page-subtitle library-hint">Reuse favourites, recent meals, and saved foods.</p>
+        <p className="hint page-subtitle library-hint">Recent foods are for speed. Favourites are your dependable routines.</p>
       </header>
       <div className="page-controls">
         <div className="seg" role="tablist" aria-label="Saved foods">
@@ -2081,7 +2092,7 @@ function JournalView({
       <header className="page-header has-helper">
         <div className="page-kicker">Food journal</div>
         <h1 className="page-title">Journal</h1>
-        <p className="hint page-subtitle">Meal photos, organised by day.</p>
+        <p className="hint page-subtitle">A visual memory of what you ate, organised by day.</p>
       </header>
       <MonthNav value={journalMonth} onChange={setJournalMonth} />
       <div className="calendar journal-month-surface">
@@ -2425,7 +2436,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
       <header className="page-header has-helper">
         <div className="page-kicker">This week</div>
         <h1 className="page-title">Week</h1>
-        <p className="hint page-subtitle">See how your week is tracking.</p>
+        <p className="hint page-subtitle">Check whether your week is still manageable.</p>
       </header>
       <RichBanking state={state} start={bankingWeekStart} setStart={setBankingWeekStart} onHelp={onBankHelp} />
 
@@ -2688,14 +2699,14 @@ function SettingsView(props: {
       <header className="page-header has-helper">
         <div className="page-kicker">Dawni</div>
         <h1 className="page-title">Settings</h1>
-        <p className="hint page-subtitle">Targets, display, local data, and backup.</p>
+        <p className="hint page-subtitle">Goals, calm display, and local-first backup.</p>
       </header>
       <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || 'dark') === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
-      <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes the built-in estimated food database from this app&apos;s files. This will not change your saved foods or food logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
-      <section className="card custom-db-card"><div className="card-head"><h2>Custom Food Databases</h2><button className="help-btn" type="button" onClick={props.onCustomDatabaseHelp}>?</button></div><p className="hint">Import your own food database JSON. Enabled databases appear in food search.</p><div className="actions"><button className="primary" type="button" onClick={props.onImportCustomDatabase}>Import JSON</button></div>{props.state.customFoodDatabases.length ? <div className="custom-db-list">{props.state.customFoodDatabases.map(database => <div className="custom-db-row" key={database.id}><div className="custom-db-main"><strong>{database.name}</strong><span>{fmt(database.itemCount)} foods · Imported {new Date(database.importedAt).toLocaleDateString()} · {database.enabled ? 'Enabled' : 'Disabled'}</span></div><label className="toggle-line"><input type="checkbox" checked={database.enabled} onChange={event => props.onToggleCustomDatabase(database.id, event.target.checked)} /><span>{database.enabled ? 'On' : 'Off'}</span></label><button className="small-btn danger" type="button" onClick={() => props.onDeleteCustomDatabase(database.id)}>Delete</button></div>)}</div> : <div className="empty custom-db-empty">No custom databases imported yet.</div>}</section>
-      <section className="card ai-prompt-card"><div className="card-head"><h2>AI Quick Log Prompt</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Copy this prompt into ChatGPT, Gemini, Claude, or another AI chatbot. Then enter your ingredients and paste the result into AI Quick Log.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div></section>
-      <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup exported: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}` : 'No backup exported yet.'} Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos, {counts.customFoodDatabases || 0} custom databases.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
+      <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes Dawni&apos;s local estimate list. Estimates stay editable and won&apos;t change your saved foods or logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
+      <section className="card custom-db-card"><div className="card-head"><h2>Custom food databases</h2><button className="help-btn" type="button" onClick={props.onCustomDatabaseHelp}>?</button></div><p className="hint">Import your own JSON estimate list. Enabled databases appear in food search and remain stored on this device.</p><div className="actions"><button className="primary" type="button" onClick={props.onImportCustomDatabase}>Import JSON</button></div>{props.state.customFoodDatabases.length ? <div className="custom-db-list">{props.state.customFoodDatabases.map(database => <div className="custom-db-row" key={database.id}><div className="custom-db-main"><strong>{database.name}</strong><span>{fmt(database.itemCount)} foods · Imported {new Date(database.importedAt).toLocaleDateString()} · {database.enabled ? 'Enabled' : 'Disabled'}</span></div><label className="toggle-line"><input type="checkbox" checked={database.enabled} onChange={event => props.onToggleCustomDatabase(database.id, event.target.checked)} /><span>{database.enabled ? 'On' : 'Off'}</span></label><button className="small-btn danger" type="button" onClick={() => props.onDeleteCustomDatabase(database.id)}>Delete</button></div>)}</div> : <div className="empty custom-db-empty">No custom databases imported yet.</div>}</section>
+      <section className="card ai-prompt-card"><div className="card-head"><h2>AI estimate helper</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Use this prompt with your AI chatbot, then review the estimate before saving it. Dawni treats AI output as editable, not guaranteed.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div></section>
+      <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}.` : 'No backup exported yet.'} Dawni keeps your data on this device; export a backup to protect your logs and journal photos. Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos, {counts.customFoodDatabases || 0} custom databases.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
       <section className="card"><h2>App</h2><p className="hint"><strong>Dawni</strong><br /><span className="project-note">Weekly Calorie Tracker</span><br />Version {APP_VERSION}</p><div className="actions"><button className="secondary" type="button" onClick={props.onCheckUpdates}>Check for updates</button><button className="secondary danger" type="button" onClick={props.onClear}>Clear local data</button></div></section>
     </>
   );
