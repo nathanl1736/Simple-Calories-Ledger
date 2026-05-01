@@ -1061,7 +1061,8 @@ export function App() {
       <AiQuickLogModal
         open={modal === 'aiQuickLog'}
         fallbackMeal={aiQuickLogMeal}
-        onClose={() => setModal(null)}
+        // Modal runs a close animation then calls onClose; if we already opened Log Food, do not setModal(null).
+        onClose={() => setModal(current => (current === 'aiQuickLog' ? null : current))}
         onParsed={prefillAiQuickLog}
       />
       <Modal open={modal === 'aiQuickLogHelp'} title="AI estimate helper" onClose={() => setModal(null)}>

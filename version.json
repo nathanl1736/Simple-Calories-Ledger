@@ -1,5 +1,5 @@
 {
-  "version": "2.1.2.8",
+  "version": "2.1.2.9",
   "notes": [
     "iOS PWA: bottom tab bar stays stable when closing Log Food and other modals (focus / nav hide sync)."
   ],
