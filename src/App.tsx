@@ -362,8 +362,10 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
 
   useEffect(() => {
     const inputTypesWithoutKeyboard = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
+    const isInsideAppModal = (el: EventTarget | null) => el instanceof HTMLElement && !!el.closest('.modal-backdrop');
     const isTextEntryElement = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false;
+      if (isInsideAppModal(target)) return false;
       if (target.matches('textarea, select, [contenteditable="true"]')) return true;
       if (!(target instanceof HTMLInputElement)) return false;
       return !inputTypesWithoutKeyboard.has(target.type);

@@ -1,7 +1,8 @@
 {
+  "id": "./",
   "name": "Dawni",
   "short_name": "Dawni",
-  "description": "Weekly Calorie Tracker. A calm weekly calorie tracker and food journal for sustainable consistency.",
+  "description": "Dawni — a calm weekly food journal. Track meals, macros, and energy without overwhelm.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -9,13 +10,13 @@
   "background_color": "#151713",
   "icons": [
     {
-      "src": "icons/icon-192-v2-1-2-2.png",
+      "src": "icons/icon-192-v2.1.2.5.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "icons/icon-512-v2-1-2-2.png",
+      "src": "icons/icon-512-v2.1.2.5.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
