@@ -1,4 +1,4 @@
-﻿import { CSSProperties, FormEvent, ReactNode, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { CSSProperties, FormEvent, ReactNode, PointerEvent as ReactPointerEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { createPortal, flushSync } from 'react-dom';
 import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
@@ -215,7 +215,7 @@ function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', '
   );
 }
 
-function Modal({ open, title, children, onClose, wide = false, className = '' }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string }) {
+function Modal({ open, title, children, onClose, wide = false, className = '', bottomSheet = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string; bottomSheet?: boolean }) {
   const [rendered, setRendered] = useState(open);
   const [closing, setClosing] = useState(false);
   useEffect(() => {
@@ -247,16 +247,27 @@ function Modal({ open, title, children, onClose, wide = false, className = '' }:
     }
     if (!rendered) return;
     setClosing(true);
+    const closeMs = bottomSheet ? 320 : 180;
     const timer = window.setTimeout(() => {
       setRendered(false);
       setClosing(false);
-    }, 180);
+    }, closeMs);
     return () => window.clearTimeout(timer);
-  }, [open, rendered]);
+  }, [open, rendered, bottomSheet]);
   if (!rendered) return null;
+  const panelClass = ['modal-panel', wide ? 'wide' : '', bottomSheet ? 'modal-panel--bottom-sheet' : '', className].filter(Boolean).join(' ');
+  const backdropMouse = (event: MouseEvent<HTMLDivElement>) => {
+    if (closing || event.target !== event.currentTarget) return;
+    onClose();
+  };
   return (
-    <div className={`modal-backdrop ${closing ? 'closing' : ''}`} data-swipe-lock onMouseDown={event => !closing && event.target === event.currentTarget && onClose()}>
-      <section className={`modal-panel ${wide ? 'wide' : ''} ${className}`} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
+    <div
+      className={`modal-backdrop ${closing ? 'closing' : ''} ${bottomSheet ? 'modal-backdrop--scrim' : ''}`}
+      data-swipe-lock
+      onMouseDown={bottomSheet ? undefined : backdropMouse}
+    >
+      {bottomSheet && <div className="modal-scrim" data-swipe-lock onMouseDown={backdropMouse} />}
+      <section className={panelClass} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="close" type="button" onClick={onClose} aria-label="Close"><span aria-hidden="true" /></button>
@@ -990,7 +1001,7 @@ export function App() {
         onClose={() => setModal(null)}
         onShare={() => activeMealCard && shareMealCard(activeMealCard, notify)}
       />
-      <Modal open={modal === 'photo'} title="Meal photo" onClose={() => setModal(null)} className="lightbox">
+      <Modal open={modal === 'photo'} title="Meal photo" onClose={() => setModal(null)} className="lightbox" bottomSheet>
         <div className="photo-preview-shell">{photoPreview ? <img className="photo-preview-large" src={photoPreview} alt="Meal" /> : <div className="empty">No photo available.</div>}</div>
       </Modal>
       <AiQuickLogModal
@@ -1763,7 +1774,7 @@ function EntryModal({
   }, [open, openMode]);
 
   return (
-    <Modal open={open} title={draft.editingId ? 'Edit entry' : `Log ${draft.meal.toLowerCase()}`} onClose={onClose} wide>
+    <Modal open={open} title={draft.editingId ? 'Edit entry' : `Log ${draft.meal.toLowerCase()}`} onClose={onClose} wide bottomSheet>
       <form className="form entry-form" onSubmit={(event: FormEvent) => { event.preventDefault(); onSave(false); }}>
         <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} onSaveDatabaseFood={onSaveDatabaseFood} compact />
         <div ref={caloriesPanelRef} className="calories-priority full">
@@ -1836,7 +1847,7 @@ function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }: { food
     setDraft(food ? structuredClone(food) : null);
     setCalorieInput(food ? energyInputFromKcal(food.calories, foodEnergyUnit) : '');
   }, [food, foodEnergyUnit]);
-  if (!draft) return <Modal open={open} title="Manage food" onClose={onClose}><div className="empty">Food not found.</div></Modal>;
+  if (!draft) return <Modal open={open} title="Manage food" onClose={onClose} bottomSheet><div className="empty">Food not found.</div></Modal>;
   const patch = (next: Partial<Food>) => setDraft(current => current ? { ...current, ...next } : current);
   const setCalories = (value: string) => {
     setCalorieInput(value);
@@ -1844,7 +1855,7 @@ function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }: { food
   };
   const toggleFoodUnitMode = () => patch({ unitMode: entryUnitModeValue(draft.unitMode) === 'serving' ? '100g' : 'serving' });
   return (
-    <Modal open={open} title="Manage food" onClose={onClose}>
+    <Modal open={open} title="Manage food" onClose={onClose} bottomSheet>
       <form className="form" onSubmit={event => { event.preventDefault(); onSave({ ...draft, calories: energyInputToKcal(calorieInput, foodEnergyUnit) }); }}>
         <Field label="Name" full><input value={draft.name} onChange={event => patch({ name: event.target.value })} /></Field>
         <Field label="Calories">
@@ -2306,7 +2317,7 @@ async function sharePhotoBlob(blob: Blob, filename: string, title: string, notif
 }
 
 function EntryPhotoModal({ entry, open, onClose, onReplace, onRemove, onShare }: { entry: Entry | null; open: boolean; onClose: () => void; onReplace: () => void; onRemove: () => void; onShare: () => void }) {
-  return <Modal open={open} title="Meal photo" onClose={onClose} className="lightbox">{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
+  return <Modal open={open} title="Meal photo" onClose={onClose} className="lightbox" bottomSheet>{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
 }
 
 function StatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {

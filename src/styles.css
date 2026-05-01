@@ -129,6 +129,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
+@keyframes bottomSheetIn {
+  from { transform: translate3d(0, 100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+
 @keyframes toastIn {
   from { opacity: 0; transform: translate(-50%, 8px) scale(.98); }
   to { opacity: 1; transform: translate(-50%, 0) scale(1); }
@@ -691,8 +696,17 @@ textarea { min-height: 78px; resize: vertical; }
 .extra-info { grid-column: 1 / -1; background: var(--color-surface-soft); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
 .extra-info summary { list-style: none; display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 12px; color: var(--color-text-soft); font-size: 13px; font-weight: var(--weight-label); letter-spacing: var(--tracking-label); text-transform: uppercase; cursor: pointer; }
 .extra-info summary::-webkit-details-marker { display: none; }
-.extra-info summary:after { content: ""; width: 15px; height: 15px; background: linear-gradient(var(--accent), var(--accent)) center / 15px 3px no-repeat, linear-gradient(var(--accent), var(--accent)) center / 3px 15px no-repeat; }
-.extra-info[open] summary:after { background: linear-gradient(var(--accent), var(--accent)) center / 15px 3px no-repeat; }
+.extra-info summary::after {
+  content: "";
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-top: 3px solid var(--muted);
+  border-right: 3px solid var(--muted);
+  transform: rotate(135deg);
+  transition: transform .18s ease;
+}
+.extra-info[open] summary::after { transform: rotate(-45deg); }
 .extra-info-body { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 12px 12px; }
 .quick-search { background: var(--color-surface-soft); border: 1px solid var(--color-border-soft); border-radius: 16px; padding: 12px; }
 .quick-search input { margin-bottom: 10px; }
@@ -709,8 +723,17 @@ textarea { min-height: 78px; resize: vertical; }
 .quick-picker details:first-of-type { margin-top: 0; }
 .quick-picker summary { list-style: none; display: flex; justify-content: space-between; align-items: center; min-height: var(--tap); color: var(--color-text-soft); font-size: 12px; font-weight: var(--weight-label); letter-spacing: var(--tracking-label); text-transform: uppercase; cursor: pointer; }
 .quick-picker summary::-webkit-details-marker { display: none; }
-.quick-picker summary:after { content: "+"; color: var(--color-accent-text); font-size: 22px; }
-.quick-picker details[open] summary:after { content: "-"; }
+.quick-picker summary::after {
+  content: "";
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-top: 3px solid var(--muted);
+  border-right: 3px solid var(--muted);
+  transform: rotate(135deg);
+  transition: transform .18s ease;
+}
+.quick-picker details[open] summary::after { transform: rotate(-45deg); }
 .quick-result-section { display: grid; gap: 8px; }
 .quick-section-label { color: var(--muted); font-size: 11px; font-weight: var(--weight-label); letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .quick-result-list { display: grid; gap: 8px; }
@@ -752,14 +775,18 @@ textarea { min-height: 78px; resize: vertical; }
 .entry-form .actions { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: stretch; }
 .entry-form .actions .entry-swipe { grid-column: 1 / -1; margin-bottom: 0; }
 .entry-form .actions button { padding: 0 12px; min-width: 0; white-space: normal; line-height: 1.1; }
-.modal-body .form > .actions.full {
+.modal-body .form > .actions.full,
+.modal-body > .actions.vertical {
   position: sticky;
   bottom: -16px;
-  z-index: 2;
+  z-index: 4;
   margin: 8px -16px -16px;
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--card) 0%, transparent), var(--card) 26%);
+  background: var(--card);
+  background-color: var(--card);
   border-top: 1px solid var(--color-border-soft);
+  box-shadow: 0 -10px 28px color-mix(in srgb, var(--card) 88%, transparent);
+  isolation: isolate;
 }
 .primary, .secondary { border-radius: var(--radius-control); min-height: 48px; padding: 0 16px; font-size: var(--type-button); font-weight: var(--weight-strong); }
 .primary { background: var(--accent); color: var(--color-accent-ink); }
@@ -773,6 +800,8 @@ textarea { min-height: 78px; resize: vertical; }
   inset: 0;
   z-index: 100;
   display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
   place-items: center;
   background: var(--color-modal-scrim);
   padding: calc(16px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
@@ -781,6 +810,32 @@ textarea { min-height: 78px; resize: vertical; }
   transition: opacity var(--motion-fast) ease;
 }
 .modal-backdrop.closing { opacity: 0; pointer-events: none; }
+.modal-backdrop.modal-backdrop--scrim {
+  background: transparent;
+  animation: none;
+}
+.modal-backdrop.modal-backdrop--scrim.closing {
+  opacity: 1;
+  pointer-events: none;
+}
+.modal-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--color-modal-scrim);
+  animation: modalBackdropIn var(--motion-medium) ease both;
+}
+.modal-backdrop.modal-backdrop--scrim.closing .modal-scrim {
+  opacity: 0;
+  transition: opacity var(--motion-medium) ease;
+}
+.modal-backdrop.modal-backdrop--scrim > .modal-panel {
+  position: relative;
+  z-index: 1;
+  grid-area: 1 / 1;
+  align-self: center;
+  justify-self: center;
+}
 .modal-panel {
   width: min(520px, 100%);
   max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
@@ -794,7 +849,12 @@ textarea { min-height: 78px; resize: vertical; }
   animation: modalPanelIn var(--motion-medium) var(--ease-ios) both;
   will-change: transform, opacity;
 }
-.modal-backdrop.closing .modal-panel { transform: translate3d(0, 10px, 0) scale(.985); opacity: 0; transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease; }
+.modal-backdrop.closing .modal-panel:not(.modal-panel--bottom-sheet) { transform: translate3d(0, 10px, 0) scale(.985); opacity: 0; transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease; }
+.modal-backdrop.modal-backdrop--scrim.closing .modal-panel.modal-panel--bottom-sheet {
+  transform: translate3d(0, 12px, 0) scale(.985);
+  opacity: 0;
+  transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease;
+}
 .modal-panel.wide { width: min(720px, 100%); }
 .modal-panel.lightbox {
   width: min(680px, 100%);
@@ -1062,10 +1122,30 @@ textarea { min-height: 78px; resize: vertical; }
   .consistency-week { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .consistency-pill { font-size: 10px; padding-left: 7px; padding-right: 7px; }
   .modal-backdrop { place-items: end center; padding: calc(12px + env(safe-area-inset-top)) 8px 0; }
+  .modal-backdrop.modal-backdrop--scrim {
+    padding-left: 0;
+    padding-right: 0;
+  }
   .modal-panel {
     border-radius: 24px 24px 0 0;
     max-height: calc(96dvh - env(safe-area-inset-top));
     border-bottom: 0;
+  }
+  .modal-backdrop.modal-backdrop--scrim > .modal-panel.modal-panel--bottom-sheet {
+    align-self: end;
+    justify-self: stretch;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 22px 22px 0 0;
+    animation: bottomSheetIn 260ms var(--ease-ios) both;
+  }
+  .modal-panel.lightbox.modal-panel--bottom-sheet {
+    border-radius: 22px 22px 0 0;
+  }
+  .modal-backdrop.modal-backdrop--scrim.closing .modal-panel.modal-panel--bottom-sheet {
+    transform: translate3d(0, 100%, 0);
+    opacity: 1;
+    transition: transform 320ms var(--ease-ios);
   }
   .modal-head { padding-top: 14px; }
   .modal-head::before {
