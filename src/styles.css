@@ -134,6 +134,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   to { transform: translate3d(0, 0, 0); }
 }
 
+@keyframes bottomSheetOut {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, 100%, 0); }
+}
+
 @keyframes toastIn {
   from { opacity: 0; transform: translate(-50%, 8px) scale(.98); }
   to { opacity: 1; transform: translate(-50%, 0) scale(1); }
@@ -1143,9 +1148,7 @@ textarea { min-height: 78px; resize: vertical; }
     border-radius: 22px 22px 0 0;
   }
   .modal-backdrop.modal-backdrop--scrim.closing .modal-panel.modal-panel--bottom-sheet {
-    transform: translate3d(0, 100%, 0);
-    opacity: 1;
-    transition: transform 320ms var(--ease-ios);
+    animation: bottomSheetOut 320ms var(--ease-ios) both;
   }
   .modal-head { padding-top: 14px; }
   .modal-head::before {
