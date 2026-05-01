@@ -1,8 +1,8 @@
 {
-  "version": "2.1.2.2",
+  "version": "2.1.2.4",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "New Dawni app icon (warm weekly journal look).",
-    "PWA and home-screen icons refreshed at 192, 512, and Apple touch sizes."
+    "Fixed bottom-sheet close animation on iOS PWA (Log Food, Manage Food, photos).",
+    "Fixed double pale band at the bottom of Log Food in light mode on iPhone."
   ]
 }

@@ -218,16 +218,17 @@ function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', '
 function Modal({ open, title, children, onClose, wide = false, className = '', bottomSheet = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string; bottomSheet?: boolean }) {
   const [rendered, setRendered] = useState(open);
   const [closing, setClosing] = useState(false);
-  // Refs so requestClose is safe to call from any closure without stale values.
+  // `entered` drives the CSS transition for bottom-sheet open/close.
+  // Default (not entered) = panel offscreen; entered = panel in view.
+  const [entered, setEntered] = useState(false);
   const closingRef = useRef(false);
   const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | undefined>(undefined);
+  const rafRef = useRef<ReturnType<typeof requestAnimationFrame> | undefined>(undefined);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const CLOSE_MS = bottomSheet ? 320 : 180;
 
-  // Body scroll lock is tied to `rendered`, NOT `open`.
-  // This keeps the body fixed for the full duration of the closing animation,
-  // even when the parent has already set open=false.
+  // Body scroll lock tied to `rendered` so it stays locked through the close animation.
   useEffect(() => {
     if (!rendered) return;
     const scrollY = window.scrollY;
@@ -250,36 +251,44 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
     };
   }, [rendered]);
 
-  // Single close gate. All dismiss paths (X, Close button in children,
-  // backdrop, open=false from parent) funnel through here.
-  // Deduplication via closingRef prevents double-fires.
+  // Single close gate — all dismiss paths funnel here.
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
+    cancelAnimationFrame(rafRef.current!);
+    // Removing `entered` triggers the CSS transition back to translate3d(0,110%,0).
+    setEntered(false);
     setClosing(true);
     window.clearTimeout(closeTimerRef.current);
     closeTimerRef.current = window.setTimeout(() => {
       setRendered(false);
       setClosing(false);
       closingRef.current = false;
-      onCloseRef.current(); // notify parent after animation
+      onCloseRef.current();
     }, CLOSE_MS);
   }, [CLOSE_MS]);
 
-  // When the parent sets open=false (e.g. swipe-to-log, external close),
-  // kick off the same animation.
   useEffect(() => {
     if (open) {
-      // (re-)opening: cancel any in-progress close and reset
       window.clearTimeout(closeTimerRef.current);
+      cancelAnimationFrame(rafRef.current!);
       closingRef.current = false;
       setRendered(true);
       setClosing(false);
-      return;
+      setEntered(false); // start off-screen
+      if (!bottomSheet) {
+        // Non-bottom-sheet: no entrance transition needed, always entered.
+        setEntered(true);
+        return;
+      }
+      // Bottom sheet: one RAF so the browser paints the offscreen starting
+      // position before the enter transition fires.
+      rafRef.current = requestAnimationFrame(() => setEntered(true));
+      return () => cancelAnimationFrame(rafRef.current!);
     }
-    if (closingRef.current) return; // already animating closed
+    if (closingRef.current) return;
     requestClose();
-  }, [open, requestClose]);
+  }, [open, requestClose, bottomSheet]);
 
   if (!rendered) return null;
   const panelClass = ['modal-panel', wide ? 'wide' : '', bottomSheet ? 'modal-panel--bottom-sheet' : '', className].filter(Boolean).join(' ');
@@ -289,7 +298,7 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
   };
   return (
     <div
-      className={`modal-backdrop ${closing ? 'closing' : ''} ${bottomSheet ? 'modal-backdrop--scrim' : ''}`}
+      className={`modal-backdrop ${entered ? 'entered' : ''} ${closing ? 'closing' : ''} ${bottomSheet ? 'modal-backdrop--scrim' : ''}`}
       data-swipe-lock
       onMouseDown={bottomSheet ? undefined : backdropMouse}
     >

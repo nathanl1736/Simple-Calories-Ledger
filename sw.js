@@ -1,4 +1,4 @@
-const APP_VERSION = '2.1.2.2';
+const APP_VERSION = '2.1.2.4';
 const CACHE_PREFIX = 'dawni';
 const CACHE_NAME = `${CACHE_PREFIX}-${APP_VERSION}`;
 const APP_SHELL = [
@@ -6,9 +6,9 @@ const APP_SHELL = [
   './index.html',
   './version.json',
   './manifest.webmanifest',
-  './icons/icon-192-v2-1-2-2.png',
-  './icons/icon-512-v2-1-2-2.png',
-  './icons/apple-touch-icon-v2-1-2-2.png'
+  './icons/icon-192-v2.1.2.4.png',
+  './icons/icon-512-v2.1.2.4.png',
+  './icons/apple-touch-icon-v2.1.2.4.png'
 ];
 
 self.addEventListener('install', event => {

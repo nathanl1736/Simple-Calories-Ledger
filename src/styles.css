@@ -129,16 +129,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
-@keyframes bottomSheetIn {
-  from { transform: translate3d(0, 100%, 0); }
-  to { transform: translate3d(0, 0, 0); }
-}
-
-@keyframes bottomSheetOut {
-  from { transform: translate3d(0, 0, 0); }
-  to { transform: translate3d(0, 100%, 0); }
-}
-
 @keyframes toastIn {
   from { opacity: 0; transform: translate(-50%, 8px) scale(.98); }
   to { opacity: 1; transform: translate(-50%, 0) scale(1); }
@@ -855,10 +845,16 @@ textarea { min-height: 78px; resize: vertical; }
   will-change: transform, opacity;
 }
 .modal-backdrop.closing .modal-panel:not(.modal-panel--bottom-sheet) { transform: translate3d(0, 10px, 0) scale(.985); opacity: 0; transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease; }
-.modal-backdrop.modal-backdrop--scrim.closing .modal-panel.modal-panel--bottom-sheet {
-  transform: translate3d(0, 12px, 0) scale(.985);
-  opacity: 0;
-  transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease;
+/* Bottom-sheet panels use a CSS transition driven by the .entered class on the
+   backdrop. Default (not entered): panel is below viewport. Entered: in view.
+   Closing: .entered is removed so it slides back to the default off-screen pos. */
+.modal-panel--bottom-sheet {
+  animation: none;
+  transform: translate3d(0, 110%, 0);
+  transition: transform 320ms var(--ease-ios);
+}
+.modal-backdrop.entered .modal-panel--bottom-sheet {
+  transform: translate3d(0, 0, 0);
 }
 .modal-panel.wide { width: min(720px, 100%); }
 .modal-panel.lightbox {
@@ -1142,14 +1138,9 @@ textarea { min-height: 78px; resize: vertical; }
     width: 100%;
     max-width: 100%;
     border-radius: 22px 22px 0 0;
-    animation: bottomSheetIn 260ms var(--ease-ios) both;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .modal-panel.lightbox.modal-panel--bottom-sheet {
     border-radius: 22px 22px 0 0;
-  }
-  .modal-backdrop.modal-backdrop--scrim.closing .modal-panel.modal-panel--bottom-sheet {
-    animation: bottomSheetOut 320ms var(--ease-ios) both;
   }
   .modal-head { padding-top: 14px; }
   .modal-head::before {
