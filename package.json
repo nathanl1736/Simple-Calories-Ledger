@@ -1,9 +1,11 @@
 {
   "name": "simple-calories-ledger",
   "private": true,
-  "version": "2.1.2.6",
+  "version": "2.1.2.8",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/prebuild.mjs",
+    "predev": "node scripts/prebuild.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1"
