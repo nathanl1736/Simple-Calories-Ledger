@@ -1,6 +1,6 @@
-﻿import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { CSSProperties, FormEvent, ReactNode, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
-import { flushSync } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
@@ -110,6 +110,12 @@ const draftEnergyText = (kcal: number, unit: EnergyUnit) => energyInputFromKcal(
 type Toast = { id: number; text: string } | null;
 type MacroChipKey = 'fat' | 'carbs' | 'protein';
 type EffectiveTheme = 'dark' | 'light';
+type SafeSwipeNavigationOptions = {
+  enabled?: boolean;
+  threshold?: number;
+  onPrevious: () => void;
+  onNext: () => void;
+};
 
 const THEME_COLORS: Record<EffectiveTheme, string> = {
   dark: '#151713',
@@ -129,6 +135,62 @@ function applyThemePreference(theme: ThemePreference) {
   if (themeColor) themeColor.content = THEME_COLORS[effectiveTheme];
 }
 
+const SAFE_SWIPE_LOCK_SELECTOR = [
+  'input',
+  'textarea',
+  'select',
+  'button',
+  'a',
+  '[role="button"]',
+  '[data-swipe-lock]',
+  '[data-interactive]',
+  '.swipe-row',
+  '.modal',
+  '.modal-panel',
+  '.modal-backdrop',
+  '.bottom-sheet'
+].join(',');
+
+function isSafeSwipeTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  // Page-level date swipes ignore controls, modals, rows, meal blocks (incl. empty states), and swipe controls.
+  return !target.closest(SAFE_SWIPE_LOCK_SELECTOR);
+}
+
+function useSafeSwipeNavigation({ enabled = true, threshold = 52, onPrevious, onNext }: SafeSwipeNavigationOptions) {
+  const gesture = useRef({ pointerId: -1, startX: 0, startY: 0, active: false, cancelled: false });
+  const reset = () => {
+    gesture.current = { pointerId: -1, startX: 0, startY: 0, active: false, cancelled: false };
+  };
+  const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!enabled || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0) || !isSafeSwipeTarget(event.target)) return;
+    gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: true, cancelled: false };
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const current = gesture.current;
+    if (!current.active || current.pointerId !== event.pointerId || current.cancelled) return;
+    const dx = event.clientX - current.startX;
+    const dy = event.clientY - current.startY;
+    if (Math.abs(dy) > 32 && Math.abs(dy) > Math.abs(dx) * 0.8) current.cancelled = true;
+  };
+  const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const current = gesture.current;
+    if (!current.active || current.pointerId !== event.pointerId || current.cancelled) return reset();
+    const dx = event.clientX - current.startX;
+    const dy = event.clientY - current.startY;
+    reset();
+    if (Math.abs(dx) < threshold || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+    if (dx < 0) onNext();
+    else onPrevious();
+  };
+  return {
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    onPointerCancel: reset
+  };
+}
+
 function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', 'protein'] }: { fat?: number; carbs?: number; protein?: number; show?: MacroChipKey[] }) {
   const chips: Record<MacroChipKey, { label: string; value: number; className: string }> = {
     fat: { label: 'F', value: fat, className: 'fat' },
@@ -146,18 +208,47 @@ function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', '
 }
 
 function Modal({ open, title, children, onClose, wide = false, className = '' }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string }) {
+  const [rendered, setRendered] = useState(open);
+  const [closing, setClosing] = useState(false);
   useEffect(() => {
     if (!open) return;
-    const previous = document.body.style.overflow;
+    const scrollY = window.scrollY;
+    const previous = {
+      overflow: document.body.style.overflow,
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width
+    };
     document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
     return () => {
-      document.body.style.overflow = previous;
+      document.body.style.overflow = previous.overflow;
+      document.body.style.position = previous.position;
+      document.body.style.top = previous.top;
+      document.body.style.width = previous.width;
+      window.scrollTo(0, scrollY);
     };
   }, [open]);
-  if (!open) return null;
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      setClosing(false);
+      return;
+    }
+    if (!rendered) return;
+    setClosing(true);
+    const timer = window.setTimeout(() => {
+      setRendered(false);
+      setClosing(false);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [open, rendered]);
+  if (!rendered) return null;
   return (
-    <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-      <section className={`modal-panel ${wide ? 'wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
+    <div className={`modal-backdrop ${closing ? 'closing' : ''}`} data-swipe-lock onMouseDown={event => !closing && event.target === event.currentTarget && onClose()}>
+      <section className={`modal-panel ${wide ? 'wide' : ''} ${className}`} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="close" type="button" onClick={onClose} aria-label="Close"><span aria-hidden="true" /></button>
@@ -966,7 +1057,7 @@ export function App() {
           <button className="secondary" type="button" onClick={() => setModal(null)}>Later today</button>
         </div>
       </Modal>
-      {toast && <div className="toast">{toast.text}</div>}
+      {toast && <div key={toast.id} className="toast">{toast.text}</div>}
     </AppShell>
   );
 }
@@ -996,9 +1087,16 @@ function TrackingView(props: {
   const remaining = goal - props.totals.calories;
   const deg = Math.min(360, Math.max(0, props.totals.calories) / goal * 360);
   const weekSummary = homeWeekSummary(props.state, props.selectedDate);
+  const weekCalorieBudget = weekSummary.rows.reduce((acc, row) => acc + row.goal.calories, 0);
+  const bankStatTone = weekSummary.completed.length ? budgetDeltaTone(weekSummary.banked) : '';
+  const projectedStatTone = weekSummary.completed.length ? upperBudgetTone(weekSummary.projected, weekCalorieBudget) : '';
   const remainingLabel = dayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
+  const swipeNavigation = useSafeSwipeNavigation({
+    onPrevious: () => props.setSelectedDate(addDays(props.selectedDate, -1)),
+    onNext: () => props.setSelectedDate(addDays(props.selectedDate, 1))
+  });
   return (
-    <>
+    <div className="screen-swipe-zone view-transition" key={props.selectedDate} {...swipeNavigation}>
       <header className="page-header">
         <div className="page-kicker">Dawni</div>
         <h1 className="page-title">Today in your week</h1>
@@ -1020,17 +1118,17 @@ function TrackingView(props: {
           <span>Week at a glance</span>
           <strong>{shortDate(weekSummary.days[0])} - {shortDate(weekSummary.days[6])}</strong>
         </div>
-        <div className="home-week-stat">
+        <div className={`home-week-stat home-week-stat--bank${bankStatTone ? ` tone-${bankStatTone}` : ''}`}>
           <span>Week bank</span>
-          <strong>{weekSummary.completed.length ? weekSummary.bankText : 'Start with today'}</strong>
+          <strong className="home-week-stat-value">{weekSummary.completed.length ? weekSummary.bankText : 'Start with today'}</strong>
         </div>
         <div className="home-week-stat">
           <span>Completed</span>
-          <strong>{weekSummary.completed.length}/7 days</strong>
+          <strong className="home-week-stat-value">{weekSummary.completed.length}/7 days</strong>
         </div>
-        <div className="home-week-stat">
+        <div className={`home-week-stat home-week-stat--projected${projectedStatTone ? ` tone-${projectedStatTone}` : ''}`}>
           <span>Projected</span>
-          <strong>{weekSummary.completed.length ? energyText(props.state, weekSummary.projected) : 'Open'}</strong>
+          <strong className="home-week-stat-value">{weekSummary.completed.length ? energyText(props.state, weekSummary.projected) : 'Open'}</strong>
         </div>
       </section>
       <div className="macro-grid macro-summary">
@@ -1066,7 +1164,7 @@ function TrackingView(props: {
           onConfirm={props.onToggleComplete}
         />
       </section>
-    </>
+    </div>
   );
 }
 
@@ -1080,7 +1178,7 @@ function GroupedEntries(props: Parameters<typeof TrackingView>[0]) {
       {MEALS.map(meal => {
         const items = props.entries.filter(entry => (entry.meal || 'Snack') === meal);
         return (
-          <div className="meal-group" key={meal}>
+          <div className="meal-group" key={meal} data-swipe-lock>
             <div className="meal-group-head"><div className="meal-group-title">{meal}</div><div className="meal-group-total">{energyText(props.state, sum(items).calories)}</div></div>
             <div className="meal-group-body">
               {items.length ? <EntryList state={props.state} entries={items} complete={props.complete} onPhoto={props.onPhotoEntry} onEdit={props.onEditEntry} onRepeat={props.onRepeatEntry} onDelete={props.onDeleteEntry} /> : <div className="meal-empty">Nothing logged yet.</div>}
@@ -1094,8 +1192,12 @@ function GroupedEntries(props: Parameters<typeof TrackingView>[0]) {
 }
 
 function EntryList({ state, entries, complete, onPhoto, onEdit, onRepeat, onDelete }: { state: AppState; entries: Entry[]; complete: boolean; onPhoto: (entry: Entry) => void; onEdit: (entry: Entry) => void; onRepeat: (entry: Entry) => void; onDelete: (id: string) => void }) {
-  if (!entries.length) return <div className="empty">Nothing logged yet.</div>;
-  return <>{entries.map(entry => <EntryRow key={entry.id} state={state} entry={entry} complete={complete} onPhoto={onPhoto} onEdit={onEdit} onRepeat={onRepeat} onDelete={onDelete} />)}</>;
+  if (!entries.length) return <div className="empty" data-swipe-lock>Nothing logged yet.</div>;
+  return (
+    <div data-swipe-lock className="entry-list-stack">
+      {entries.map(entry => <EntryRow key={entry.id} state={state} entry={entry} complete={complete} onPhoto={onPhoto} onEdit={onEdit} onRepeat={onRepeat} onDelete={onDelete} />)}
+    </div>
+  );
 }
 
 function EntryRow({ state, entry, complete, onPhoto, onEdit, onRepeat, onDelete }: { state: AppState; entry: Entry; complete: boolean; onPhoto: (entry: Entry) => void; onEdit: (entry: Entry) => void; onRepeat: (entry: Entry) => void; onDelete: (id: string) => void }) {
@@ -1126,7 +1228,7 @@ function EntryRow({ state, entry, complete, onPhoto, onEdit, onRepeat, onDelete 
         : Math.min(buttonRect.bottom + 8, window.innerHeight - bottomGuard - menuHeight);
       setMenuStyle({ left, top });
     };
-    const close = (event: MouseEvent) => {
+    const close = (event: PointerEvent) => {
       const target = event.target as Node;
       if (!menuRef.current?.contains(target) && !menuButtonRef.current?.contains(target)) setMenuOpen(false);
     };
@@ -1135,19 +1237,19 @@ function EntryRow({ state, entry, complete, onPhoto, onEdit, onRepeat, onDelete 
       if (event.key === 'Escape') setMenuOpen(false);
     };
     positionMenu();
-    document.addEventListener('mousedown', close);
+    document.addEventListener('pointerdown', close);
     document.addEventListener('keydown', closeOnEscape);
     window.addEventListener('resize', positionMenu);
     window.addEventListener('scroll', closeOnScroll, true);
     return () => {
-      document.removeEventListener('mousedown', close);
+      document.removeEventListener('pointerdown', close);
       document.removeEventListener('keydown', closeOnEscape);
       window.removeEventListener('resize', positionMenu);
       window.removeEventListener('scroll', closeOnScroll, true);
     };
   }, [menuOpen]);
   return (
-    <div className="entry">
+    <div className="entry" data-swipe-lock>
       <button className="thumb" type="button" onClick={() => onPhoto(entry)} aria-label="Add or change food photo">
         {entry.photo ? <img src={entry.photo} alt="" /> : <span className="empty-photo-icon" aria-hidden="true" />}
       </button>
@@ -1158,7 +1260,17 @@ function EntryRow({ state, entry, complete, onPhoto, onEdit, onRepeat, onDelete 
         </div>
       </div>
       <div className="entry-cal">{energyText(state, totals.calories)}</div>
-      <div className="entry-menu-wrap"><button ref={menuButtonRef} className="entry-menu-btn" type="button" aria-label="Entry actions" onClick={() => setMenuOpen(open => !open)}><span aria-hidden="true" /></button>{menuOpen && <div ref={menuRef} className="entry-menu" style={menuStyle}><button type="button" onClick={() => { setMenuOpen(false); onRepeat(entry); }}>Repeat</button>{!complete && <button type="button" onClick={() => { setMenuOpen(false); onEdit(entry); }}>Edit</button>}{!complete && <button type="button" className="danger-text" onClick={() => { setMenuOpen(false); onDelete(entry.id); }}>Delete</button>}</div>}</div>
+      <div className="entry-menu-wrap">
+        <button ref={menuButtonRef} className="entry-menu-btn" type="button" aria-label="Entry actions" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}><span aria-hidden="true" /></button>
+        {menuOpen && createPortal(
+          <div ref={menuRef} className="entry-menu" data-swipe-lock style={menuStyle}>
+            <button type="button" onClick={() => { setMenuOpen(false); onRepeat(entry); }}>Repeat</button>
+            {!complete && <button type="button" onClick={() => { setMenuOpen(false); onEdit(entry); }}>Edit</button>}
+            {!complete && <button type="button" className="danger-text" onClick={() => { setMenuOpen(false); onDelete(entry.id); }}>Delete</button>}
+          </div>,
+          document.body
+        )}
+      </div>
     </div>
   );
 }
@@ -1196,6 +1308,7 @@ function SwipeConfirm({ label, confirmLabel, className = '', onConfirm }: { labe
     <div
       ref={wrapRef}
       className={`swipe-confirm ${dragging ? 'dragging' : ''} ${className}`}
+      data-swipe-lock
       role="button"
       tabIndex={0}
       aria-label={confirmLabel || label}
@@ -1803,7 +1916,7 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
 
 function FoodRow({ state, food, showUsage, onPrefill, onManage }: { state: AppState; food: Food; showUsage: boolean; onPrefill: (food: Food) => void; onManage: (food: Food) => void }) {
   return (
-    <div className="food-row">
+    <div className="food-row" data-swipe-lock>
       <div className={`emoji ${food.favourite ? 'fav' : ''}`}>{food.favourite && <span className="star-icon" aria-hidden="true" />}</div>
       <div className="body">
         <strong>{food.name}</strong>
@@ -1867,6 +1980,28 @@ function JournalView({
   onShuffle: () => void;
   onPhoto: (entry: Entry) => void;
 }) {
+  const year = journalMonth.getFullYear();
+  const month = journalMonth.getMonth();
+  const journalDaySwipeNavigation = useSafeSwipeNavigation({
+    enabled: !!journalDay,
+    onPrevious: () => {
+      if (!journalDay) return;
+      const key = addDays(journalDay, -1);
+      setJournalDay(key);
+      setJournalMonth(new Date(`${key}T00:00:00`));
+    },
+    onNext: () => {
+      if (!journalDay) return;
+      const key = addDays(journalDay, 1);
+      setJournalDay(key);
+      setJournalMonth(new Date(`${key}T00:00:00`));
+    }
+  });
+  const journalMonthSwipeNavigation = useSafeSwipeNavigation({
+    enabled: !journalDay,
+    onPrevious: () => setJournalMonth(new Date(year, month - 1, 1)),
+    onNext: () => setJournalMonth(new Date(year, month + 1, 1))
+  });
   if (journalDay) {
     const entries = dayEntries(state, journalDay);
     const photos = entries.filter(entry => entry.photo);
@@ -1889,7 +2024,7 @@ function JournalView({
       return <span className="journal-photo-caption"><strong>{entry.name}</strong><span>{calories}</span></span>;
     };
     return (
-      <>
+      <div className="screen-swipe-zone view-transition" key={journalDay} {...journalDaySwipeNavigation}>
         <header className="page-header">
           <div className="page-kicker">Food journal</div>
           <h1 className="page-title">{readable(journalDay)}</h1>
@@ -1921,7 +2056,7 @@ function JournalView({
           : entries.length ? <div className="journal-day-list">{entries.map(entry => {
             const totals = entryTotals(entry);
             return (
-              <button key={entry.id} className={`journal-entry-card ${entry.photo ? '' : 'no-photo'}`} type="button" onClick={() => entry.photo && onPhoto(entry)}>
+              <button key={entry.id} className={`journal-entry-card ${entry.photo ? '' : 'no-photo'}`} data-swipe-lock type="button" onClick={() => entry.photo && onPhoto(entry)}>
                 {entry.photo && <img className="journal-entry-photo" src={entry.photo} alt="" />}
                 <div>
                   <div className="journal-entry-title">{entry.name}</div>
@@ -1935,16 +2070,14 @@ function JournalView({
               </button>
             );
           })}</div> : <div className="empty"><strong>Nothing logged yet.</strong><div>Log something when you&apos;re ready.</div></div>}
-      </>
+      </div>
     );
   }
-  const year = journalMonth.getFullYear();
-  const month = journalMonth.getMonth();
   const first = new Date(year, month, 1);
   const offset = first.getDay();
   const days = Array.from({ length: 42 }, (_, i) => new Date(year, month, i - offset + 1));
   return (
-    <>
+    <div className="screen-swipe-zone view-transition" key={`${year}-${month}`} {...journalMonthSwipeNavigation}>
       <header className="page-header has-helper">
         <div className="page-kicker">Food journal</div>
         <h1 className="page-title">Journal</h1>
@@ -1991,7 +2124,7 @@ function JournalView({
           );
         })}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -2023,8 +2156,26 @@ function CardsView({
   onStartLog: () => void;
 }) {
   const datedGroups = groups.filter(group => group.date === selectedDate);
+  const prevCardsDateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevCardsDateRef.current !== null && prevCardsDateRef.current !== selectedDate) {
+      requestAnimationFrame(() => {
+        try {
+          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        } catch {
+          window.scrollTo(0, 0);
+        }
+      });
+    }
+    prevCardsDateRef.current = selectedDate;
+  }, [selectedDate]);
+
+  const cardsSwipe = useSafeSwipeNavigation({
+    onPrevious: () => setSelectedDate(addDays(selectedDate, -1)),
+    onNext: () => setSelectedDate(addDays(selectedDate, 1))
+  });
   return (
-    <>
+    <div className="screen-swipe-zone view-transition" key={selectedDate} {...cardsSwipe}>
       <header className="page-header has-helper">
         <div className="page-kicker">Reflect</div>
         <h1 className="page-title">Cards</h1>
@@ -2037,7 +2188,7 @@ function CardsView({
         const photo = group.photos[0];
         const photoCount = Math.min(group.photos.length, 4);
         return (
-          <article key={group.id} className="meal-card-row">
+          <article key={group.id} className="meal-card-row" data-swipe-lock>
             <div className={`meal-card-thumb count-${photoCount || 0}`}>
               {photo ? group.photos.slice(0, 4).map((src, index) => <img key={`${src}${index}`} src={src} alt="" />) : <span className="empty-photo-icon" aria-hidden="true" />}
             </div>
@@ -2054,8 +2205,8 @@ function CardsView({
             <button className="secondary show-card-btn" type="button" onClick={() => onOpen(group)}>Show card</button>
           </article>
         );
-      })}</div> : <div className="empty"><strong>No meal cards yet.</strong><div>Log a meal to make a simple share card.</div><button className="empty-action" type="button" onClick={onStartLog}>Log food</button></div>}
-    </>
+      })}</div> : <div className="empty" data-swipe-lock><strong>No meal cards yet.</strong><div>Log a meal to make a simple share card.</div><button className="empty-action" type="button" onClick={onStartLog}>Log food</button></div>}
+    </div>
   );
 }
 
@@ -2230,6 +2381,20 @@ function upperBudgetTone(value: number, budget: number): MetricTone {
 }
 
 function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
+  const prevBankingWeekRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevBankingWeekRef.current !== null && prevBankingWeekRef.current !== bankingWeekStart) {
+      requestAnimationFrame(() => {
+        try {
+          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        } catch {
+          window.scrollTo(0, 0);
+        }
+      });
+    }
+    prevBankingWeekRef.current = bankingWeekStart;
+  }, [bankingWeekStart]);
+
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(bankingWeekStart, i));
   const weekRows = weekDays.map(date => {
     const totals = sum(dayEntries(state, date));
@@ -2251,8 +2416,12 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
   const last7Rows = last7Days.map(date => ({ date, totals: sum(dayEntries(state, date)), complete: isDayComplete(state, date), goal: goalForDate(state, date) }));
   const last7Logged = last7Rows.filter(row => row.totals.calories > 0);
   const last7Completed = last7Rows.filter(row => row.complete);
+  const swipeNavigation = useSafeSwipeNavigation({
+    onPrevious: () => setBankingWeekStart(addDays(bankingWeekStart, -7)),
+    onNext: () => setBankingWeekStart(addDays(bankingWeekStart, 7))
+  });
   return (
-    <>
+    <div className="screen-swipe-zone view-transition" key={bankingWeekStart} {...swipeNavigation}>
       <header className="page-header has-helper">
         <div className="page-kicker">This week</div>
         <h1 className="page-title">Week</h1>
@@ -2317,7 +2486,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
         ) : <div className="empty">{last7Logged.length ? 'Mark a day complete to see completed-day patterns.' : 'No logged days in this window yet.'}</div>}
         <ConsumptionBars state={state} rows={last7Rows.map(row => ({ date: row.date, total: row.totals.calories, complete: row.complete, goal: row.goal }))} />
       </section>
-    </>
+    </div>
   );
 }
 
