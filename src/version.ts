@@ -1,8 +1,9 @@
-// To release: bump version in package.json, update src/release-notes.json, run npm run build.
-// The prebuild script auto-generates sw.js, public/sw.js, version.json, public/version.json,
-// and the app-version meta in index.html. No other files need manual version edits.
-import pkg from '../package.json';
-import notes from './release-notes.json';
+// Release checklist: always bump APP_VERSION here, sw.js, public/sw.js, package.json,
+// package-lock.json, version.json, and public/version.json for user-visible app changes.
+// App icons live at stable paths under public/icons/ (no per-release icon filenames).
+// Keep RELEASE_NOTES to the latest release only, ideally one to three short bullets.
+export const APP_VERSION = '2.1.2.6';
 
-export const APP_VERSION: string = pkg.version;
-export const RELEASE_NOTES: string[] = notes as string[];
+export const RELEASE_NOTES = [
+  'iOS PWA: bottom tab bar stays stable when closing Log Food and other modals (focus / nav hide sync).'
+];
