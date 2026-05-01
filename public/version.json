@@ -1,8 +1,8 @@
 {
-  "version": "2.1.2.1",
+  "version": "2.1.2.2",
   "maintenanceNote": "When releasing app changes, bump APP_VERSION in src/version.ts, APP_VERSION in sw.js and public/sw.js, plus this version value and the root version.json so Settings, service worker caches, and update checks stay in sync.",
   "notes": [
-    "Fixed Weekly calorie bank status colors for under-budget days.",
-    "Aligned weekly projection and completed-average tones with calorie budgets."
+    "New Dawni app icon (warm weekly journal look).",
+    "PWA and home-screen icons refreshed at 192, 512, and Apple touch sizes."
   ]
 }

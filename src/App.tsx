@@ -1,4 +1,4 @@
-﻿import { CSSProperties, FormEvent, ReactNode, PointerEvent as ReactPointerEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { CSSProperties, FormEvent, ReactNode, PointerEvent as ReactPointerEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { createPortal, flushSync } from 'react-dom';
 import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
@@ -218,8 +218,18 @@ function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', '
 function Modal({ open, title, children, onClose, wide = false, className = '', bottomSheet = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string; bottomSheet?: boolean }) {
   const [rendered, setRendered] = useState(open);
   const [closing, setClosing] = useState(false);
+  // Refs so requestClose is safe to call from any closure without stale values.
+  const closingRef = useRef(false);
+  const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | undefined>(undefined);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const CLOSE_MS = bottomSheet ? 320 : 180;
+
+  // Body scroll lock is tied to `rendered`, NOT `open`.
+  // This keeps the body fixed for the full duration of the closing animation,
+  // even when the parent has already set open=false.
   useEffect(() => {
-    if (!open) return;
+    if (!rendered) return;
     const scrollY = window.scrollY;
     const previous = {
       overflow: document.body.style.overflow,
@@ -238,27 +248,44 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       document.body.style.width = previous.width;
       window.scrollTo(0, scrollY);
     };
-  }, [open]);
+  }, [rendered]);
+
+  // Single close gate. All dismiss paths (X, Close button in children,
+  // backdrop, open=false from parent) funnel through here.
+  // Deduplication via closingRef prevents double-fires.
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(() => {
+      setRendered(false);
+      setClosing(false);
+      closingRef.current = false;
+      onCloseRef.current(); // notify parent after animation
+    }, CLOSE_MS);
+  }, [CLOSE_MS]);
+
+  // When the parent sets open=false (e.g. swipe-to-log, external close),
+  // kick off the same animation.
   useEffect(() => {
     if (open) {
+      // (re-)opening: cancel any in-progress close and reset
+      window.clearTimeout(closeTimerRef.current);
+      closingRef.current = false;
       setRendered(true);
       setClosing(false);
       return;
     }
-    if (!rendered) return;
-    setClosing(true);
-    const closeMs = bottomSheet ? 320 : 180;
-    const timer = window.setTimeout(() => {
-      setRendered(false);
-      setClosing(false);
-    }, closeMs);
-    return () => window.clearTimeout(timer);
-  }, [open, rendered, bottomSheet]);
+    if (closingRef.current) return; // already animating closed
+    requestClose();
+  }, [open, requestClose]);
+
   if (!rendered) return null;
   const panelClass = ['modal-panel', wide ? 'wide' : '', bottomSheet ? 'modal-panel--bottom-sheet' : '', className].filter(Boolean).join(' ');
   const backdropMouse = (event: MouseEvent<HTMLDivElement>) => {
-    if (closing || event.target !== event.currentTarget) return;
-    onClose();
+    if (event.target !== event.currentTarget) return;
+    requestClose();
   };
   return (
     <div
@@ -270,7 +297,7 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       <section className={panelClass} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="close" type="button" onClick={onClose} aria-label="Close"><span aria-hidden="true" /></button>
+          <button className="close" type="button" onClick={requestClose} aria-label="Close"><span aria-hidden="true" /></button>
         </div>
         <div className="modal-body">{children}</div>
       </section>
@@ -435,6 +462,7 @@ export function App() {
 
   useEffect(() => {
     if (!loaded) return;
+    console.info(`[Dawni] v${APP_VERSION}`);
     registerServiceWorker(update => {
       setAvailableUpdate(update);
       setModal('version');
