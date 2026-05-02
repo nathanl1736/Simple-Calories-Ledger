@@ -130,6 +130,56 @@ const THEME_COLORS: Record<EffectiveTheme, string> = {
   light: '#f8f3e9'
 };
 
+type ModalScrollLockSnapshot = {
+  scrollY: number;
+  bodyOverflow: string;
+  bodyPosition: string;
+  bodyTop: string;
+  bodyWidth: string;
+  htmlOverflow: string;
+};
+
+let modalScrollLockCount = 0;
+let modalScrollLockSnapshot: ModalScrollLockSnapshot | null = null;
+
+function acquireModalScrollLock() {
+  if (modalScrollLockCount === 0) {
+    const scrollY = window.scrollY;
+    modalScrollLockSnapshot = {
+      scrollY,
+      bodyOverflow: document.body.style.overflow,
+      bodyPosition: document.body.style.position,
+      bodyTop: document.body.style.top,
+      bodyWidth: document.body.style.width,
+      htmlOverflow: document.documentElement.style.overflow
+    };
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+  }
+
+  modalScrollLockCount += 1;
+  let released = false;
+
+  return () => {
+    if (released) return;
+    released = true;
+    modalScrollLockCount = Math.max(0, modalScrollLockCount - 1);
+    if (modalScrollLockCount > 0 || !modalScrollLockSnapshot) return;
+
+    const previous = modalScrollLockSnapshot;
+    modalScrollLockSnapshot = null;
+    document.documentElement.style.overflow = previous.htmlOverflow;
+    document.body.style.overflow = previous.bodyOverflow;
+    document.body.style.position = previous.bodyPosition;
+    document.body.style.top = previous.bodyTop;
+    document.body.style.width = previous.bodyWidth;
+    window.scrollTo(0, previous.scrollY);
+  };
+}
+
 function resolvedTheme(theme: ThemePreference): EffectiveTheme {
   if (theme === 'light' || theme === 'dark') return theme;
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
@@ -228,30 +278,10 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
   onCloseRef.current = onClose;
   const CLOSE_MS = bottomSheet ? 320 : 180;
 
-  // Body scroll lock tied to `rendered` so it stays locked through the close animation.
+  // Body scroll lock is shared across modal instances so handoffs cannot unlock the page early.
   useEffect(() => {
     if (!rendered) return;
-    const scrollY = window.scrollY;
-    const previous = {
-      overflow: document.body.style.overflow,
-      position: document.body.style.position,
-      top: document.body.style.top,
-      width: document.body.style.width,
-      htmlOverflow: document.documentElement.style.overflow
-    };
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = '100%';
-    return () => {
-      document.documentElement.style.overflow = previous.htmlOverflow;
-      document.body.style.overflow = previous.overflow;
-      document.body.style.position = previous.position;
-      document.body.style.top = previous.top;
-      document.body.style.width = previous.width;
-      window.scrollTo(0, scrollY);
-    };
+    return acquireModalScrollLock();
   }, [rendered]);
 
   // Single close gate — all dismiss paths funnel here.
