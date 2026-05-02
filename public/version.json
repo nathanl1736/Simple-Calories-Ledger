@@ -1,5 +1,5 @@
 {
-  "version": "2.2.0.0",
+  "version": "2.2.0.1",
   "notes": [
     "AI uplift: Gemini estimates can be generated in-app from text or a photo using your saved API key.",
     "AI quick log prompt and paste flow now better protect against double-counted servings."
