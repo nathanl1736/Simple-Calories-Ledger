@@ -1,3 +1,4 @@
 [
-  "iOS PWA: bottom tab bar stays stable when closing Log Food and other modals (focus / nav hide sync)."
+  "AI uplift: Gemini estimates can be generated in-app from text or a photo using your saved API key.",
+  "AI quick log prompt and paste flow now better protect against double-counted servings."
 ]

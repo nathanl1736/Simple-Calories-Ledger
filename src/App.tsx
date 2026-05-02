@@ -11,7 +11,8 @@ import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
-import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
+import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
+import { requestMealEstimate } from './geminiEstimate';
 import {
   addDays,
   dayEntries,
@@ -51,7 +52,7 @@ import {
 } from './utils';
 
 type Tab = 'tracking' | 'journal' | 'library' | 'cards' | 'stats' | 'settings';
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'customDbHelp' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'customDbHelp' | null;
 type EntryOpenMode = 'manual' | 'prefill' | 'edit';
 type JournalDayViewMode = 'list' | 'collage';
 type JournalLabelMode = 'photo' | 'calories' | 'nameCalories';
@@ -471,6 +472,7 @@ export function App() {
   const [goalDraft, setGoalDraft] = useState<Settings>(DEFAULT.settings);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
   const [aiQuickLogMeal, setAiQuickLogMeal] = useState<Meal>('Snack');
+  const [aiQuickLogSeedText, setAiQuickLogSeedText] = useState('');
   const [reuseSearchCollapseNonce, setReuseSearchCollapseNonce] = useState(0);
   const importRef = useRef<HTMLInputElement>(null);
   const customDatabaseImportRef = useRef<HTMLInputElement>(null);
@@ -592,12 +594,6 @@ export function App() {
     const caloriesInput = document.getElementById('entryCalories') as HTMLInputElement | null;
     caloriesInput?.focus({ preventScroll: true });
     caloriesInput?.select();
-  };
-
-  const openAiQuickLog = (meal: Meal = defaultMealForCurrentTime()) => {
-    if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
-    setAiQuickLogMeal(meal);
-    setModal('aiQuickLog');
   };
 
   const editEntry = (entry: Entry) => {
@@ -758,22 +754,75 @@ export function App() {
   };
 
   const prefillAiQuickLog = (entry: AiQuickLogEntry) => {
+    setAiQuickLogSeedText('');
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
+    const portion = amountPortionValue(entry.amount);
+    const servingLabel =
+      entry.unitMode === '100g'
+        ? (entry.amount.trim() ? entry.amount : `${portion} g`)
+        : entry.amount;
     flushSync(() => {
       setEntryDraft({
         ...blankEntryDraft(entry.meal, entryEnergyUnit),
         name: entry.name,
-        servingLabel: entry.amount,
+        unitMode: entry.unitMode,
+        servingLabel,
         calories: draftEnergyText(entry.calories, entryEnergyUnit),
         protein: draftNumberText(entry.protein),
         carbs: draftNumberText(entry.carbs),
         fat: draftNumberText(entry.fat),
-        portion: amountPortionValue(entry.amount),
+        portion,
         notes: entry.notes
       });
       setEntryOpenMode('prefill');
       setModal('entry');
     });
+  };
+
+  const pasteAiQuickLogFromClipboard = async () => {
+    if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
+    if (!navigator.clipboard?.readText) return notify('Clipboard paste is not available here.');
+    try {
+      const raw = await navigator.clipboard.readText();
+      const trimmed = raw.trim();
+      if (!trimmed) return notify('Clipboard is empty.');
+      const parsed = parseAiQuickLog(trimmed, defaultMealForCurrentTime());
+      if (parsed) {
+        setAiQuickLogSeedText('');
+        prefillAiQuickLog(parsed);
+        return;
+      }
+      notify('Couldn\u2019t read that format. You can fix it below.');
+      setAiQuickLogMeal(defaultMealForCurrentTime());
+      setAiQuickLogSeedText(raw);
+      setModal('aiQuickLog');
+    } catch {
+      notify('Could not read from clipboard.');
+    }
+  };
+
+  const openGeminiEstimate = () => {
+    if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
+    if (!state.settings.geminiApiKey.trim()) return notify('Add a Gemini API key in Settings first');
+    setModal('geminiEstimate');
+  };
+
+  const estimateWithGemini = async (userText: string, imageDataUrl?: string | null) => {
+    const raw = await requestMealEstimate({
+      apiKey: state.settings.geminiApiKey,
+      userText,
+      imageDataUrl
+    });
+    const parsed = parseAiQuickLog(raw, defaultMealForCurrentTime());
+    if (parsed) {
+      setAiQuickLogSeedText('');
+      prefillAiQuickLog(parsed);
+      return;
+    }
+    notify('Gemini returned text Dawni could not read. You can fix it below.');
+    setAiQuickLogMeal(defaultMealForCurrentTime());
+    setAiQuickLogSeedText(raw);
+    setModal('aiQuickLog');
   };
 
   const saveDatabaseFood = async (item: FoodDatabaseItem) => {
@@ -875,7 +924,8 @@ export function App() {
           onToggleComplete={() => updateState(draft => setDayComplete(draft, selectedDate, !complete)).then(() => notify(complete ? 'Day reopened' : 'Day completed'))}
           onPrefillFood={prefillFood}
           onSaveDatabaseFood={saveDatabaseFood}
-          onOpenAiQuickLog={openAiQuickLog}
+          onPasteAiQuickLog={pasteAiQuickLogFromClipboard}
+          onOpenGeminiEstimate={openGeminiEstimate}
           onCopyAiPrompt={copyAiPrompt}
           reuseSearchCollapseNonce={reuseSearchCollapseNonce}
         />
@@ -983,6 +1033,10 @@ export function App() {
           onToggleCustomDatabase={setCustomDatabaseEnabled}
           onDeleteCustomDatabase={deleteCustomDatabase}
           onCustomDatabaseHelp={() => setModal('customDbHelp')}
+          onGeminiApiKey={key => updateState(draft => {
+            draft.settings.geminiApiKey = key.trim();
+          }).then(() => notify(key.trim() ? 'Gemini API key saved' : 'Gemini API key cleared'))}
+          onGeminiApiKeyHelp={() => setModal('geminiApiKeyHelp')}
           onCopyAiPrompt={copyAiPrompt}
           onAiPromptHelp={() => setModal('aiQuickLogHelp')}
           onExport={() => exportBackup(state).then(next => persist(next)).then(() => notify('Backup exported')).catch(err => err?.name !== 'AbortError' && notify('Could not export backup'))}
@@ -1096,18 +1150,41 @@ export function App() {
       <AiQuickLogModal
         open={modal === 'aiQuickLog'}
         fallbackMeal={aiQuickLogMeal}
+        seedText={aiQuickLogSeedText}
         // Modal runs a close animation then calls onClose; if we already opened Log Food, do not setModal(null).
-        onClose={() => setModal(current => (current === 'aiQuickLog' ? null : current))}
+        onClose={() => {
+          setAiQuickLogSeedText('');
+          setModal(current => (current === 'aiQuickLog' ? null : current));
+        }}
         onParsed={prefillAiQuickLog}
+      />
+      <GeminiEstimateModal
+        open={modal === 'geminiEstimate'}
+        // Modal runs a close animation then calls onClose; if we already opened Log Food, do not setModal(null).
+        onClose={() => setModal(current => (current === 'geminiEstimate' ? null : current))}
+        onEstimate={estimateWithGemini}
       />
       <Modal open={modal === 'aiQuickLogHelp'} title="AI estimate helper" onClose={() => setModal(null)}>
         <ol className="update-list ai-help-list">
           <li>Copy the prompt.</li>
           <li>Paste it into your AI chatbot.</li>
           <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
-          <li>Copy the returned JSON.</li>
-          <li>Tap AI estimate helper in Track.</li>
-          <li>Paste, review the Log Food form, then save normally.</li>
+          <li>Copy the returned JSON (it must include unitMode: per serving or per 100g, with calories matching that choice so nothing double-counts).</li>
+          <li>Tap Paste AI estimate on Track.</li>
+          <li>Review the Log Food form, then save normally.</li>
+        </ol>
+      </Modal>
+      <Modal open={modal === 'geminiApiKeyHelp'} title="Gemini API key" onClose={() => setModal(null)}>
+        <ol className="update-list ai-help-list">
+          <li>
+            Open Google AI Studio at{' '}
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">https://aistudio.google.com/app/apikey</a>
+            .
+          </li>
+          <li>Create or copy an API key for a Google project where Gemini API access is enabled.</li>
+          <li>Paste the key into Dawni&apos;s Gemini API key field in Settings.</li>
+          <li>Manage billing, budgets, and quota limits in Google Cloud. Dawni only uses the key when you tap Estimate with Gemini.</li>
+          <li>The key is stored locally in this browser and is included in exported backups.</li>
         </ol>
       </Modal>
       <Modal open={modal === 'customDbHelp'} title="Custom Food Database Help" onClose={() => setModal(null)}>
@@ -1188,7 +1265,8 @@ function TrackingView(props: {
   onToggleComplete: () => void;
   onPrefillFood: (food: Food) => void;
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
-  onOpenAiQuickLog: (meal?: Meal) => void;
+  onPasteAiQuickLog: () => Promise<void>;
+  onOpenGeminiEstimate: () => void;
   onCopyAiPrompt: () => Promise<void>;
   reuseSearchCollapseNonce: number;
 }) {
@@ -1257,9 +1335,15 @@ function TrackingView(props: {
       )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
       {!props.complete && (
-        <div className="tracking-ai-actions">
-          <button className="ai-quick-log-btn" type="button" onClick={() => props.onOpenAiQuickLog()}>AI estimate helper</button>
-          <button className="secondary ai-copy-prompt-btn" type="button" onClick={() => props.onCopyAiPrompt()}>Copy prompt</button>
+        <div className="tracking-ai-stack">
+          <div className="tracking-ai-actions">
+            <div className="tracking-ai-paste-col">
+              <button className="ai-quick-log-btn" type="button" onClick={() => props.onPasteAiQuickLog()}>Paste AI estimate</button>
+              <p className="tracking-ai-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p>
+            </div>
+            <button className="secondary ai-copy-prompt-btn" type="button" onClick={() => props.onCopyAiPrompt()}>Copy prompt</button>
+          </div>
+          <button className="log-btn gemini-estimate-btn" type="button" onClick={props.onOpenGeminiEstimate}>Estimate with Gemini</button>
         </div>
       )}
       <section className="card">
@@ -1715,7 +1799,76 @@ function FoodDatabasePreviewModal({ state, item, onUse, onSave, onClose }: { sta
   );
 }
 
-function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: boolean; fallbackMeal: Meal; onClose: () => void; onParsed: (entry: AiQuickLogEntry) => void }) {
+function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onClose: () => void; onEstimate: (userText: string, imageDataUrl?: string | null) => Promise<void> }) {
+  const [text, setText] = useState('');
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setText('');
+      setPhoto(null);
+      setLoading(false);
+      setError('');
+    }
+  }, [open]);
+
+  const attachPhoto = async (file?: File | null) => {
+    if (!file) return;
+    try {
+      setError('');
+      setPhoto(await compressImage(file));
+    } catch {
+      setError('Could not attach that photo.');
+    } finally {
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
+
+  const submit = async () => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setError('Describe what you ate first.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      await onEstimate(trimmed, photo);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gemini could not estimate this meal.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal open={open} title="Estimate with Gemini" onClose={onClose} bottomSheet>
+      <form className="gemini-estimate-modal" onSubmit={(event: FormEvent) => { event.preventDefault(); submit(); }}>
+        <p className="hint">Describe your food, add a photo if helpful, then review the estimate before saving.</p>
+        <Field label="What did you eat?" full>
+          <textarea value={text} onChange={event => { setText(event.target.value); setError(''); }} placeholder="Example: 2 large black milk teas with mini taro balls, little sugar, little ice" />
+        </Field>
+        <input ref={photoInputRef} hidden type="file" accept="image/*" onChange={event => attachPhoto(event.target.files?.[0])} />
+        <div className="photo-picker full">
+          <button type="button" className="photo-picker-label" onClick={() => photoInputRef.current?.click()}>
+            <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{photo ? 'Photo attached' : 'Add photo'}</strong><small>{photo ? 'Tap to replace the photo' : 'Optional, compressed before sending to Gemini'}</small></span>
+          </button>
+          {photo && <div className="photo-picker-preview show"><img src={photo} alt="Selected meal preview" /></div>}
+        </div>
+        {error && <p className="ai-quick-log-error">{error}</p>}
+        <div className="actions vertical">
+          <button className="primary" type="submit" disabled={loading || !text.trim()}>{loading ? 'Estimating...' : 'Estimate food'}</button>
+          <button className="secondary" type="button" disabled={loading} onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AiQuickLogModal({ open, fallbackMeal, seedText, onClose, onParsed }: { open: boolean; fallbackMeal: Meal; seedText: string; onClose: () => void; onParsed: (entry: AiQuickLogEntry) => void }) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const parsedRef = useRef(false);
@@ -1724,9 +1877,15 @@ function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: bool
     if (!open) {
       setText('');
       setError('');
+      parsedRef.current = false;
+      return;
     }
-    parsedRef.current = false;
-  }, [open]);
+    if (seedText) {
+      setText(seedText);
+      setError('');
+      parsedRef.current = false;
+    }
+  }, [open, seedText]);
 
   const tryParse = (value: string, showError: boolean) => {
     if (parsedRef.current) return true;
@@ -1786,13 +1945,13 @@ function AiQuickLogModal({ open, fallbackMeal, onClose, onParsed }: { open: bool
     <Modal open={open} title="AI estimate helper" onClose={onClose}>
       <div className="ai-quick-log-modal">
         <p className="hint">Paste an AI-generated estimate. If the format is correct, it will fill the Log Food form for review.</p>
-        <div className="help-callout">AI estimates can be wrong. Review before saving.</div>
+        <div className="help-callout">{AI_ESTIMATE_DISCLAIMER}</div>
         <div className="actions">
           <button className="secondary" type="button" onClick={pasteFromClipboard}>Paste from clipboard</button>
           <button className="secondary" type="button" onClick={() => { setText(''); setError(''); }}>Clear</button>
         </div>
         <Field label="Quick log JSON" full>
-          <textarea className="ai-quick-log-textarea" value={text} onChange={event => updateText(event.target.value)} placeholder='{"name":"Beef mince bowl","amount":"1 bowl","meal":"Dinner","calories":520,"protein":45,"carbs":18,"fat":28,"notes":"Ingredients and estimate notes"}' />
+          <textarea className="ai-quick-log-textarea" value={text} onChange={event => updateText(event.target.value)} placeholder='{"name":"Beef mince bowl","unitMode":"serving","amount":"1","meal":"Dinner","calories":520,"protein":45,"carbs":18,"fat":28,"notes":"Ingredients and estimate notes"}' />
         </Field>
         {error && <p className="ai-quick-log-error">{error}</p>}
       </div>
@@ -1823,7 +1982,6 @@ function EntryModal({
   onPickPhoto: () => void;
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
 }) {
-  const [additionalOpen, setAdditionalOpen] = useState(false);
   const caloriesPanelRef = useRef<HTMLDivElement>(null);
   const caloriesInputRef = useRef<HTMLInputElement>(null);
   const update = (patch: Partial<EntryDraft>) => setDraft(current => ({ ...current, ...patch }));
@@ -1874,13 +2032,11 @@ function EntryModal({
       portion: entryUnitModeValue(food.unitMode) === '100g' ? '100' : '1',
       favourite: !!food.favourite
     }));
-    setAdditionalOpen(false);
     scrollCaloriesPanel();
   };
 
   useEffect(() => {
     if (!open) return;
-    setAdditionalOpen(false);
     scrollCaloriesPanel('auto');
     if (openMode === 'manual') focusCaloriesInput();
   }, [open, openMode]);
@@ -1930,16 +2086,13 @@ function EntryModal({
           {draft.photo && <div className="photo-picker-preview show"><img src={draft.photo} alt="Selected meal preview" /></div>}
         </div>
 
-        <details className="extra-info" open={additionalOpen} onToggle={event => setAdditionalOpen(event.currentTarget.open)}>
-          <summary>Additional Information</summary>
-          <div className="extra-info-body">
-            <Field label="Food name" full><input value={draft.name} placeholder={`${draft.meal} entry`} onChange={event => update({ name: event.target.value })} /></Field>
-            <Field label={draft.unitMode === '100g' ? 'Amount eaten (g)' : 'Servings eaten'} full><input inputMode="decimal" value={draft.portion} onChange={event => update({ portion: event.target.value })} /></Field>
-            <div className="portion-help full">{draft.unitMode === '100g' ? 'Logged calories and macros = per 100g values x grams eaten / 100.' : 'Logged calories and macros = per-serving values x servings eaten.'}</div>
-            <Field label="Notes" full><textarea value={draft.notes} onChange={event => update({ notes: event.target.value })} /></Field>
-            <label className="check-pill full"><input type="checkbox" checked={draft.favourite} onChange={event => update({ favourite: event.target.checked })} /><span>Save to favourites</span></label>
-          </div>
-        </details>
+        <div className="entry-form-extras">
+          <Field label="Food name" full><input value={draft.name} placeholder={`${draft.meal} entry`} onChange={event => update({ name: event.target.value })} /></Field>
+          <Field label={draft.unitMode === '100g' ? 'Amount eaten (g)' : 'Servings eaten'} full><input inputMode="decimal" value={draft.portion} onChange={event => update({ portion: event.target.value })} /></Field>
+          <div className="portion-help full">{draft.unitMode === '100g' ? 'Logged calories and macros = per 100g values x grams eaten / 100.' : 'Logged calories and macros = per-serving values x servings eaten.'}</div>
+          <Field label="Notes" full><textarea value={draft.notes} onChange={event => update({ notes: event.target.value })} /></Field>
+          <label className="check-pill full"><input type="checkbox" checked={draft.favourite} onChange={event => update({ favourite: event.target.checked })} /><span>Save to favourites</span></label>
+        </div>
 
         <div className="actions full">
           <SwipeConfirm label={draft.editingId ? 'Swipe to save entry' : 'Swipe to log food'} confirmLabel={draft.editingId ? 'Release to save' : 'Release to log'} className="entry-swipe" onConfirm={() => onSave(false)} />
@@ -2803,6 +2956,8 @@ function SettingsView(props: {
   onToggleCustomDatabase: (id: string, enabled: boolean) => Promise<void>;
   onDeleteCustomDatabase: (id: string) => void;
   onCustomDatabaseHelp: () => void;
+  onGeminiApiKey: (key: string) => Promise<void> | void;
+  onGeminiApiKeyHelp: () => void;
   onCopyAiPrompt: () => Promise<void>;
   onAiPromptHelp: () => void;
   onExport: () => void;
@@ -2811,12 +2966,28 @@ function SettingsView(props: {
   onClear: () => void;
 }) {
   const [foodDatabaseUpdating, setFoodDatabaseUpdating] = useState(false);
+  const [geminiEditing, setGeminiEditing] = useState(false);
+  const [geminiDraft, setGeminiDraft] = useState(() => props.state.settings.geminiApiKey);
   const counts = backupCounts(props.state);
   const goalUnit = energyUnitValue(props.state.settings.energyUnit);
   const visibleSettings = { ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) };
   const draft = props.goalsEditing ? props.goalDraft : visibleSettings;
   const patchGoal = (patch: Partial<Settings>) => props.setGoalDraft({ ...props.goalDraft, ...patch });
   const toggleEnergyUnit = () => props.onEnergyUnit(goalUnit === 'kcal' ? 'kj' : 'kcal');
+
+  useEffect(() => {
+    if (!geminiEditing) setGeminiDraft(props.state.settings.geminiApiKey);
+  }, [props.state.settings.geminiApiKey, geminiEditing]);
+
+  const toggleGeminiEdit = () => {
+    if (geminiEditing) {
+      void Promise.resolve(props.onGeminiApiKey(geminiDraft)).then(() => setGeminiEditing(false));
+    } else {
+      setGeminiDraft(props.state.settings.geminiApiKey);
+      setGeminiEditing(true);
+    }
+  };
+
   return (
     <>
       <header className="page-header has-helper">
@@ -2828,7 +2999,27 @@ function SettingsView(props: {
       <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || DEFAULT.settings.theme) === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes Dawni&apos;s local estimate list. Estimates stay editable and won&apos;t change your saved foods or logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
       <section className="card custom-db-card"><div className="card-head"><h2>Custom food databases</h2><button className="help-btn" type="button" onClick={props.onCustomDatabaseHelp}>?</button></div><p className="hint">Import your own JSON estimate list. Enabled databases appear in food search and remain stored on this device.</p><div className="actions"><button className="primary" type="button" onClick={props.onImportCustomDatabase}>Import JSON</button></div>{props.state.customFoodDatabases.length ? <div className="custom-db-list">{props.state.customFoodDatabases.map(database => <div className="custom-db-row" key={database.id}><div className="custom-db-main"><strong>{database.name}</strong><span>{fmt(database.itemCount)} foods · Imported {new Date(database.importedAt).toLocaleDateString()} · {database.enabled ? 'Enabled' : 'Disabled'}</span></div><label className="toggle-line"><input type="checkbox" checked={database.enabled} onChange={event => props.onToggleCustomDatabase(database.id, event.target.checked)} /><span>{database.enabled ? 'On' : 'Off'}</span></label><button className="small-btn danger" type="button" onClick={() => props.onDeleteCustomDatabase(database.id)}>Delete</button></div>)}</div> : <div className="empty custom-db-empty">No custom databases imported yet.</div>}</section>
-      <section className="card ai-prompt-card"><div className="card-head"><h2>AI estimate helper</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Use this prompt with your AI chatbot, then review the estimate before saving it. Dawni treats AI output as editable, not guaranteed.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div></section>
+      <section className="card gemini-settings-card">
+        <div className="card-head">
+          <h2>Gemini</h2>
+          <div className="card-head-trailing">
+            <button className="small-btn" type="button" onClick={toggleGeminiEdit}>{geminiEditing ? 'Save' : 'Edit'}</button>
+            <button className="help-btn" type="button" onClick={props.onGeminiApiKeyHelp}>?</button>
+          </div>
+        </div>
+        <p className="hint">Use your own Gemini API key for in-app food estimates. The key stays on this device and is included in backups.</p>
+        <Field label="Gemini API key" full>
+          <input
+            type="password"
+            disabled={!geminiEditing}
+            value={geminiEditing ? geminiDraft : props.state.settings.geminiApiKey}
+            placeholder={geminiEditing ? 'Paste API key' : 'Tap Edit to add or change your key'}
+            autoComplete="off"
+            onChange={event => setGeminiDraft(event.target.value)}
+          />
+        </Field>
+      </section>
+      <section className="card ai-prompt-card"><div className="card-head"><h2>AI estimate helper</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Use this prompt with your AI chatbot, then review the estimate before saving it. Dawni treats AI output as editable, not guaranteed.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div><p className="hint ai-prompt-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p></section>
       <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}.` : 'No backup exported yet.'} Dawni keeps your data on this device; export a backup to protect your logs and journal photos. Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos, {counts.customFoodDatabases || 0} custom databases.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
       <section className="card"><h2>App</h2><p className="hint"><strong>Dawni</strong><br /><span className="project-note">Weekly Calorie Tracker</span><br />Version {APP_VERSION}</p><div className="actions"><button className="secondary" type="button" onClick={props.onCheckUpdates}>Check for updates</button><button className="secondary danger" type="button" onClick={props.onClear}>Clear local data</button></div></section>
     </>
