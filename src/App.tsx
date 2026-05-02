@@ -266,7 +266,7 @@ function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', '
   );
 }
 
-function Modal({ open, title, children, onClose, wide = false, className = '', bottomSheet = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string; bottomSheet?: boolean }) {
+function Modal({ open, title, children, onClose, wide = false, className = '', bottomSheet = false, closeDisabled = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string; bottomSheet?: boolean; closeDisabled?: boolean }) {
   const [rendered, setRendered] = useState(open);
   const [closing, setClosing] = useState(false);
   // `entered` drives the CSS transition for bottom-sheet open/close.
@@ -286,7 +286,8 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
   }, [rendered]);
 
   // Single close gate — all dismiss paths funnel here.
-  const requestClose = useCallback(() => {
+  const requestClose = useCallback((force = false) => {
+    if (closeDisabled && !force) return;
     if (closingRef.current) return;
     closingRef.current = true;
     cancelAnimationFrame(rafRef.current!);
@@ -300,7 +301,7 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       closingRef.current = false;
       onCloseRef.current();
     }, CLOSE_MS);
-  }, [CLOSE_MS]);
+  }, [CLOSE_MS, closeDisabled]);
 
   useEffect(() => {
     if (open) {
@@ -321,7 +322,7 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       return () => cancelAnimationFrame(rafRef.current!);
     }
     if (closingRef.current) return;
-    requestClose();
+    requestClose(true);
   }, [open, requestClose, bottomSheet]);
 
   if (!rendered) return null;
@@ -340,7 +341,7 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       <section className={panelClass} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="close" type="button" onClick={requestClose} aria-label="Close"><span aria-hidden="true" /></button>
+          <button className="close" type="button" onClick={() => requestClose()} aria-label="Close" disabled={closeDisabled}><span aria-hidden="true" /></button>
         </div>
         <div className="modal-body">{children}</div>
       </section>
@@ -1845,15 +1846,15 @@ function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onC
   };
 
   return (
-    <Modal open={open} title="Estimate with Gemini" onClose={onClose} bottomSheet>
+    <Modal open={open} title="Estimate with Gemini" onClose={onClose} bottomSheet closeDisabled={loading}>
       <form className="gemini-estimate-modal" onSubmit={(event: FormEvent) => { event.preventDefault(); submit(); }}>
         <p className="hint">Describe your food, add a photo if helpful, then review the estimate before saving.</p>
         <Field label="What did you eat?" full>
-          <textarea value={text} onChange={event => { setText(event.target.value); setError(''); }} placeholder="Example: 2 large black milk teas with mini taro balls, little sugar, little ice" />
+          <textarea disabled={loading} value={text} onChange={event => { setText(event.target.value); setError(''); }} placeholder="Example: 2 large black milk teas with mini taro balls, little sugar, little ice" />
         </Field>
         <input ref={photoInputRef} hidden type="file" accept="image/*" onChange={event => attachPhoto(event.target.files?.[0])} />
         <div className="photo-picker full">
-          <button type="button" className="photo-picker-label" onClick={() => photoInputRef.current?.click()}>
+          <button type="button" className="photo-picker-label" disabled={loading} onClick={() => photoInputRef.current?.click()}>
             <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{photo ? 'Photo attached' : 'Add photo'}</strong><small>{photo ? 'Tap to replace the photo' : 'Optional, compressed before sending to Gemini'}</small></span>
           </button>
           {photo && <div className="photo-picker-preview show"><img src={photo} alt="Selected meal preview" /></div>}
