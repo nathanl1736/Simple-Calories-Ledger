@@ -471,6 +471,7 @@ export function App() {
   const [goalDraft, setGoalDraft] = useState<Settings>(DEFAULT.settings);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
   const [aiQuickLogMeal, setAiQuickLogMeal] = useState<Meal>('Snack');
+  const [reuseSearchCollapseNonce, setReuseSearchCollapseNonce] = useState(0);
   const importRef = useRef<HTMLInputElement>(null);
   const customDatabaseImportRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -706,7 +707,10 @@ export function App() {
     });
     notify(entryDraft.editingId ? 'Entry updated' : 'Entry saved');
     if (keepOpen) setEntryDraft(blankEntryDraft(entryDraft.meal, energyUnitValue(state.settings.energyUnit)));
-    else setModal(null);
+    else {
+      setModal(null);
+      setReuseSearchCollapseNonce(n => n + 1);
+    }
   };
 
   const repeatEntry = async (entry: Entry) => {
@@ -873,6 +877,7 @@ export function App() {
           onSaveDatabaseFood={saveDatabaseFood}
           onOpenAiQuickLog={openAiQuickLog}
           onCopyAiPrompt={copyAiPrompt}
+          reuseSearchCollapseNonce={reuseSearchCollapseNonce}
         />
       )}
       {tab === 'journal' && (
@@ -1185,6 +1190,7 @@ function TrackingView(props: {
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   onOpenAiQuickLog: (meal?: Meal) => void;
   onCopyAiPrompt: () => Promise<void>;
+  reuseSearchCollapseNonce: number;
 }) {
   const dayGoal = goalForDate(props.state, props.selectedDate);
   const goal = dayGoal.calories || 1;
@@ -1246,7 +1252,7 @@ function TrackingView(props: {
       {!props.complete && (
         <section className="reuse-panel" aria-label="Reuse or search foods">
           <div className="section">Reuse or search foods</div>
-          <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} onSaveDatabaseFood={props.onSaveDatabaseFood} compact browseToggle />
+          <SavedFoodPicker state={props.state} foods={props.state.foods} onChoose={props.onPrefillFood} onSaveDatabaseFood={props.onSaveDatabaseFood} compact browseToggle collapseSignal={props.reuseSearchCollapseNonce} />
         </section>
       )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
@@ -1526,12 +1532,13 @@ function QuickResultSection({ title, children }: { title: string; children: Reac
   return <div className="quick-result-section"><div className="quick-section-label">{title}</div><div className="quick-result-list">{children}</div></div>;
 }
 
-function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact = false, browseToggle = false }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void; compact?: boolean; browseToggle?: boolean }) {
+function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact = false, browseToggle = false, collapseSignal }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void; compact?: boolean; browseToggle?: boolean; collapseSignal?: number }) {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [browseOpen, setBrowseOpen] = useState(false);
   const [favouritesOpen, setFavouritesOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
+  const prevCollapseSignal = useRef<number | null>(null);
   const [databaseMatches, setDatabaseMatches] = useState<FoodDatabaseItem[]>([]);
   const [databaseOpen, setDatabaseOpen] = useState(false);
   const [databasePreview, setDatabasePreview] = useState<FoodDatabaseItem | null>(null);
@@ -1548,6 +1555,16 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
     const timer = window.setTimeout(() => setDebouncedQuery(query), 120);
     return () => window.clearTimeout(timer);
   }, [query]);
+
+  useEffect(() => {
+    if (!browseToggle || collapseSignal === undefined) return;
+    if (prevCollapseSignal.current !== null && collapseSignal !== prevCollapseSignal.current) {
+      setBrowseOpen(false);
+      setFavouritesOpen(false);
+      setRecentOpen(false);
+    }
+    prevCollapseSignal.current = collapseSignal;
+  }, [browseToggle, collapseSignal]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1578,6 +1595,11 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
   const choose = (food: Food) => {
     setDatabaseOpen(false);
     setQuery('');
+    if (browseToggle) {
+      setBrowseOpen(false);
+      setFavouritesOpen(false);
+      setRecentOpen(false);
+    }
     onChoose(food);
   };
   const previewDatabase = (item: FoodDatabaseItem) => {
@@ -1588,6 +1610,11 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
     setDatabasePreview(null);
     setDatabaseOpen(false);
     setQuery('');
+    if (browseToggle) {
+      setBrowseOpen(false);
+      setFavouritesOpen(false);
+      setRecentOpen(false);
+    }
     onChoose(databaseItemToFood(item));
   };
   const saveDatabaseFood = async (item: FoodDatabaseItem) => {
