@@ -912,6 +912,7 @@ textarea { min-height: 78px; resize: vertical; }
 }
 .help-callout { background: var(--color-surface-soft); border: 1px solid var(--line); border-radius: 16px; padding: 12px; margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.45; }
 .gemini-estimate-modal { display: grid; gap: 12px; }
+.gemini-estimate-modal .gemini-estimate-tip { margin-top: -4px; }
 .gemini-estimate-modal .photo-picker { margin: 0; }
 .gemini-estimate-modal textarea { min-height: 130px; }
 .ai-quick-log-modal { display: grid; gap: 12px; }

@@ -17,6 +17,7 @@ export type Settings = {
   lastBackupReminderShownAt: string | null;
   backupReminderDays: number;
   geminiApiKey: string;
+  spreadWeeklyBank: boolean;
 };
 
 export type DailyGoalSnapshot = Pick<Settings, 'calories' | 'protein' | 'carbs' | 'fat' | 'trackingMode'>;

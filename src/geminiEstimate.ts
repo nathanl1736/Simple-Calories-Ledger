@@ -161,7 +161,17 @@ export async function requestMealEstimate({
   const key = apiKey.trim();
   if (!key) throw new Error('Add a Gemini API key in Settings first.');
 
-  const parts: GeminiPart[] = [{ text: userText.trim() }];
+  const trimmed = userText.trim();
+  const textForModel =
+    trimmed ||
+    (imageDataUrl
+      ? 'Photo only: identify the food or meal, estimate it for a calorie tracker, and reply only with the JSON object described in your instructions.'
+      : '');
+  if (!textForModel && !imageDataUrl) {
+    throw new Error('Add a short description or attach a photo.');
+  }
+
+  const parts: GeminiPart[] = [{ text: textForModel }];
   if (imageDataUrl) parts.push(inlineImagePart(imageDataUrl));
 
   const ranked = await rankedModelIdsForKey(key);

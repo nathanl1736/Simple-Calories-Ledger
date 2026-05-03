@@ -16,7 +16,8 @@ export const DEFAULT: AppState = {
     lastBackupMeta: null,
     lastBackupReminderShownAt: null,
     backupReminderDays: 7,
-    geminiApiKey: ''
+    geminiApiKey: '',
+    spreadWeeklyBank: false
   },
   entries: [],
   foods: [],
@@ -77,6 +78,7 @@ export function normalizeStateShape(input: unknown): AppState {
   settings.energyUnit = energyUnitValue(settings.energyUnit);
   settings.backupReminderDays = validBackupReminderDays(settings.backupReminderDays);
   settings.geminiApiKey = typeof settings.geminiApiKey === 'string' ? settings.geminiApiKey : '';
+  settings.spreadWeeklyBank = !!settings.spreadWeeklyBank;
   if (!['system', 'dark', 'light'].includes(settings.theme)) settings.theme = DEFAULT.settings.theme;
   if (settings.accent === '#efad7c' || settings.accent === '#ccb7f6') settings.accent = '#c9dc86';
   if (settings.calories === 2000 && settings.protein === 150 && settings.carbs === 200 && settings.fat === 65) {

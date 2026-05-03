@@ -480,10 +480,10 @@ export function App() {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const entryPhotoInputRef = useRef<HTMLInputElement>(null);
 
-  const notify = (text: string) => {
+  const notify = (text: string, durationMs: number = 1800) => {
     const id = Date.now();
     setToast({ id, text });
-    window.setTimeout(() => setToast(current => current?.id === id ? null : current), 1800);
+    window.setTimeout(() => setToast(current => current?.id === id ? null : current), durationMs);
   };
 
   const persist = async (next: AppState) => {
@@ -809,6 +809,7 @@ export function App() {
   };
 
   const estimateWithGemini = async (userText: string, imageDataUrl?: string | null) => {
+    notify('Estimating… You can close this and navigate again once the result is back.', 6000);
     const raw = await requestMealEstimate({
       apiKey: state.settings.geminiApiKey,
       userText,
@@ -1027,6 +1028,12 @@ export function App() {
           onBackupDays={days => updateState(draft => {
             draft.settings.backupReminderDays = validBackupReminderDays(days);
           })}
+          onSpreadWeeklyBank={enabled => {
+            if (goalsEditing) setGoalDraft(current => ({ ...current, spreadWeeklyBank: enabled }));
+            updateState(draft => {
+              draft.settings.spreadWeeklyBank = enabled;
+            }).then(() => notify(enabled ? 'Weekly bank spread enabled' : 'Weekly bank spread disabled'));
+          }}
           onRefreshFoodDatabase={() => refreshFoodEstimateDatabase()
             .then(result => notify(`Loaded ${fmt(result.validCount)} food estimates`))
             .catch(() => notify('Could not update local food estimates'))}
@@ -1271,7 +1278,9 @@ function TrackingView(props: {
   onCopyAiPrompt: () => Promise<void>;
   reuseSearchCollapseNonce: number;
 }) {
-  const dayGoal = goalForDate(props.state, props.selectedDate);
+  const baseDayGoal = goalForDate(props.state, props.selectedDate);
+  const bankAdjustment = weeklyBankAdjustmentForDate(props.state, props.selectedDate);
+  const dayGoal = bankAdjustment ? { ...baseDayGoal, calories: baseDayGoal.calories + bankAdjustment } : baseDayGoal;
   const goal = dayGoal.calories || 1;
   const remaining = goal - props.totals.calories;
   const overTarget = remaining < 0;
@@ -1300,6 +1309,7 @@ function TrackingView(props: {
           <div className="value">{fmt(displayedRemaining)} <small>{energyLabel(props.state)}</small></div>
           <div className="today-context">
             <span className="today-context-chip">Daily target {energyText(props.state, dayGoal.calories)}</span>
+            {bankAdjustment > 0 && <span className="today-context-chip">Includes +{energyText(props.state, bankAdjustment)}/day bank</span>}
             {overTarget && <span className="today-context-chip today-context-chip--balance">Week can still balance</span>}
           </div>
         </div>
@@ -1830,8 +1840,8 @@ function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onC
 
   const submit = async () => {
     const trimmed = text.trim();
-    if (!trimmed) {
-      setError('Describe what you ate first.');
+    if (!trimmed && !photo) {
+      setError('Add a short description or attach a photo.');
       return;
     }
     setLoading(true);
@@ -1848,20 +1858,21 @@ function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onC
   return (
     <Modal open={open} title="Estimate with Gemini" onClose={onClose} bottomSheet closeDisabled={loading}>
       <form className="gemini-estimate-modal" onSubmit={(event: FormEvent) => { event.preventDefault(); submit(); }}>
-        <p className="hint">Describe your food, add a photo if helpful, then review the estimate before saving.</p>
-        <Field label="What did you eat?" full>
-          <textarea disabled={loading} value={text} onChange={event => { setText(event.target.value); setError(''); }} placeholder="Example: 2 large black milk teas with mini taro balls, little sugar, little ice" />
+        <p className="hint">Add a short description, attach a photo, or both—then review the estimate before saving.</p>
+        <p className="hint gemini-estimate-tip">Tip: listing the ingredients and amounts you actually used in cooking gives more accurate estimates.</p>
+        <Field label="What did you eat? (optional with a photo)" full>
+          <textarea disabled={loading} value={text} onChange={event => { setText(event.target.value); setError(''); }} placeholder="Example: 2 large black milk teas with mini taro balls, little sugar, little ice. Leave blank if you are sending a photo only." />
         </Field>
         <input ref={photoInputRef} hidden type="file" accept="image/*" onChange={event => attachPhoto(event.target.files?.[0])} />
         <div className="photo-picker full">
           <button type="button" className="photo-picker-label" disabled={loading} onClick={() => photoInputRef.current?.click()}>
-            <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{photo ? 'Photo attached' : 'Add photo'}</strong><small>{photo ? 'Tap to replace the photo' : 'Optional, compressed before sending to Gemini'}</small></span>
+            <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{photo ? 'Photo attached' : 'Add photo'}</strong><small>{photo ? 'Tap to replace the photo' : 'Optional with text, or use a photo alone—compressed before sending'}</small></span>
           </button>
           {photo && <div className="photo-picker-preview show"><img src={photo} alt="Selected meal preview" /></div>}
         </div>
         {error && <p className="ai-quick-log-error">{error}</p>}
         <div className="actions vertical">
-          <button className="primary" type="submit" disabled={loading || !text.trim()}>{loading ? 'Estimating...' : 'Estimate food'}</button>
+          <button className="primary" type="submit" disabled={loading || (!text.trim() && !photo)}>{loading ? 'Estimating...' : 'Estimate food'}</button>
           <button className="secondary" type="button" disabled={loading} onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -2632,6 +2643,24 @@ function signedEnergyValue(state: AppState, kcal: number) {
   return `${value > 0 ? '+' : ''}${fmt(value)}`;
 }
 
+function weeklyBankAdjustmentForDate(state: AppState, key: string) {
+  if (!state.settings.spreadWeeklyBank) return 0;
+  const date = normalizeDateKey(key);
+  const today = todayKey();
+  if (!date || date < today || isDayComplete(state, date)) return 0;
+
+  const start = weekStartMonday(date);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const completedBank = days
+    .filter(day => isDayComplete(state, day))
+    .reduce((acc, day) => acc + goalForDate(state, day).calories - sum(dayEntries(state, day)).calories, 0);
+  if (completedBank <= 0) return 0;
+
+  const remainingDays = days.filter(day => day >= today && !isDayComplete(state, day));
+  if (!remainingDays.includes(date) || !remainingDays.length) return 0;
+  return completedBank / remainingDays.length;
+}
+
 function homeWeekSummary(state: AppState, selectedDate: string) {
   const start = weekStartMonday(selectedDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
@@ -2952,6 +2981,7 @@ function SettingsView(props: {
   onTheme: (theme: ThemePreference) => void;
   onEnergyUnit: (unit: 'kcal' | 'kj') => void;
   onBackupDays: (days: number) => void;
+  onSpreadWeeklyBank: (enabled: boolean) => void;
   onRefreshFoodDatabase: () => Promise<void>;
   onImportCustomDatabase: () => void;
   onToggleCustomDatabase: (id: string, enabled: boolean) => Promise<void>;
@@ -2997,6 +3027,15 @@ function SettingsView(props: {
         <p className="hint page-subtitle">Goals, calm display, and local-first backup.</p>
       </header>
       <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
+      <section className="card">
+        <h2>Weekly banking</h2>
+        <p className="hint">Use completed days to make the rest of the week easier to plan.</p>
+        <label className="check-pill full">
+          <input type="checkbox" checked={props.state.settings.spreadWeeklyBank} onChange={event => props.onSpreadWeeklyBank(event.target.checked)} />
+          <span>Spread banked calories across remaining days</span>
+        </label>
+        <p className="hint">When enabled, positive banked calories from completed days are added evenly to open days from today through Sunday.</p>
+      </section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || DEFAULT.settings.theme) === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes Dawni&apos;s local estimate list. Estimates stay editable and won&apos;t change your saved foods or logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
       <section className="card custom-db-card"><div className="card-head"><h2>Custom food databases</h2><button className="help-btn" type="button" onClick={props.onCustomDatabaseHelp}>?</button></div><p className="hint">Import your own JSON estimate list. Enabled databases appear in food search and remain stored on this device.</p><div className="actions"><button className="primary" type="button" onClick={props.onImportCustomDatabase}>Import JSON</button></div>{props.state.customFoodDatabases.length ? <div className="custom-db-list">{props.state.customFoodDatabases.map(database => <div className="custom-db-row" key={database.id}><div className="custom-db-main"><strong>{database.name}</strong><span>{fmt(database.itemCount)} foods · Imported {new Date(database.importedAt).toLocaleDateString()} · {database.enabled ? 'Enabled' : 'Disabled'}</span></div><label className="toggle-line"><input type="checkbox" checked={database.enabled} onChange={event => props.onToggleCustomDatabase(database.id, event.target.checked)} /><span>{database.enabled ? 'On' : 'Off'}</span></label><button className="small-btn danger" type="button" onClick={() => props.onDeleteCustomDatabase(database.id)}>Delete</button></div>)}</div> : <div className="empty custom-db-empty">No custom databases imported yet.</div>}</section>
