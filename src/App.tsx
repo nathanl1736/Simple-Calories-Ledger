@@ -1280,7 +1280,9 @@ function TrackingView(props: {
 }) {
   const baseDayGoal = goalForDate(props.state, props.selectedDate);
   const bankAdjustment = weeklyBankAdjustmentForDate(props.state, props.selectedDate);
-  const dayGoal = bankAdjustment ? { ...baseDayGoal, calories: baseDayGoal.calories + bankAdjustment } : baseDayGoal;
+  const adjustedCalories = Math.max(1, baseDayGoal.calories + bankAdjustment);
+  const effectiveBankAdjustment = adjustedCalories - baseDayGoal.calories;
+  const dayGoal = effectiveBankAdjustment ? { ...baseDayGoal, calories: adjustedCalories } : baseDayGoal;
   const goal = dayGoal.calories || 1;
   const remaining = goal - props.totals.calories;
   const overTarget = remaining < 0;
@@ -1309,7 +1311,7 @@ function TrackingView(props: {
           <div className="value">{fmt(displayedRemaining)} <small>{energyLabel(props.state)}</small></div>
           <div className="today-context">
             <span className="today-context-chip">Daily target {energyText(props.state, dayGoal.calories)}</span>
-            {bankAdjustment > 0 && <span className="today-context-chip">Includes +{energyText(props.state, bankAdjustment)}/day bank</span>}
+            {effectiveBankAdjustment !== 0 && <span className="today-context-chip">Includes {signedEnergyText(props.state, effectiveBankAdjustment)}/day bank</span>}
             {overTarget && <span className="today-context-chip today-context-chip--balance">Week can still balance</span>}
           </div>
         </div>
@@ -2654,7 +2656,7 @@ function weeklyBankAdjustmentForDate(state: AppState, key: string) {
   const completedBank = days
     .filter(day => isDayComplete(state, day))
     .reduce((acc, day) => acc + goalForDate(state, day).calories - sum(dayEntries(state, day)).calories, 0);
-  if (completedBank <= 0) return 0;
+  if (completedBank === 0) return 0;
 
   const remainingDays = days.filter(day => day >= today && !isDayComplete(state, day));
   if (!remainingDays.includes(date) || !remainingDays.length) return 0;
@@ -3034,7 +3036,7 @@ function SettingsView(props: {
           <input type="checkbox" checked={props.state.settings.spreadWeeklyBank} onChange={event => props.onSpreadWeeklyBank(event.target.checked)} />
           <span>Spread banked calories across remaining days</span>
         </label>
-        <p className="hint">When enabled, positive banked calories from completed days are added evenly to open days from today through Sunday.</p>
+        <p className="hint">When enabled, saved or overrun calories from completed days are spread evenly across open days from today through Sunday.</p>
       </section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || DEFAULT.settings.theme) === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes Dawni&apos;s local estimate list. Estimates stay editable and won&apos;t change your saved foods or logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>

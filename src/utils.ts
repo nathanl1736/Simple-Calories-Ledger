@@ -110,9 +110,12 @@ export function isDayComplete(state: AppState, key: string) {
 export function setDayComplete(state: AppState, key: string, on: boolean): AppState {
   const date = normalizeDateKey(key);
   const completedDates = state.completedDates.map(normalizeDateKey).filter(Boolean);
+  const dailyGoals = { ...(state.dailyGoals || {}) };
+  if (on && date && !dailyGoals[date]) dailyGoals[date] = goalSnapshotFromSettings(state.settings);
   return {
     ...state,
-    completedDates: on ? [...new Set([...completedDates, date])] : completedDates.filter(item => item !== date)
+    completedDates: on ? [...new Set([...completedDates, date])] : completedDates.filter(item => item !== date),
+    dailyGoals
   };
 }
 
@@ -142,8 +145,9 @@ export function normalizeGoalSnapshot(input: Partial<DailyGoalSnapshot> | undefi
 export function goalForDate(state: AppState, key: string): DailyGoalSnapshot {
   const date = normalizeDateKey(key);
   const today = todayKey();
-  if (!date || date >= today) return goalSnapshotFromSettings(state.settings);
-  return state.dailyGoals?.[date] || goalSnapshotFromSettings(state.settings);
+  const savedGoal = state.dailyGoals?.[date];
+  if (savedGoal && (date < today || isDayComplete(state, date))) return savedGoal;
+  return goalSnapshotFromSettings(state.settings);
 }
 
 export function datesWithRecords(state: AppState) {
@@ -156,7 +160,7 @@ export function datesWithRecords(state: AppState) {
 export function lockPastGoals(state: AppState, today = todayKey(), goal = goalSnapshotFromSettings(state.settings)): AppState {
   const dailyGoals = { ...(state.dailyGoals || {}) };
   datesWithRecords(state).forEach(date => {
-    if (date < today && !dailyGoals[date]) dailyGoals[date] = goal;
+    if ((date < today || isDayComplete(state, date)) && !dailyGoals[date]) dailyGoals[date] = goal;
   });
   return { ...state, dailyGoals };
 }

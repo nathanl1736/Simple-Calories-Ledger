@@ -1,7 +1,8 @@
 {
-  "version": "2.2.0.2",
+  "version": "2.2.0.3",
   "notes": [
-    "Weekly banking: optional setting to spread positive banked calories across remaining open days in the week.",
+    "Weekly banking: locked days keep their saved goal; bank spread now includes deficits and surpluses across remaining open days.",
+    "Weekly banking: optional setting to spread saved or overrun calories across remaining open days in the week.",
     "AI uplift: Gemini estimates can be generated in-app from text or a photo using your saved API key.",
     "AI quick log prompt and paste flow now better protect against double-counted servings."
   ],
