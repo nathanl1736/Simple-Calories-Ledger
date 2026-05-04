@@ -2342,11 +2342,19 @@ function JournalView({
             <button type="button" className={dayViewMode === 'list' ? 'active' : ''} onClick={() => setDayViewMode(dayViewMode === 'list' ? 'collage' : 'list')}>List</button>
             <button type="button" className={dayViewMode === 'collage' ? 'active' : ''} onClick={() => setDayViewMode(dayViewMode === 'list' ? 'collage' : 'list')}>Collage</button>
           </div>
-          {dayViewMode === 'collage' && (
-            <div className="journal-collage-actions">
-              <button className="journal-label-toggle" type="button" onClick={onShuffle}>Shuffle</button>
-              <button className="journal-label-toggle active" type="button" onClick={() => setLabelMode(labelOrder[(labelOrder.indexOf(labelMode) + 1) % labelOrder.length])}>{labelTitle}</button>
-            </div>
+          {dayViewMode === 'collage' && photos.length > 0 && (
+            <button className="journal-label-toggle" type="button" onClick={onShuffle}>
+              Shuffle
+            </button>
+          )}
+          {photos.length > 0 && (
+            <button
+              className="journal-label-toggle active"
+              type="button"
+              onClick={() => setLabelMode(labelOrder[(labelOrder.indexOf(labelMode) + 1) % labelOrder.length])}
+            >
+              {labelTitle}
+            </button>
           )}
         </div>
         {dayViewMode === 'collage'
@@ -2354,16 +2362,23 @@ function JournalView({
             const featured = index === featureOffset || ((index + featureOffset) % 7 === 0 && index < photos.length - 1);
             return <button className={`journal-photo-card ${featured ? 'featured' : ''}`} key={entry.id} type="button" onClick={() => onPhoto(entry)}><img src={entry.photo || ''} alt="" />{labelText(entry)}</button>;
           })}</div> : <div className="empty"><strong>No photos yet.</strong><div>Add a meal photo while logging to build your journal.</div></div>
-          : entries.length ? <div className="journal-day-list">{entries.map(entry => {
+          : entries.length ? <div className={`journal-day-list label-${labelMode}`}>{entries.map(entry => {
             const totals = entryTotals(entry);
+            const hideTitleOnThumb = entry.photo && labelMode === 'nameCalories';
+            const hideCalChipOnThumb = entry.photo && (labelMode === 'calories' || labelMode === 'nameCalories');
             return (
               <button key={entry.id} className={`journal-entry-card ${entry.photo ? '' : 'no-photo'}`} data-swipe-lock type="button" onClick={() => entry.photo && onPhoto(entry)}>
-                {entry.photo && <img className="journal-entry-photo" src={entry.photo} alt="" />}
+                {entry.photo ? (
+                  <span className="journal-entry-photo-wrap">
+                    <img className="journal-entry-photo" src={entry.photo} alt="" />
+                    {labelText(entry)}
+                  </span>
+                ) : null}
                 <div>
-                  <div className="journal-entry-title">{entry.name}</div>
+                  {!hideTitleOnThumb && <div className="journal-entry-title">{entry.name}</div>}
                   <div className="meta-chips journal-meta-chips">
                     <span className="meta-chip neutral">{entry.meal || 'Snack'}</span>
-                    <span className="meta-chip accent">{energyText(state, totals.calories)}</span>
+                    {!hideCalChipOnThumb && <span className="meta-chip accent">{energyText(state, totals.calories)}</span>}
                     <MacroChips fat={totals.fat} carbs={totals.carbs} protein={totals.protein} />
                   </div>
                   {entry.notes && <div className="journal-entry-note">{entry.notes}</div>}

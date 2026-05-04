@@ -1,6 +1,7 @@
 {
-  "version": "2.2.0.6",
+  "version": "2.2.0.7",
   "notes": [
+    "Food journal collage: Calories and Name + Cal overlays now use the same solid caption panel and full-opacity white type as each other (shared tokens with meal photo cards). Photo label mode stays images only.",
     "Weekly banking: locked days keep their saved goal; bank spread now includes deficits and surpluses across remaining open days.",
     "Weekly banking: optional setting to spread saved or overrun calories across remaining open days in the week.",
     "AI uplift: Gemini estimates can be generated in-app from text or a photo using your saved API key.",
