@@ -1,5 +1,5 @@
 {
-  "version": "2.2.0.3",
+  "version": "2.2.0.6",
   "notes": [
     "Weekly banking: locked days keep their saved goal; bank spread now includes deficits and surpluses across remaining open days.",
     "Weekly banking: optional setting to spread saved or overrun calories across remaining open days in the week.",

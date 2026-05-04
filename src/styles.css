@@ -78,11 +78,11 @@
   --color-text-soft: #575044;
   --color-accent: #7d8f48;
   --color-accent-ink: color-mix(in srgb, var(--accent) 14%, var(--ink));
-  --color-accent-text: color-mix(in srgb, var(--accent) 38%, var(--ink));
+  --color-accent-text: color-mix(in srgb, var(--accent) 14%, var(--ink));
   --color-good: #6f8a57;
   --color-review: #a27832;
   --color-risk: #b86f62;
-  --color-photo-overlay: rgba(39, 32, 23, .62);
+  --color-photo-overlay: rgba(22, 18, 14, .78);
   --color-modal-scrim: rgba(46, 38, 27, .34);
   --color-handle-mark: rgba(255, 250, 240, .64);
   --color-handle-mark-soft: rgba(255, 250, 240, .32);
@@ -93,6 +93,12 @@
   --carbs: var(--color-review);
   --fat: #79699c;
   --shadow: 0 16px 38px rgba(83, 69, 45, .14);
+}
+
+:root[data-theme="light"] .kicker,
+:root[data-theme="light"] .page-kicker,
+:root[data-theme="light"] .page-eyebrow {
+  color: var(--color-text);
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -1000,9 +1006,9 @@ textarea { min-height: 78px; resize: vertical; }
 .journal-photo-card { position: relative; border-radius: 16px; overflow: hidden; background: var(--color-surface-raised); color: var(--ink); padding: 0; min-height: 0; }
 .journal-photo-card.featured { grid-row: span 2; }
 .journal-photo-card img { width: 100%; height: 100%; object-fit: cover; transition: transform var(--motion-medium) var(--ease-ios), opacity var(--motion-medium) ease; }
-.journal-photo-caption { position: absolute; left: 7px; right: 7px; bottom: 7px; background: var(--color-photo-overlay); backdrop-filter: blur(8px); border-radius: 10px; padding: 7px 8px; text-align: left; display: grid; gap: 2px; }
-.journal-photo-caption strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.journal-photo-caption span, .journal-photo-caption.calories-only { color: var(--ink); font-size: 11px; font-weight: 720; }
+.journal-photo-caption { position: absolute; left: 7px; right: 7px; bottom: 7px; background: var(--color-photo-overlay); backdrop-filter: blur(8px); border-radius: 10px; padding: 7px 8px; text-align: left; display: grid; gap: 2px; color: rgb(255, 255, 255); -webkit-text-fill-color: rgb(255, 255, 255); opacity: 1; }
+.journal-photo-caption strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(255, 255, 255); -webkit-text-fill-color: rgb(255, 255, 255); opacity: 1; }
+.journal-photo-caption span, .journal-photo-caption.calories-only { color: rgb(255, 255, 255); -webkit-text-fill-color: rgb(255, 255, 255); opacity: 1; font-size: 11px; font-weight: 760; }
 .journal-photo-caption.calories-only {
   left: auto;
   right: 8px;
@@ -1016,9 +1022,14 @@ textarea { min-height: 78px; resize: vertical; }
   justify-content: center;
   white-space: nowrap;
   box-sizing: border-box;
-  color: var(--color-accent-text);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(12, 10, 8, 0.94);
+  color: rgb(255, 255, 255);
+  -webkit-text-fill-color: rgb(255, 255, 255);
+  opacity: 1;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 820;
 }
 .journal-day-list { display: grid; gap: 10px; }
 .journal-entry-card { min-height: 86px; border-radius: var(--radius-card); background: var(--card); border: 1px solid var(--surface-border); color: inherit; padding: 10px; display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; text-align: left; }
@@ -1045,6 +1056,10 @@ textarea { min-height: 78px; resize: vertical; }
 .journal-photo-card:active,
 .meal-card-row:active {
   transform: scale(.988);
+}
+
+.journal-photo-card:active {
+  opacity: 1;
 }
 
 .smooth-toggle { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--color-surface-soft); border: 1px solid var(--line); border-radius: 999px; padding: 4px; max-width: 260px; }
