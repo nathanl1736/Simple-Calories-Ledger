@@ -140,6 +140,7 @@ type ModalScrollLockSnapshot = {
   htmlOverflow: string;
 };
 
+const MODAL_SCROLL_LOCK_RELEASED_EVENT = 'modal-scroll-lock-released';
 let modalScrollLockCount = 0;
 let modalScrollLockSnapshot: ModalScrollLockSnapshot | null = null;
 
@@ -178,6 +179,8 @@ function acquireModalScrollLock() {
     document.body.style.top = previous.bodyTop;
     document.body.style.width = previous.bodyWidth;
     window.scrollTo(0, previous.scrollY);
+    requestAnimationFrame(() => window.scrollTo(0, previous.scrollY));
+    window.dispatchEvent(new Event(MODAL_SCROLL_LOCK_RELEASED_EVENT));
   };
 }
 
@@ -386,6 +389,7 @@ function MonthNav({ value, onChange }: { value: Date; onChange: (date: Date) => 
 
 function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => void; children: ReactNode }) {
   const [navHidden, setNavHidden] = useState(false);
+  const [navResetKey, setNavResetKey] = useState(0);
   const tabs: [Tab, string][] = [
     ['tracking', 'Track'],
     ['stats', 'Week'],
@@ -411,6 +415,11 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
       if (isModalLayerPresent()) return;
       setNavHidden(isTextEntryElement(document.activeElement));
     };
+    const onModalScrollLockReleased = () => {
+      setNavHidden(false);
+      setNavResetKey(key => key + 1);
+      requestAnimationFrame(refresh);
+    };
     const onFocusIn = (event: FocusEvent) => {
       if (isModalLayerPresent()) return;
       setNavHidden(isTextEntryElement(event.target));
@@ -422,17 +431,19 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
     };
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
+    window.addEventListener(MODAL_SCROLL_LOCK_RELEASED_EVENT, onModalScrollLockReleased);
     refresh();
     return () => {
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
+      window.removeEventListener(MODAL_SCROLL_LOCK_RELEASED_EVENT, onModalScrollLockReleased);
     };
   }, []);
 
   return (
     <>
       <main className="app">{children}</main>
-      <nav className={`nav ${navHidden ? 'hidden' : ''}`} aria-label="Main tabs" aria-hidden={navHidden}>
+      <nav key={navResetKey} className={`nav ${navHidden ? 'hidden' : ''}`} aria-label="Main tabs" aria-hidden={navHidden}>
         <div className="nav-inner">
           {tabs.map(([id, label]) => (
             <button key={id} className={`tab ${tab === id ? 'active' : ''}`} type="button" onClick={() => setTab(id)}>
@@ -850,7 +861,7 @@ export function App() {
 
   const activeFood = state.foods.find(food => food.id === activeFoodId) || null;
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
-  const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 3);
+  const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 5);
   const copyAiPrompt = () => navigator.clipboard
     ? navigator.clipboard.writeText(AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
     : (notify('Clipboard is not available'), Promise.resolve());
@@ -1231,9 +1242,14 @@ export function App() {
       <Modal open={modal === 'adherenceHelp'} title="Consistency this week" onClose={() => setModal(null)}>
         <p className="hint">Consistency is based only on completed days. “On track” uses your saved targets for each day. Open days stay open.</p>
       </Modal>
-      <Modal open={modal === 'version'} title="Version update available" onClose={() => setModal(null)}>
+      <Modal open={modal === 'version'} title="Update available" onClose={() => setModal(null)}>
         <div className="version-badge">Version {availableUpdate?.version || APP_VERSION}</div>
-        <p className="hint">{availableUpdate?.source === 'service-worker' ? 'A newer offline version is ready to install.' : `Installed version ${APP_VERSION}. Update to version ${availableUpdate?.version || APP_VERSION}.`}</p>
+        <p className="hint">
+          {availableUpdate?.source === 'service-worker'
+            ? 'A newer build is already downloaded and waiting. Tap Update now to reload Dawni with the latest changes. Your journal, foods, and settings stay on this device.'
+            : `You are on version ${APP_VERSION}. Version ${availableUpdate?.version || APP_VERSION} is available on the server. Tap Update now to refresh the page and load it.`}
+        </p>
+        <p className="page-kicker update-notes-heading">What&apos;s new</p>
         <ul className="update-list">{updateNotes.map(item => <li key={item}>{item}</li>)}</ul>
         <div className="actions vertical">
           <button className="primary" type="button" onClick={() => applyAppUpdate(availableUpdate)}>Update now</button>
@@ -2306,6 +2322,7 @@ function JournalView({
   if (journalDay) {
     const entries = dayEntries(state, journalDay);
     const photos = entries.filter(entry => entry.photo);
+    const dayTotals = sum(entries);
     const setDay = (key: string) => {
       setJournalDay(key);
       setJournalMonth(new Date(`${key}T00:00:00`));
@@ -2386,6 +2403,15 @@ function JournalView({
               </button>
             );
           })}</div> : <div className="empty"><strong>Nothing logged yet.</strong><div>Log something when you&apos;re ready.</div></div>}
+        <div className="journal-day-summary-bar" data-swipe-lock aria-label="Journal day totals">
+          <div className="journal-day-summary-main">
+            <span>Total</span>
+            <strong>{energyText(state, dayTotals.calories)}</strong>
+          </div>
+          <div className="meta-chips journal-day-summary-macros">
+            <MacroChips fat={dayTotals.fat} carbs={dayTotals.carbs} protein={dayTotals.protein} />
+          </div>
+        </div>
       </div>
     );
   }

@@ -900,6 +900,7 @@ textarea { min-height: 78px; resize: vertical; }
 .modal-body { min-height: 0; overflow: auto; padding: 16px; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .version-badge { display: inline-flex; align-items: center; min-height: 30px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 14%, var(--color-surface-raised)); color: var(--color-accent-text); font-size: var(--type-meta); font-weight: var(--weight-label); letter-spacing: var(--tracking-label); text-transform: uppercase; padding: 0 10px; margin-bottom: 12px; }
 .update-list { margin: 12px 0 0; padding-left: 20px; color: var(--ink); font-size: 15px; line-height: 1.45; }
+.update-notes-heading { margin: 14px 0 6px; }
 .photo-preview-shell {
   width: 100%;
   max-height: min(74vh, 560px);
@@ -1041,6 +1042,43 @@ textarea { min-height: 78px; resize: vertical; }
 .journal-meta-chips { margin-top: 5px; }
 .journal-entry-card > div > .journal-meta-chips:first-child { margin-top: 0; }
 .journal-entry-note { margin-top: 6px; color: var(--muted); font-size: 12px; font-weight: 680; line-height: 1.35; }
+.journal-day-summary-bar {
+  position: sticky;
+  bottom: calc(90px + env(safe-area-inset-bottom));
+  z-index: 30;
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--card) 92%, var(--color-nav-blend));
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  box-shadow: 0 14px 34px color-mix(in srgb, var(--bg) 70%, transparent), inset 0 1px 0 var(--color-inset-highlight);
+}
+.journal-day-summary-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.journal-day-summary-main span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: var(--weight-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+.journal-day-summary-main strong {
+  color: var(--ink);
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 840;
+  white-space: nowrap;
+}
+.journal-day-summary-macros {
+  justify-content: flex-end;
+}
 
 .thumb img,
 .photo-card img,

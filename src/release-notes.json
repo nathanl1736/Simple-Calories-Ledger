@@ -1,4 +1,6 @@
 [
+  "Journal day view: sticky bar at the bottom shows total calories and macros for that day.",
+  "Journal: closing the meal photo lightbox no longer leaves the bottom tab bar offset or stuck.",
   "Food journal: Photo, Calories, and Name + Cal label modes use the same solid caption panel and full-opacity white type on collage tiles and on list thumbnails (shared tokens with meal photo cards). Photo mode stays image-only on the thumb; list view hides duplicate title or calorie chip when the thumb already shows them.",
   "Weekly banking: locked days keep their saved goal; bank spread now includes deficits and surpluses across remaining open days.",
   "Weekly banking: optional setting to spread saved or overrun calories across remaining open days in the week.",
