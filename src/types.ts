@@ -99,6 +99,8 @@ export type AppState = {
   foods: Food[];
   completedDates: string[];
   dailyGoals: Record<string, DailyGoalSnapshot>;
+  /** Optional per-day calorie target (kcal) for open days; does not change macro targets on Track. */
+  dayCalorieOverrides: Record<string, number>;
   customFoodDatabases: CustomFoodDatabase[];
 };
 

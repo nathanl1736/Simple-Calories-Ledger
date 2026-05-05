@@ -111,11 +111,14 @@ export function setDayComplete(state: AppState, key: string, on: boolean): AppSt
   const date = normalizeDateKey(key);
   const completedDates = state.completedDates.map(normalizeDateKey).filter(Boolean);
   const dailyGoals = { ...(state.dailyGoals || {}) };
+  const dayCalorieOverrides = { ...(state.dayCalorieOverrides || {}) };
   if (on && date && !dailyGoals[date]) dailyGoals[date] = goalSnapshotFromSettings(state.settings);
+  if (on && date) delete dayCalorieOverrides[date];
   return {
     ...state,
     completedDates: on ? [...new Set([...completedDates, date])] : completedDates.filter(item => item !== date),
-    dailyGoals
+    dailyGoals,
+    dayCalorieOverrides
   };
 }
 
@@ -148,6 +151,75 @@ export function goalForDate(state: AppState, key: string): DailyGoalSnapshot {
   const savedGoal = state.dailyGoals?.[date];
   if (savedGoal && (date < today || isDayComplete(state, date))) return savedGoal;
   return goalSnapshotFromSettings(state.settings);
+}
+
+export function weeklyBankAdjustmentForDate(state: AppState, key: string): number {
+  if (!state.settings.spreadWeeklyBank) return 0;
+  const date = normalizeDateKey(key);
+  const today = todayKey();
+  if (!date || date < today || isDayComplete(state, date)) return 0;
+
+  const start = weekStartMonday(date);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const completedBank = days
+    .filter(day => isDayComplete(state, day))
+    .reduce((acc, day) => acc + goalForDate(state, day).calories - sum(dayEntries(state, day)).calories, 0);
+  if (completedBank === 0) return 0;
+
+  const remainingDays = days.filter(day => day >= today && !isDayComplete(state, day));
+  if (!remainingDays.includes(date) || !remainingDays.length) return 0;
+  return completedBank / remainingDays.length;
+}
+
+export function dayCalorieSliderBounds(suggested: number): { min: number; max: number } {
+  const min = Math.max(400, Math.floor(suggested * 0.45));
+  const max = Math.min(8000, Math.ceil(Math.max(suggested * 1.65, suggested + 400)));
+  return min < max ? { min, max } : { min: Math.max(1, suggested - 1), max: suggested + 1 };
+}
+
+export function suggestedTrackDayCalories(state: AppState, date: string): number {
+  const key = normalizeDateKey(date);
+  const base = goalForDate(state, key);
+  const bank = weeklyBankAdjustmentForDate(state, key);
+  return Math.max(1, base.calories + bank);
+}
+
+function overrideNearSuggestedTolerance(suggested: number) {
+  return Math.max(25, Math.round(suggested * 0.015));
+}
+
+export function resolveDayCalorieTarget(state: AppState, date: string): { suggested: number; effective: number; hasOverride: boolean } {
+  const key = normalizeDateKey(date);
+  const suggested = suggestedTrackDayCalories(state, key);
+  const complete = isDayComplete(state, key);
+  const raw = state.dayCalorieOverrides?.[key];
+  if (complete || raw == null || !Number.isFinite(raw)) {
+    return { suggested, effective: suggested, hasOverride: false };
+  }
+  const { min, max } = dayCalorieSliderBounds(suggested);
+  const clamped = Math.min(max, Math.max(min, Math.round(n(raw))));
+  const tol = overrideNearSuggestedTolerance(suggested);
+  if (Math.abs(clamped - suggested) <= tol) {
+    return { suggested, effective: suggested, hasOverride: false };
+  }
+  return { suggested, effective: clamped, hasOverride: true };
+}
+
+export function applyDayCalorieOverride(state: AppState, date: string, kcal: number | null): AppState {
+  const key = normalizeDateKey(date);
+  if (!key) return state;
+  const next = { ...(state.dayCalorieOverrides || {}) };
+  if (kcal == null) {
+    delete next[key];
+    return { ...state, dayCalorieOverrides: next };
+  }
+  const suggested = suggestedTrackDayCalories(state, key);
+  const { min, max } = dayCalorieSliderBounds(suggested);
+  const clamped = Math.min(max, Math.max(min, Math.round(n(kcal))));
+  const tol = overrideNearSuggestedTolerance(suggested);
+  if (Math.abs(clamped - suggested) <= tol) delete next[key];
+  else next[key] = clamped;
+  return { ...state, dayCalorieOverrides: next };
 }
 
 export function datesWithRecords(state: AppState) {

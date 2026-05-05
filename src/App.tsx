@@ -15,6 +15,8 @@ import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseA
 import { requestMealEstimate } from './geminiEstimate';
 import {
   addDays,
+  applyDayCalorieOverride,
+  dayCalorieSliderBounds,
   dayEntries,
   energyLabel,
   energyInputFromKcal,
@@ -23,6 +25,7 @@ import {
   energyText,
   energyUnitLabel,
   energyUnitValue,
+  energyValue,
   energyValueForUnit,
   entryTotals,
   entryUnitModeValue,
@@ -40,6 +43,7 @@ import {
   n,
   normalizeDateKey,
   readable,
+  resolveDayCalorieTarget,
   setDayComplete,
   shortDate,
   signed,
@@ -48,7 +52,8 @@ import {
   toKey,
   uid,
   validBackupReminderDays,
-  weekStartMonday
+  weekStartMonday,
+  weeklyBankAdjustmentForDate
 } from './utils';
 
 type Tab = 'tracking' | 'journal' | 'library' | 'cards' | 'stats' | 'settings';
@@ -321,6 +326,92 @@ function MonthNav({ value, onChange }: { value: Date; onChange: (date: Date) => 
       </button>
       <button className="small-btn month-nav next" type="button" aria-label="Next month" onClick={() => onChange(new Date(year, month + 1, 1))} />
     </div>
+  );
+}
+
+function DayCalorieGoalPanel({
+  state,
+  date,
+  suggested,
+  effective,
+  hasOverride,
+  complete,
+  onPersist
+}: {
+  state: AppState;
+  date: string;
+  suggested: number;
+  effective: number;
+  hasOverride: boolean;
+  complete: boolean;
+  onPersist: (kcal: number | null) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (complete) return null;
+  const { min, max } = dayCalorieSliderBounds(suggested);
+  const safe = Math.min(max, Math.max(min, effective));
+  const unit = energyUnitValue(state.settings.energyUnit);
+  const step = unit === 'kj' ? 84 : 25;
+  const panelId = `day-cal-goal-expand-${date}`;
+  const sliderId = `day-cal-goal-${date}`;
+  return (
+    <section
+      className={`card day-calorie-goal-panel${expanded ? ' is-expanded' : ''}`}
+      aria-label="Calorie target for this day"
+    >
+      <button
+        type="button"
+        className="day-calorie-goal-toggle"
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => setExpanded(current => !current)}
+      >
+        <div className="day-calorie-goal-toggle-text">
+          <span className="section">Today&apos;s calorie target</span>
+          <span className="day-calorie-goal-toggle-summary">{energyText(state, safe)}</span>
+        </div>
+        <div className="day-calorie-goal-toggle-trail">
+          {hasOverride ? <span className="meta-chip accent">Custom</span> : null}
+          <span className="day-calorie-chevron" aria-hidden />
+        </div>
+      </button>
+      {expanded ? (
+        <div className="day-calorie-goal-expand" id={panelId} role="region">
+          <p className="hint day-calorie-goal-hint">Adjust if you&apos;re pacing calories across the week. Protein, carbs and fat below still follow your usual targets.</p>
+          <div className="day-calorie-slider-well">
+            <div className="day-calorie-slider-row">
+              <span className="day-calorie-endpoint" aria-hidden="true">{fmt(energyValue(state, min))}</span>
+              <input
+                id={sliderId}
+                className="day-calorie-slider"
+                type="range"
+                aria-valuemin={min}
+                aria-valuemax={max}
+                aria-valuenow={safe}
+                min={min}
+                max={max}
+                step={step}
+                value={safe}
+                onChange={event => {
+                  const kcal = Number(event.target.value);
+                  if (!Number.isFinite(kcal)) return;
+                  onPersist(kcal);
+                }}
+              />
+              <span className="day-calorie-endpoint" aria-hidden="true">{fmt(energyValue(state, max))}</span>
+            </div>
+          </div>
+          <div className="day-calorie-goal-foot">
+            <span className="hint">Daily Goal {energyText(state, suggested)}{state.settings.spreadWeeklyBank ? ' · includes week bank spread' : ''}</span>
+            {hasOverride ? (
+              <button type="button" className="secondary day-calorie-reset" onClick={() => onPersist(null)}>
+                Match Daily Goal
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -878,6 +969,7 @@ export function App() {
           onOpenGeminiEstimate={openGeminiEstimate}
           onCopyAiPrompt={copyAiPrompt}
           reuseSearchCollapseNonce={reuseSearchCollapseNonce}
+          onSetDayCalorieTarget={kcal => updateState(draft => applyDayCalorieOverride(draft, selectedDate, kcal))}
         />
       )}
       {tab === 'journal' && (
@@ -1230,13 +1322,15 @@ function TrackingView(props: {
   onOpenGeminiEstimate: () => void;
   onCopyAiPrompt: () => Promise<void>;
   reuseSearchCollapseNonce: number;
+  onSetDayCalorieTarget: (kcal: number | null) => void;
 }) {
   const baseDayGoal = goalForDate(props.state, props.selectedDate);
   const bankAdjustment = weeklyBankAdjustmentForDate(props.state, props.selectedDate);
   const adjustedCalories = Math.max(1, baseDayGoal.calories + bankAdjustment);
-  const effectiveBankAdjustment = adjustedCalories - baseDayGoal.calories;
-  const dayGoal = effectiveBankAdjustment ? { ...baseDayGoal, calories: adjustedCalories } : baseDayGoal;
-  const goal = dayGoal.calories || 1;
+  const macroDayGoal = adjustedCalories !== baseDayGoal.calories ? { ...baseDayGoal, calories: adjustedCalories } : baseDayGoal;
+  const calorieTarget = resolveDayCalorieTarget(props.state, props.selectedDate);
+  const goalCalories = calorieTarget.effective;
+  const goal = goalCalories || 1;
   const remaining = goal - props.totals.calories;
   const overTarget = remaining < 0;
   const displayedRemaining = overTarget ? Math.abs(remaining) : remaining;
@@ -1245,7 +1339,7 @@ function TrackingView(props: {
   const weekCalorieBudget = weekSummary.rows.reduce((acc, row) => acc + row.goal.calories, 0);
   const bankStatTone = weekSummary.completed.length ? budgetDeltaTone(weekSummary.banked) : '';
   const projectedStatTone = weekSummary.completed.length ? upperBudgetTone(weekSummary.projected, weekCalorieBudget) : '';
-  const remainingLabel = overTarget ? (dayGoal.trackingMode === 'Bulking' ? 'Above target by' : 'Over today by') : dayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
+  const remainingLabel = overTarget ? (macroDayGoal.trackingMode === 'Bulking' ? 'Above target by' : 'Over today by') : macroDayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
   const trackingTitle = props.selectedDate === todayKey() ? 'Today in your week' : 'This day in your week';
   return (
     <div className="screen-swipe-zone view-transition" key={props.selectedDate}>
@@ -1261,13 +1355,26 @@ function TrackingView(props: {
           <div className="label">{remainingLabel}</div>
           <div className="value">{fmt(displayedRemaining)} <small>{energyLabel(props.state)}</small></div>
           <div className="today-context">
-            <span className="today-context-chip">Daily target {energyText(props.state, dayGoal.calories)}</span>
-            {effectiveBankAdjustment !== 0 && <span className="today-context-chip">Includes {signedEnergyText(props.state, effectiveBankAdjustment)}/day bank</span>}
+            <span className="today-context-chip">Today&apos;s target {energyText(props.state, goalCalories)}</span>
+            {calorieTarget.hasOverride ? (
+              <span className="today-context-chip today-context-chip--muted">Daily Goal {energyText(props.state, calorieTarget.suggested)}</span>
+            ) : bankAdjustment !== 0 ? (
+              <span className="today-context-chip">Includes {signedEnergyText(props.state, bankAdjustment)}/day bank</span>
+            ) : null}
             {overTarget && <span className="today-context-chip today-context-chip--balance">Week can still balance</span>}
           </div>
         </div>
         <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Logged</span></div></div>
       </section>
+      <DayCalorieGoalPanel
+        state={props.state}
+        date={props.selectedDate}
+        suggested={calorieTarget.suggested}
+        effective={calorieTarget.effective}
+        hasOverride={calorieTarget.hasOverride}
+        complete={props.complete}
+        onPersist={props.onSetDayCalorieTarget}
+      />
       <section className="home-week-strip" aria-label="This week at a glance">
         <div className="home-week-heading">
           <span>Week at a glance</span>
@@ -1287,9 +1394,9 @@ function TrackingView(props: {
         </div>
       </section>
       <div className="macro-grid macro-summary">
-        <Macro name="Protein" value={props.totals.protein} goal={dayGoal.protein} color="--protein" featured />
-        <Macro name="Carbs" value={props.totals.carbs} goal={dayGoal.carbs} color="--carbs" />
-        <Macro name="Fat" value={props.totals.fat} goal={dayGoal.fat} color="--fat" />
+        <Macro name="Protein" value={props.totals.protein} goal={macroDayGoal.protein} color="--protein" featured />
+        <Macro name="Carbs" value={props.totals.carbs} goal={macroDayGoal.carbs} color="--carbs" />
+        <Macro name="Fat" value={props.totals.fat} goal={macroDayGoal.fat} color="--fat" />
       </div>
       {!props.complete && (
         <section className="reuse-panel" aria-label="Reuse or search foods">
@@ -2599,23 +2706,6 @@ function signedEnergyValue(state: AppState, kcal: number) {
   return `${value > 0 ? '+' : ''}${fmt(value)}`;
 }
 
-function weeklyBankAdjustmentForDate(state: AppState, key: string) {
-  if (!state.settings.spreadWeeklyBank) return 0;
-  const date = normalizeDateKey(key);
-  const today = todayKey();
-  if (!date || date < today || isDayComplete(state, date)) return 0;
-
-  const start = weekStartMonday(date);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const completedBank = days
-    .filter(day => isDayComplete(state, day))
-    .reduce((acc, day) => acc + goalForDate(state, day).calories - sum(dayEntries(state, day)).calories, 0);
-  if (completedBank === 0) return 0;
-
-  const remainingDays = days.filter(day => day >= today && !isDayComplete(state, day));
-  if (!remainingDays.includes(date) || !remainingDays.length) return 0;
-  return completedBank / remainingDays.length;
-}
 
 function homeWeekSummary(state: AppState, selectedDate: string) {
   const start = weekStartMonday(selectedDate);

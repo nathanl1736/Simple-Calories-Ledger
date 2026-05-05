@@ -23,6 +23,7 @@ export const DEFAULT: AppState = {
   foods: [],
   completedDates: [],
   dailyGoals: {},
+  dayCalorieOverrides: {},
   customFoodDatabases: []
 };
 
@@ -92,6 +93,7 @@ export function normalizeStateShape(input: unknown): AppState {
     foods: Array.isArray(raw.foods) ? raw.foods.map(food => normalizeFood(food)) : [],
     completedDates: Array.isArray(raw.completedDates) ? raw.completedDates.map(String) : [],
     dailyGoals: {},
+    dayCalorieOverrides: {},
     customFoodDatabases: normalizeCustomFoodDatabases((raw as { customFoodDatabases?: unknown }).customFoodDatabases)
   };
   const rawDailyGoals = raw.dailyGoals && typeof raw.dailyGoals === 'object' ? raw.dailyGoals : {};
@@ -99,5 +101,13 @@ export function normalizeStateShape(input: unknown): AppState {
     const date = normalizeDateKey(key);
     if (date) next.dailyGoals[date] = normalizeGoalSnapshot(value as Partial<Settings>, settings);
   });
+  const rawOverrides = (raw as { dayCalorieOverrides?: unknown }).dayCalorieOverrides;
+  if (rawOverrides && typeof rawOverrides === 'object') {
+    Object.entries(rawOverrides as Record<string, unknown>).forEach(([key, value]) => {
+      const date = normalizeDateKey(key);
+      const kcal = n(value);
+      if (date && kcal > 0) next.dayCalorieOverrides[date] = Math.round(kcal);
+    });
+  }
   return lockPastGoals(next, undefined, goalSnapshotFromSettings(settings));
 }
