@@ -1,5 +1,5 @@
 {
-  "version": "2.2.0.8",
+  "version": "2.2.0.9",
   "notes": [
     "Journal day view: sticky bar at the bottom shows total calories and macros for that day.",
     "Journal: closing the meal photo lightbox no longer leaves the bottom tab bar offset or stuck.",
