@@ -347,13 +347,24 @@ function DayCalorieGoalPanel({
   onPersist: (kcal: number | null) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [typedValue, setTypedValue] = useState('');
   if (complete) return null;
   const { min, max } = dayCalorieSliderBounds(suggested);
   const safe = Math.min(max, Math.max(min, effective));
   const unit = energyUnitValue(state.settings.energyUnit);
-  const step = unit === 'kj' ? 84 : 25;
+  const sliderStepKcal = 10;
   const panelId = `day-cal-goal-expand-${date}`;
   const sliderId = `day-cal-goal-${date}`;
+  const inputId = `day-cal-goal-input-${date}`;
+  const applyTyped = () => {
+    const raw = typedValue.trim();
+    if (!raw) return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return;
+    const kcal = energyInputToKcal(parsed, unit);
+    onPersist(kcal);
+    setTypedValue('');
+  };
   return (
     <section
       className={`card day-calorie-goal-panel${expanded ? ' is-expanded' : ''}`}
@@ -390,7 +401,7 @@ function DayCalorieGoalPanel({
                 aria-valuenow={safe}
                 min={min}
                 max={max}
-                step={step}
+                step={sliderStepKcal}
                 value={safe}
                 onChange={event => {
                   const kcal = Number(event.target.value);
@@ -399,6 +410,29 @@ function DayCalorieGoalPanel({
                 }}
               />
               <span className="day-calorie-endpoint" aria-hidden="true">{fmt(energyValue(state, max))}</span>
+            </div>
+            <div className="day-calorie-input-row">
+              <label className="day-calorie-input-label" htmlFor={inputId}>Type a target ({unit === 'kj' ? 'kJ' : 'kCal'})</label>
+              <div className="day-calorie-input-controls">
+                <input
+                  id={inputId}
+                  className="day-calorie-input"
+                  inputMode="numeric"
+                  type="number"
+                  step={unit === 'kj' ? 10 : 10}
+                  placeholder={String(fmt(energyValue(state, safe))).replaceAll(',', '')}
+                  value={typedValue}
+                  onChange={event => setTypedValue(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    applyTyped();
+                  }}
+                />
+                <button type="button" className="secondary day-calorie-apply" onClick={applyTyped} disabled={!typedValue.trim()}>
+                  Set
+                </button>
+              </div>
             </div>
           </div>
           <div className="day-calorie-goal-foot">

@@ -346,6 +346,45 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
   align-items: center;
   gap: 10px;
 }
+.day-calorie-input-row {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+.day-calorie-input-label {
+  color: var(--muted);
+  font-size: var(--type-meta);
+  font-weight: 720;
+}
+.day-calorie-input-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.day-calorie-input {
+  min-height: 46px;
+  width: 100%;
+  border-radius: var(--radius-control);
+  background: var(--card);
+  border: 1px solid var(--surface-border);
+  padding: 10px 12px;
+  font-size: 16px;
+  font-weight: 760;
+  color: var(--ink);
+}
+.day-calorie-input:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 46%, var(--line));
+  outline-offset: 2px;
+}
+.day-calorie-apply {
+  min-height: 46px;
+  padding: 0 14px !important;
+  border-radius: var(--radius-control) !important;
+  font-size: 13px !important;
+  font-weight: 760 !important;
+  white-space: nowrap;
+}
 .day-calorie-endpoint {
   font-size: 11px;
   font-weight: 720;

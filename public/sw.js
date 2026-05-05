@@ -1,4 +1,4 @@
-const APP_VERSION = '2.2.0.9';
+const APP_VERSION = '2.2.0.10';
 const CACHE_PREFIX = 'dawni';
 const CACHE_NAME = `${CACHE_PREFIX}-${APP_VERSION}`;
 const APP_SHELL = [
