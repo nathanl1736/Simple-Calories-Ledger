@@ -1,4 +1,4 @@
-﻿import { CSSProperties, FormEvent, ReactNode, PointerEvent as ReactPointerEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { CSSProperties, FormEvent, ReactNode, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { createPortal, flushSync } from 'react-dom';
 import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
@@ -119,13 +119,6 @@ const draftEnergyText = (kcal: number, unit: EnergyUnit) => energyInputFromKcal(
 type Toast = { id: number; text: string } | null;
 type MacroChipKey = 'fat' | 'carbs' | 'protein';
 type EffectiveTheme = 'dark' | 'light';
-type SafeSwipeNavigationOptions = {
-  enabled?: boolean;
-  threshold?: number;
-  onPrevious: () => void;
-  onNext: () => void;
-};
-
 const THEME_COLORS: Record<EffectiveTheme, string> = {
   dark: '#151713',
   light: '#f8f3e9'
@@ -195,62 +188,6 @@ function applyThemePreference(theme: ThemePreference) {
   document.documentElement.dataset.themePreference = theme;
   const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (themeColor) themeColor.content = THEME_COLORS[effectiveTheme];
-}
-
-const SAFE_SWIPE_LOCK_SELECTOR = [
-  'input',
-  'textarea',
-  'select',
-  'button',
-  'a',
-  '[role="button"]',
-  '[data-swipe-lock]',
-  '[data-interactive]',
-  '.swipe-row',
-  '.modal',
-  '.modal-panel',
-  '.modal-backdrop',
-  '.bottom-sheet'
-].join(',');
-
-function isSafeSwipeTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  // Page-level date swipes ignore controls, modals, rows, meal blocks (incl. empty states), and swipe controls.
-  return !target.closest(SAFE_SWIPE_LOCK_SELECTOR);
-}
-
-function useSafeSwipeNavigation({ enabled = true, threshold = 52, onPrevious, onNext }: SafeSwipeNavigationOptions) {
-  const gesture = useRef({ pointerId: -1, startX: 0, startY: 0, active: false, cancelled: false });
-  const reset = () => {
-    gesture.current = { pointerId: -1, startX: 0, startY: 0, active: false, cancelled: false };
-  };
-  const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    if (!enabled || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0) || !isSafeSwipeTarget(event.target)) return;
-    gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: true, cancelled: false };
-  };
-  const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const current = gesture.current;
-    if (!current.active || current.pointerId !== event.pointerId || current.cancelled) return;
-    const dx = event.clientX - current.startX;
-    const dy = event.clientY - current.startY;
-    if (Math.abs(dy) > 32 && Math.abs(dy) > Math.abs(dx) * 0.8) current.cancelled = true;
-  };
-  const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
-    const current = gesture.current;
-    if (!current.active || current.pointerId !== event.pointerId || current.cancelled) return reset();
-    const dx = event.clientX - current.startX;
-    const dy = event.clientY - current.startY;
-    reset();
-    if (Math.abs(dx) < threshold || Math.abs(dx) < Math.abs(dy) * 1.35) return;
-    if (dx < 0) onNext();
-    else onPrevious();
-  };
-  return {
-    onPointerDown,
-    onPointerMove,
-    onPointerUp,
-    onPointerCancel: reset
-  };
 }
 
 function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', 'protein'] }: { fat?: number; carbs?: number; protein?: number; show?: MacroChipKey[] }) {
@@ -1310,17 +1247,15 @@ function TrackingView(props: {
   const projectedStatTone = weekSummary.completed.length ? upperBudgetTone(weekSummary.projected, weekCalorieBudget) : '';
   const remainingLabel = overTarget ? (dayGoal.trackingMode === 'Bulking' ? 'Above target by' : 'Over today by') : dayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
   const trackingTitle = props.selectedDate === todayKey() ? 'Today in your week' : 'This day in your week';
-  const swipeNavigation = useSafeSwipeNavigation({
-    onPrevious: () => props.setSelectedDate(addDays(props.selectedDate, -1)),
-    onNext: () => props.setSelectedDate(addDays(props.selectedDate, 1))
-  });
   return (
-    <div className="screen-swipe-zone view-transition" key={props.selectedDate} {...swipeNavigation}>
-      <header className="page-header">
-        <div className="page-kicker">Dawni</div>
-        <h1 className="page-title">{trackingTitle}</h1>
-      </header>
-      <DayNav value={props.selectedDate} onChange={props.setSelectedDate} />
+    <div className="screen-swipe-zone view-transition" key={props.selectedDate}>
+      <div className="sticky-screen-top">
+        <header className="page-header">
+          <div className="page-kicker">Dawni</div>
+          <h1 className="page-title">{trackingTitle}</h1>
+        </header>
+        <DayNav value={props.selectedDate} onChange={props.setSelectedDate} />
+      </div>
       <section className={`hero today-card ${overTarget ? 'over-target' : ''}`}>
         <div className="remaining">
           <div className="label">{remainingLabel}</div>
@@ -2299,26 +2234,6 @@ function JournalView({
 }) {
   const year = journalMonth.getFullYear();
   const month = journalMonth.getMonth();
-  const journalDaySwipeNavigation = useSafeSwipeNavigation({
-    enabled: !!journalDay,
-    onPrevious: () => {
-      if (!journalDay) return;
-      const key = addDays(journalDay, -1);
-      setJournalDay(key);
-      setJournalMonth(new Date(`${key}T00:00:00`));
-    },
-    onNext: () => {
-      if (!journalDay) return;
-      const key = addDays(journalDay, 1);
-      setJournalDay(key);
-      setJournalMonth(new Date(`${key}T00:00:00`));
-    }
-  });
-  const journalMonthSwipeNavigation = useSafeSwipeNavigation({
-    enabled: !journalDay,
-    onPrevious: () => setJournalMonth(new Date(year, month - 1, 1)),
-    onNext: () => setJournalMonth(new Date(year, month + 1, 1))
-  });
   if (journalDay) {
     const entries = dayEntries(state, journalDay);
     const photos = entries.filter(entry => entry.photo);
@@ -2342,7 +2257,7 @@ function JournalView({
       return <span className="journal-photo-caption"><strong>{entry.name}</strong><span>{calories}</span></span>;
     };
     return (
-      <div className="screen-swipe-zone view-transition" key={journalDay} {...journalDaySwipeNavigation}>
+      <div className="screen-swipe-zone view-transition" key={journalDay}>
         <header className="page-header">
           <div className="page-kicker">Food journal</div>
           <h1 className="page-title">{readable(journalDay)}</h1>
@@ -2419,7 +2334,7 @@ function JournalView({
   const offset = first.getDay();
   const days = Array.from({ length: 42 }, (_, i) => new Date(year, month, i - offset + 1));
   return (
-    <div className="screen-swipe-zone view-transition" key={`${year}-${month}`} {...journalMonthSwipeNavigation}>
+    <div className="screen-swipe-zone view-transition" key={`${year}-${month}`}>
       <header className="page-header has-helper">
         <div className="page-kicker">Food journal</div>
         <h1 className="page-title">Journal</h1>
@@ -2512,18 +2427,16 @@ function CardsView({
     prevCardsDateRef.current = selectedDate;
   }, [selectedDate]);
 
-  const cardsSwipe = useSafeSwipeNavigation({
-    onPrevious: () => setSelectedDate(addDays(selectedDate, -1)),
-    onNext: () => setSelectedDate(addDays(selectedDate, 1))
-  });
   return (
-    <div className="screen-swipe-zone view-transition" key={selectedDate} {...cardsSwipe}>
-      <header className="page-header has-helper">
-        <div className="page-kicker">Reflect</div>
-        <h1 className="page-title">Cards</h1>
-        <p className="hint page-subtitle">Create simple meal snapshots.</p>
-      </header>
-      <DayNav value={selectedDate} onChange={setSelectedDate} />
+    <div className="screen-swipe-zone view-transition" key={selectedDate}>
+      <div className="sticky-screen-top">
+        <header className="page-header has-helper">
+          <div className="page-kicker">Reflect</div>
+          <h1 className="page-title">Cards</h1>
+          <p className="hint page-subtitle">Create simple meal snapshots.</p>
+        </header>
+        <DayNav value={selectedDate} onChange={setSelectedDate} />
+      </div>
       <section className="card meal-card-intro"><p className="hint">Pick a logged meal group and open a simple screenshot-ready meal summary card.</p></section>
       {datedGroups.length ? <div className="cards-list">{datedGroups.map(group => {
         const names = group.items.map(item => item.name).join(', ');
@@ -2776,17 +2689,16 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
   const last7Rows = last7Days.map(date => ({ date, totals: sum(dayEntries(state, date)), complete: isDayComplete(state, date), goal: goalForDate(state, date) }));
   const last7Logged = last7Rows.filter(row => row.totals.calories > 0);
   const last7Completed = last7Rows.filter(row => row.complete);
-  const swipeNavigation = useSafeSwipeNavigation({
-    onPrevious: () => setBankingWeekStart(addDays(bankingWeekStart, -7)),
-    onNext: () => setBankingWeekStart(addDays(bankingWeekStart, 7))
-  });
   return (
-    <div className="screen-swipe-zone view-transition" key={bankingWeekStart} {...swipeNavigation}>
-      <header className="page-header has-helper">
-        <div className="page-kicker">This week</div>
-        <h1 className="page-title">Week</h1>
-        <p className="hint page-subtitle">Check whether your week is still manageable.</p>
-      </header>
+    <div className="screen-swipe-zone view-transition" key={bankingWeekStart}>
+      <div className="sticky-screen-top">
+        <header className="page-header has-helper">
+          <div className="page-kicker">This week</div>
+          <h1 className="page-title">Week</h1>
+          <p className="hint page-subtitle">Check whether your week is still manageable.</p>
+        </header>
+        <WeekRangeControl start={bankingWeekStart} setStart={setBankingWeekStart} />
+      </div>
       <RichBanking state={state} start={bankingWeekStart} setStart={setBankingWeekStart} onHelp={onBankHelp} />
 
       <section className="card stats-card week-summary-card" aria-label="Week summary">
@@ -2884,13 +2796,13 @@ function WeekRangeControl({ start, setStart }: { start: string; setStart: (start
   const currentWeek = weekStartMonday(todayKey());
   const isCurrentWeek = start === currentWeek;
   return (
-    <div className="week-tools">
-      <button className="week-nav prev" type="button" aria-label="Previous week" onClick={() => setStart(addDays(start, -7))} />
-      <button className={`week-title ${isCurrentWeek ? 'current' : 'can-reset'}`} type="button" onClick={() => !isCurrentWeek && setStart(currentWeek)}>
+    <div className="date-row">
+      <button className="date-btn prev" type="button" aria-label="Previous week" onClick={() => setStart(addDays(start, -7))} />
+      <button className={`date-pill ${isCurrentWeek ? 'current' : 'can-reset'}`} type="button" onClick={() => !isCurrentWeek && setStart(currentWeek)}>
         <span>{isCurrentWeek ? 'This week' : 'Return to this week'}</span>
-        <strong>{shortDate(days[0])} - {shortDate(days[6])}</strong>
+        <small>{`${shortDate(days[0])} - ${shortDate(days[6])}`}</small>
       </button>
-      <button className="week-nav next" type="button" aria-label="Next week" onClick={() => setStart(addDays(start, 7))} />
+      <button className="date-btn next" type="button" aria-label="Next week" onClick={() => setStart(addDays(start, 7))} />
     </div>
   );
 }
@@ -2949,7 +2861,6 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
   return (
     <section className="card stats-card">
       <div className="card-head"><h2>Weekly calorie bank</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
-      <WeekRangeControl start={start} setStart={setStart} />
       {completed.length ? (
         <>
           <div className="bank-hero"><div className="label">{bankLabel}</div><div className={`value ${bankTone}`}>{bankHeroText}</div><div className="bank-note">Based on {completed.length} completed day{completed.length === 1 ? '' : 's'}. Open days don’t count yet.</div></div>
@@ -2984,7 +2895,6 @@ function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; st
   return (
     <section className="card stats-card">
       <div className="card-head"><h2>Consistency this week</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
-      <WeekRangeControl start={start} setStart={setStart} />
       {completed.length ? (
         <div className="adherence-hero">
           <div className="label">On-track completed days</div>

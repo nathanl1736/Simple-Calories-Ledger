@@ -161,6 +161,22 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
   gap: 6px;
 }
 .page-header.has-helper { margin-bottom: 12px; }
+
+/* Sticky top: kicker + title (+ optional hint) + single date/week control (Track, Week, Cards) */
+.sticky-screen-top {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 40;
+  background: var(--bg);
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+}
+.sticky-screen-top .page-header {
+  margin-bottom: 10px;
+}
+.sticky-screen-top .date-row {
+  margin-bottom: 0;
+}
 .kicker, .page-kicker, .page-eyebrow {
   color: var(--color-accent-text);
   font-size: 13px;
@@ -501,7 +517,7 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
 }
 .calendar.journal-month-surface .daybox-quiet .daynum-quiet { opacity: 0.9; }
 .library-hint { max-width: 36em; }
-.month-tools, .week-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.month-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .month-title, .week-title { flex: 1; min-width: 0; min-height: var(--tap); border-radius: var(--radius-card); background: var(--color-surface-raised); border: 1px solid var(--line); color: var(--ink); display: grid; place-items: center; gap: 1px; padding: 5px 10px; text-align: center; }
 .month-title span, .week-title span { color: var(--muted); font-size: 11px; font-weight: var(--weight-label); letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .month-title strong, .week-title strong { display: block; font-size: 15px; line-height: 1.1; }
