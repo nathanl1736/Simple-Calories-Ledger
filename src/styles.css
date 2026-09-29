@@ -111,9 +111,21 @@ body {
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   overflow-x: hidden;
-  overscroll-behavior-x: none;
   touch-action: manipulation;
   -webkit-text-size-adjust: 100%;
+  /* Installed on a home screen this is an app, not a page: long-pressing a tab or
+     a row should not raise iOS text selection. Text surfaces opt back in below. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Stops the document rubber-banding, which is what made content visibly travel
+   behind the fixed tab bar and turned its edge into a hard line. */
+html, body { overscroll-behavior: none; }
+a, input, textarea, select, pre, [contenteditable="true"], .selectable {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { border: 0; cursor: pointer; transition: transform var(--motion-fast) var(--ease-ios), opacity var(--motion-fast) ease, background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
@@ -123,8 +135,8 @@ img { max-width: 100%; display: block; }
 input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: color-mix(in srgb, var(--accent) 46%, var(--line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 
 @keyframes pageSettle {
-  from { opacity: .78; transform: translate3d(0, 4px, 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
+  from { opacity: .82; }
+  to { opacity: 1; }
 }
 
 @keyframes modalBackdropIn {
@@ -150,6 +162,24 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 }
 .screen-swipe-zone {
   min-height: calc(100dvh - 142px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+/* With apple-mobile-web-app-status-bar-style=black-translucent the web view runs
+   under the clock, so without this, content scrolls through the status bar.
+   Sits above .sticky-screen-top (40) and below .entry-menu (80) / modals (100). */
+.status-bar-scrim {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 45;
+  background: color-mix(in srgb, var(--bg) 76%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  pointer-events: none;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .status-bar-scrim { background: var(--bg); }
 }
 .view-transition {
   animation: pageSettle var(--motion-medium) var(--ease-ios);
@@ -1339,7 +1369,12 @@ textarea { min-height: 78px; resize: vertical; }
 .smooth-toggle button { min-height: var(--tap); border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--type-button); font-weight: var(--weight-strong); transition: background .18s ease, color .18s ease, transform .12s ease; }
 .smooth-toggle button.active { background: color-mix(in srgb, var(--accent) 16%, var(--color-control)); color: var(--color-accent-text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent); }
 
-.nav { position: fixed; left: 0; right: 0; bottom: 0; background: color-mix(in srgb, var(--bg) 88%, var(--color-nav-blend)); border-top: 1px solid var(--color-border-soft); padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); z-index: 40; transform: translateY(0); opacity: 1; transition: transform .18s ease, opacity .18s ease; }
+/* Frosted rather than merely translucent: content dissolves under the bar instead
+   of sliding through it behind a hard border. */
+.nav { position: fixed; left: 0; right: 0; bottom: 0; background: color-mix(in srgb, var(--bg) 72%, var(--color-nav-blend)); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); border-top: 1px solid color-mix(in srgb, var(--color-border-soft) 55%, transparent); padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); z-index: 40; transform: translateY(0); opacity: 1; transition: transform .18s ease, opacity .18s ease; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .nav { background: color-mix(in srgb, var(--bg) 97%, var(--color-nav-blend)); border-top-color: var(--color-border-soft); }
+}
 .nav.hidden { transform: translateY(calc(100% + env(safe-area-inset-bottom))); opacity: 0; pointer-events: none; }
 .nav-inner { width: min(var(--app-shell-width), 100%); margin: 0 auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
 .tab { min-height: 64px; background: transparent; color: color-mix(in srgb, var(--muted) 66%, var(--bg)); border-radius: var(--radius-control); font-size: var(--type-nav); font-weight: var(--weight-label); letter-spacing: .035em; line-height: 1.05; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
@@ -1356,6 +1391,7 @@ textarea { min-height: 78px; resize: vertical; }
 .nav-inner .tab:nth-child(5) .ico::after { width: 14px; height: 16px; right: 2px; top: 2px; }
 .nav-inner .tab:nth-child(6) .ico::before { width: 18px; height: 18px; left: 3px; top: 3px; border: 2px dotted currentColor; border-radius: 50%; }
 .nav-inner .tab:nth-child(6) .ico::after { width: 6px; height: 6px; left: 9px; top: 9px; border-radius: 50%; background: currentColor; }
+.tab:active { transform: none; opacity: 1; color: var(--color-accent-text); }
 .tab.active { color: var(--color-accent-text); background: color-mix(in srgb, var(--accent) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent); }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1432,6 +1468,11 @@ textarea { min-height: 78px; resize: vertical; }
     border-radius: 24px 24px 0 0;
     max-height: calc(96dvh - env(safe-area-inset-top));
     border-bottom: 0;
+  }
+  /* Sheets sit flush to the bottom edge here. Those with a sticky action bar
+     already pad for the home indicator; these are the ones that don't. */
+  .modal-body:not(:has(> .actions.vertical)):not(:has(> .form > .actions.full)) {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
   .modal-backdrop.modal-backdrop--scrim > .modal-panel.modal-panel--bottom-sheet {
     align-self: end;

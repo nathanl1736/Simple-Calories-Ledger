@@ -1,4 +1,4 @@
-﻿import { CSSProperties, FormEvent, ReactNode, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { CSSProperties, FormEvent, ReactNode, type MouseEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { createPortal, flushSync } from 'react-dom';
 import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference } from './types';
@@ -201,6 +201,24 @@ function applyThemePreference(theme: ThemePreference) {
   document.documentElement.dataset.themePreference = theme;
   const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (themeColor) themeColor.content = THEME_COLORS[effectiveTheme];
+}
+
+/**
+ * Replays the settle animation when `token` changes. Previously each screen used
+ * `key={date}`, which remounted the whole subtree on every arrow tap: children
+ * lost state and re-ran their effects (the food database load, menu positioning)
+ * and the DOM was rebuilt. Restarting the animation on a stable node is cheaper.
+ */
+function useSettleAnimation(token: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.classList.remove('view-transition');
+    void el.offsetWidth; // reflow, so re-adding the class restarts the animation
+    el.classList.add('view-transition');
+  }, [token]);
+  return ref;
 }
 
 function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'carbs', 'protein'] }: { fat?: number; carbs?: number; protein?: number; show?: MacroChipKey[] }) {
@@ -512,6 +530,7 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
 
   return (
     <>
+      <div className="status-bar-scrim" aria-hidden="true" />
       <main className="app">{children}</main>
       <nav key={navResetKey} className={`nav ${navHidden ? 'hidden' : ''}`} aria-label="Main tabs" aria-hidden={navHidden}>
         <div className="nav-inner">
@@ -556,6 +575,8 @@ export function App() {
   const [aiQuickLogMeal, setAiQuickLogMeal] = useState<Meal>('Snack');
   const [aiQuickLogSeedText, setAiQuickLogSeedText] = useState('');
   const [reuseSearchCollapseNonce, setReuseSearchCollapseNonce] = useState(0);
+  const tabScrollRef = useRef<Partial<Record<Tab, number>>>({});
+  const nextTabScrollRef = useRef(0);
   const importRef = useRef<HTMLInputElement>(null);
   const customDatabaseImportRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -636,24 +657,31 @@ export function App() {
   }, [loaded, modal, state]);
 
   const setTab = (next: Tab) => {
-    if (next === 'tracking') {
-      setSelectedDate(todayKey());
-      requestAnimationFrame(() => {
-        try {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        } catch {
-          window.scrollTo(0, 0);
-        }
-      });
-    }
-    if (next === 'journal' && tab === 'journal') {
+    const reTap = next === tab;
+    // While a modal holds the scroll lock the body is fixed and scrollY reads 0,
+    // which would wipe the offset we are trying to remember.
+    if (!modalScrollLockCount) tabScrollRef.current[tab] = window.scrollY;
+    // Track always opens on today at the top, and re-tapping a tab resets it.
+    const resetToTop = next === 'tracking' || reTap;
+    if (next === 'tracking') setSelectedDate(todayKey());
+    if (next === 'journal' && reTap) {
       setJournalDay(null);
       setJournalMonth(new Date());
     }
-    if (next === 'cards' && tab === 'cards') setCardsDate(todayKey());
-    if (next === 'stats' && tab === 'stats') {
+    if (next === 'cards' && reTap) setCardsDate(todayKey());
+    if (next === 'stats' && reTap) {
       setSelectedDate(todayKey());
       setBankingWeekStart(weekStartMonday(todayKey()));
+    }
+    if (resetToTop) tabScrollRef.current[next] = 0;
+    nextTabScrollRef.current = tabScrollRef.current[next] ?? 0;
+    if (reTap) {
+      // Same tab, so the restore effect below will not fire: scroll here instead.
+      try {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch {
+        window.scrollTo(0, 0);
+      }
     }
     setTabState(next);
     localStorage.setItem('calorie-tracker-active-tab', next);
@@ -664,6 +692,12 @@ export function App() {
     const result = recipe(draft) || draft;
     return persist(result);
   };
+
+  // Each tab keeps its own scroll offset, the way a native tab bar does. Before
+  // paint, so switching never flashes at the offset from the previous tab.
+  useLayoutEffect(() => {
+    window.scrollTo({ top: nextTabScrollRef.current, behavior: 'auto' });
+  }, [tab]);
 
   const entries = useMemo(() => dayEntries(state, selectedDate), [state, selectedDate]);
   const totals = useMemo(() => sum(entries), [entries]);
@@ -1393,8 +1427,9 @@ function TrackingView(props: {
   const projectedStatTone = weekSummary.completed.length ? upperBudgetTone(weekSummary.projected, weekCalorieBudget) : '';
   const remainingLabel = overTarget ? (macroDayGoal.trackingMode === 'Bulking' ? 'Above target by' : 'Over today by') : macroDayGoal.trackingMode === 'Bulking' ? 'Left to target' : 'Today remaining';
   const trackingTitle = props.selectedDate === todayKey() ? 'Today in your week' : 'This day in your week';
+  const settleRef = useSettleAnimation(props.selectedDate);
   return (
-    <div className="screen-swipe-zone view-transition" key={props.selectedDate}>
+    <div className="screen-swipe-zone view-transition" ref={settleRef}>
       <div className="sticky-screen-top">
         <header className="page-header">
           <div className="page-kicker">Dawni</div>
@@ -1419,6 +1454,7 @@ function TrackingView(props: {
         <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Logged</span></div></div>
       </section>
       <DayCalorieGoalPanel
+        key={props.selectedDate}
         state={props.state}
         date={props.selectedDate}
         suggested={calorieTarget.suggested}
@@ -2402,6 +2438,7 @@ function JournalView({
 }) {
   const year = journalMonth.getFullYear();
   const month = journalMonth.getMonth();
+  const settleRef = useSettleAnimation(journalDay || `${year}-${month}`);
   if (journalDay) {
     const entries = dayEntries(state, journalDay);
     const photos = entries.filter(entry => entry.photo);
@@ -2425,7 +2462,7 @@ function JournalView({
       return <span className="journal-photo-caption"><strong>{entry.name}</strong><span>{calories}</span></span>;
     };
     return (
-      <div className="screen-swipe-zone view-transition" key={journalDay}>
+      <div className="screen-swipe-zone view-transition" ref={settleRef}>
         <header className="page-header">
           <div className="page-kicker">Food journal</div>
           <h1 className="page-title">{readable(journalDay)}</h1>
@@ -2503,7 +2540,7 @@ function JournalView({
   const offset = first.getDay();
   const days = Array.from({ length: 42 }, (_, i) => new Date(year, month, i - offset + 1));
   return (
-    <div className="screen-swipe-zone view-transition" key={`${year}-${month}`}>
+    <div className="screen-swipe-zone view-transition" ref={settleRef}>
       <header className="page-header has-helper">
         <div className="page-kicker">Food journal</div>
         <h1 className="page-title">Journal</h1>
@@ -2582,6 +2619,7 @@ function CardsView({
   onStartLog: () => void;
 }) {
   const datedGroups = groups.filter(group => group.date === selectedDate);
+  const settleRef = useSettleAnimation(selectedDate);
   const prevCardsDateRef = useRef<string | null>(null);
   useEffect(() => {
     if (prevCardsDateRef.current !== null && prevCardsDateRef.current !== selectedDate) {
@@ -2597,7 +2635,7 @@ function CardsView({
   }, [selectedDate]);
 
   return (
-    <div className="screen-swipe-zone view-transition" key={selectedDate}>
+    <div className="screen-swipe-zone view-transition" ref={settleRef}>
       <div className="sticky-screen-top">
         <header className="page-header has-helper">
           <div className="page-kicker">Reflect</div>
@@ -2816,6 +2854,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
     prevBankingWeekRef.current = bankingWeekStart;
   }, [bankingWeekStart]);
 
+  const settleRef = useSettleAnimation(bankingWeekStart);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(bankingWeekStart, i));
   const weekRows = weekDays.map(date => {
     const totals = sum(dayEntries(state, date));
@@ -2838,7 +2877,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
   const last7Logged = last7Rows.filter(row => row.totals.calories > 0);
   const last7Completed = last7Rows.filter(row => row.complete);
   return (
-    <div className="screen-swipe-zone view-transition" key={bankingWeekStart}>
+    <div className="screen-swipe-zone view-transition" ref={settleRef}>
       <div className="sticky-screen-top">
         <header className="page-header has-helper">
           <div className="page-kicker">This week</div>
@@ -3086,7 +3125,7 @@ function GeminiKeyStatus({ hasKey, check }: { hasKey: boolean; check: GeminiChec
     return (
       <div className="gemini-status is-error">
         <p className="hint">{check.message}</p>
-        {check.detail ? <details className="extra-info"><summary>Details from Google</summary><div className="extra-info-body"><p className="hint">{check.detail}</p></div></details> : null}
+        {check.detail ? <details className="extra-info"><summary>Details from Google</summary><div className="extra-info-body"><p className="hint selectable">{check.detail}</p></div></details> : null}
       </div>
     );
   }

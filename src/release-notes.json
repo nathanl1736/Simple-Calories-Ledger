@@ -1,7 +1,7 @@
 [
-  "Estimate with Gemini: Dawni now picks the best model your API key supports and tries another if one is busy, so estimates keep working as Google changes models.",
-  "Settings: new Test key button on the Gemini card. It's free, and it shows which model Dawni will use.",
-  "Gemini setup problems now explain what to fix — an invalid key, or the Generative Language API not being enabled — instead of failing quietly.",
-  "Food log: entries created from an AI estimate are labelled Estimated, so you can tell them apart from numbers you read off a label.",
-  "Updates: Dawni checks for a new version when you reopen it from your home screen, and the update card now shows the version you're moving to."
+  "Tab bar is now frosted, so content dissolves under it instead of showing through — the hard line across the bottom of the screen is gone.",
+  "Scrolling stops cleanly at the top and bottom instead of bouncing the whole page.",
+  "Home-screen app: content no longer scrolls up behind the clock and battery.",
+  "Long-pressing a tab, a food row or a chip no longer pops up iOS text selection.",
+  "Each tab remembers where you were scrolled, and changing day no longer rebuilds the whole screen."
 ]
