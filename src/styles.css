@@ -1143,6 +1143,17 @@ textarea { min-height: 78px; resize: vertical; }
 .gemini-estimate-modal .gemini-estimate-tip { margin-top: -4px; }
 .gemini-estimate-modal .photo-picker { margin: 0; }
 .gemini-estimate-modal textarea { min-height: 130px; }
+.gemini-status { margin: 10px 0 0; }
+.gemini-status.is-ready { color: var(--color-good); }
+.gemini-status.is-ready strong { font-weight: var(--weight-strong); overflow-wrap: anywhere; }
+.gemini-status.is-error { display: grid; gap: 8px; margin-top: 10px; }
+.gemini-status.is-error > .hint { margin: 0; color: var(--danger); font-weight: var(--weight-label); }
+.gemini-status .extra-info-body { grid-template-columns: 1fr; }
+.gemini-status .extra-info-body .hint { margin: 0; overflow-wrap: anywhere; }
+.gemini-settings-card .actions { margin-top: 12px; }
+.estimate-source-row { align-items: center; gap: 8px; margin-top: 10px; }
+.estimate-source-row .hint { flex: 1 1 auto; min-width: 0; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--color-accent-text); font-size: var(--type-meta); font-weight: var(--weight-label); text-decoration: underline; text-underline-offset: 2px; }
 .ai-quick-log-modal { display: grid; gap: 12px; }
 .ai-quick-log-modal .help-callout { margin-top: 0; }
 .ai-quick-log-textarea { min-height: 150px; font-family: inherit; line-height: 1.35; }

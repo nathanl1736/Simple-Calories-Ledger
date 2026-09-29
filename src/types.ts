@@ -2,6 +2,8 @@ export type Meal = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack' | 'Drink';
 export type EnergyUnit = 'kcal' | 'kj';
 export type TrackingMode = 'Cutting' | 'Maintaining' | 'Bulking';
 export type ThemePreference = 'system' | 'dark' | 'light';
+/** Where an entry's numbers came from when they are an estimate rather than a label. */
+export type EntryEstimateSource = 'ai';
 
 export type Settings = {
   calories: number;
@@ -39,6 +41,8 @@ export type Entry = {
   fat: number;
   portion?: number;
   meal?: Meal;
+  /** Set when the numbers came from an AI estimate, so the log can say so. */
+  estimateSource?: EntryEstimateSource | null;
   notes?: string;
   photo?: string | null;
   createdAt: number;

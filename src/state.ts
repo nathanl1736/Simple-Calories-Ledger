@@ -42,6 +42,7 @@ export function normalizeEntry(input: Partial<Entry>): Entry {
   entry.portion = portion;
   Object.assign(entry, entryTotals(entry));
   entry.sourceFoodId = entry.sourceFoodId || null;
+  entry.estimateSource = entry.estimateSource === 'ai' ? 'ai' : null;
   entry.photo = entry.photo || null;
   entry.meal = entry.meal || 'Snack';
   entry.createdAt = entry.createdAt || Date.now();

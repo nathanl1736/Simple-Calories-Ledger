@@ -1,21 +1,21 @@
-const APP_VERSION = '2.2.0.10';
+const APP_VERSION = '2.2.0.11';
 const CACHE_PREFIX = 'dawni';
 const CACHE_NAME = `${CACHE_PREFIX}-${APP_VERSION}`;
 const APP_SHELL = [
   './',
   './index.html',
-  './version.json',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png'
 ];
 
+// No skipWaiting() here on purpose: the new worker waits until the app asks for it
+// (SKIP_WAITING below), so the running page keeps its caches until it reloads.
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL))
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
@@ -58,7 +58,14 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (url.origin !== location.origin) return;
 
-  if (url.pathname.endsWith('/version.json') || url.pathname.includes('/commonfooddb/')) {
+  // version.json is an update probe, not app content. Never cache it: a stored
+  // copy would hide a real update, and caching each cache-busted URL leaked entries.
+  if (url.pathname.endsWith('/version.json')) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }).catch(() => Response.error()));
+    return;
+  }
+
+  if (url.pathname.includes('/commonfooddb/')) {
     event.respondWith(networkFirst(event.request));
     return;
   }

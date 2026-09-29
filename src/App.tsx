@@ -1,18 +1,18 @@
 ﻿import { CSSProperties, FormEvent, ReactNode, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { createPortal, flushSync } from 'react-dom';
-import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
+import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
 import { compressImage, downloadBlob } from './image';
 import { backupCounts, exportBackup, parseBackup } from './backup';
-import { applyAppUpdate, checkForAppUpdate, registerServiceWorker, type UpdateInfo } from './pwa';
+import { applyAppUpdate, checkForAppUpdate, clearUpdateReloadMarkers, dismissUpdatePrompt, registerServiceWorker, watchForUpdatesOnResume, type UpdateInfo } from './pwa';
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
 import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
-import { requestMealEstimate } from './geminiEstimate';
+import { probeGeminiKey, requestMealEstimate, type GeminiError } from './geminiEstimate';
 import {
   addDays,
   applyDayCalorieOverride,
@@ -46,7 +46,6 @@ import {
   resolveDayCalorieTarget,
   setDayComplete,
   shortDate,
-  signed,
   sum,
   todayKey,
   toKey,
@@ -84,6 +83,7 @@ type EntryDraft = {
   favourite: boolean;
   photo: string | null;
   entryEnergyUnit: EnergyUnit;
+  estimateSource: EntryEstimateSource | null;
 };
 
 const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kcal'): EntryDraft => ({
@@ -107,7 +107,8 @@ const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kc
   notes: '',
   favourite: false,
   photo: null,
-  entryEnergyUnit
+  entryEnergyUnit,
+  estimateSource: null
 });
 
 function defaultMealForCurrentTime(): Meal {
@@ -122,6 +123,13 @@ const draftNumberText = (value: unknown) => String(Number.isFinite(Number(value)
 const draftEnergyText = (kcal: number, unit: EnergyUnit) => energyInputFromKcal(kcal, unit) || '0';
 
 type Toast = { id: number; text: string } | null;
+type GeminiCheck = {
+  state: 'idle' | 'testing' | 'ok' | 'error';
+  modelId?: string;
+  modelCount?: number;
+  message?: string;
+  detail?: string;
+};
 type MacroChipKey = 'fat' | 'carbs' | 'protein';
 type EffectiveTheme = 'dark' | 'light';
 const THEME_COLORS: Record<EffectiveTheme, string> = {
@@ -596,14 +604,16 @@ export function App() {
   useEffect(() => {
     if (!loaded) return;
     console.info(`[Dawni] v${APP_VERSION}`);
-    registerServiceWorker(update => {
+    clearUpdateReloadMarkers();
+    const onUpdate = (update: UpdateInfo) => {
       setAvailableUpdate(update);
       setModal('version');
-    }).catch(console.warn);
-    checkForAppUpdate(update => {
-      setAvailableUpdate(update);
-      setModal('version');
-    }).catch(console.warn);
+    };
+    registerServiceWorker(onUpdate).catch(console.warn);
+    checkForAppUpdate(onUpdate).catch(console.warn);
+    // Installed on a home screen, the app is suspended rather than closed, so it
+    // also has to re-check whenever it comes back to the foreground.
+    return watchForUpdatesOnResume(onUpdate);
   }, [loaded]);
 
   useEffect(() => {
@@ -621,7 +631,9 @@ export function App() {
       setModal('backupReminder');
       persist({ ...state, settings: { ...state.settings, lastBackupReminderShownAt: todayKey() } }).catch(console.warn);
     }
-  }, [loaded, modal]);
+    // `state` belongs here: without it this read a stale snapshot. Re-running is
+    // safe because setting lastBackupReminderShownAt closes the guard above.
+  }, [loaded, modal, state]);
 
   const setTab = (next: Tab) => {
     if (next === 'tracking') {
@@ -693,7 +705,8 @@ export function App() {
       portion: fmtPortion(entry.portion),
       notes: entry.notes || '',
       favourite: !!(entry.sourceFoodId && state.foods.find(food => food.id === entry.sourceFoodId)?.favourite),
-      photo: entry.photo || null
+      photo: entry.photo || null,
+      estimateSource: entry.estimateSource === 'ai' ? 'ai' : null
     });
     setEntryOpenMode('edit');
     setModal('entry');
@@ -720,6 +733,7 @@ export function App() {
       carbs: n(entryDraft.carbs),
       fat: n(entryDraft.fat),
       meal: entryDraft.meal,
+      estimateSource: entryDraft.estimateSource,
       notes: entryDraft.notes.trim(),
       photo: entryDraft.photo,
       createdAt: Date.now(),
@@ -846,7 +860,8 @@ export function App() {
         carbs: draftNumberText(entry.carbs),
         fat: draftNumberText(entry.fat),
         portion,
-        notes: entry.notes
+        notes: entry.notes,
+        estimateSource: 'ai'
       });
       setEntryOpenMode('prefill');
       setModal('entry');
@@ -924,6 +939,7 @@ export function App() {
   const activeFood = state.foods.find(food => food.id === activeFoodId) || null;
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
   const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 5);
+  const incomingVersion = availableUpdate?.version || '';
   const copyAiPrompt = () => navigator.clipboard
     ? navigator.clipboard.writeText(AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
     : (notify('Clipboard is not available'), Promise.resolve());
@@ -1263,11 +1279,13 @@ export function App() {
             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">https://aistudio.google.com/app/apikey</a>
             .
           </li>
-          <li>Create or copy an API key for a Google project where Gemini API access is enabled.</li>
-          <li>Paste the key into Dawni&apos;s Gemini API key field in Settings.</li>
+          <li>Create or copy an API key for a Google project where the Generative Language API is enabled.</li>
+          <li>Paste the key into Dawni&apos;s Gemini API key field in Settings, then tap Save.</li>
+          <li>Tap Test key. This is free — it only asks Google which models the key can use, and shows which one Dawni will pick.</li>
           <li>Manage billing, budgets, and quota limits in Google Cloud. Dawni only uses the key when you tap Estimate with Gemini.</li>
           <li>The key is stored locally in this browser and is included in exported backups.</li>
         </ol>
+        <div className="help-callout">Dawni asks your key which models it can use and picks the best available one, so it keeps working as Google releases new models. If one model is busy or unavailable, it tries the next.</div>
       </Modal>
       <Modal open={modal === 'customDbHelp'} title="Custom Food Database Help" onClose={() => setModal(null)}>
         <div className="custom-db-help">
@@ -1306,17 +1324,17 @@ export function App() {
         <p className="hint">Consistency is based only on completed days. “On track” uses your saved targets for each day. Open days stay open.</p>
       </Modal>
       <Modal open={modal === 'version'} title="Update available" onClose={() => setModal(null)}>
-        <div className="version-badge">Version {availableUpdate?.version || APP_VERSION}</div>
+        <div className="version-badge">{incomingVersion && incomingVersion !== APP_VERSION ? `Version ${APP_VERSION} → ${incomingVersion}` : `Version ${APP_VERSION}`}</div>
         <p className="hint">
           {availableUpdate?.source === 'service-worker'
             ? 'A newer build is already downloaded and waiting. Tap Update now to reload Dawni with the latest changes. Your journal, foods, and settings stay on this device.'
-            : `You are on version ${APP_VERSION}. Version ${availableUpdate?.version || APP_VERSION} is available on the server. Tap Update now to refresh the page and load it.`}
+            : 'A newer build is live on the server. Tap Update now to reload Dawni and load it. Your journal, foods, and settings stay on this device.'}
         </p>
         <p className="page-kicker update-notes-heading">What&apos;s new</p>
         <ul className="update-list">{updateNotes.map(item => <li key={item}>{item}</li>)}</ul>
         <div className="actions vertical">
           <button className="primary" type="button" onClick={() => applyAppUpdate(availableUpdate)}>Update now</button>
-          <button className="secondary" type="button" onClick={() => setModal(null)}>Later</button>
+          <button className="secondary" type="button" onClick={() => { dismissUpdatePrompt(availableUpdate?.version); setModal(null); }}>Not now</button>
         </div>
       </Modal>
       <Modal open={modal === 'backupReminder'} title="Backup reminder" onClose={() => setModal(null)}>
@@ -1558,6 +1576,7 @@ function EntryRow({ state, entry, complete, onPhoto, onEdit, onRepeat, onDelete 
       <div className="entry-main">
         <div className="entry-title"><div className="entry-name">{entry.name}</div>{portion}</div>
         <div className="meta-chips">
+          {entry.estimateSource === 'ai' && <span className="meta-chip source-chip">Estimated</span>}
           <MacroChips fat={totals.fat} carbs={totals.carbs} protein={totals.protein} />
         </div>
       </div>
@@ -2136,7 +2155,8 @@ function EntryModal({
       carbs: draftNumberText(food.carbs),
       fat: draftNumberText(food.fat),
       portion: entryUnitModeValue(food.unitMode) === '100g' ? '100' : '1',
-      favourite: !!food.favourite
+      favourite: !!food.favourite,
+      estimateSource: null
     }));
     scrollCaloriesPanel();
   };
@@ -2175,6 +2195,13 @@ function EntryModal({
               <button type="button" className={draft.unitMode === '100g' ? 'active' : ''} onClick={toggleUnitMode}>Per 100g</button>
             </span>
           </div>
+          {draft.estimateSource === 'ai' && (
+            <div className="meta-chips estimate-source-row">
+              <span className="meta-chip source-chip">Estimated</span>
+              <span className="hint">AI estimate — adjust anything that looks off.</span>
+              <button type="button" className="link-btn" onClick={() => update({ estimateSource: null })}>Not an estimate</button>
+            </div>
+          )}
           {multiplier !== 1 && (
             <div className="meta-chips portion-preview">
               <span className="meta-chip neutral">Logged total</span>
@@ -2451,6 +2478,7 @@ function JournalView({
                   {!hideTitleOnThumb && <div className="journal-entry-title">{entry.name}</div>}
                   <div className="meta-chips journal-meta-chips">
                     <span className="meta-chip neutral">{entry.meal || 'Snack'}</span>
+                    {entry.estimateSource === 'ai' && <span className="meta-chip source-chip">Estimated</span>}
                     {!hideCalChipOnThumb && <span className="meta-chip accent">{energyText(state, totals.calories)}</span>}
                     <MacroChips fat={totals.fat} carbs={totals.carbs} protein={totals.protein} />
                   </div>
@@ -2694,10 +2722,6 @@ function EntryPhotoModal({ entry, open, onClose, onReplace, onRemove, onShare }:
   return <Modal open={open} title="Meal photo" onClose={onClose} className="lightbox" bottomSheet>{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
 }
 
-function StatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
-  return <RichStatsView state={state} selectedDate={selectedDate} bankingWeekStart={bankingWeekStart} setBankingWeekStart={setBankingWeekStart} onBankHelp={onBankHelp} onAdherenceHelp={onAdherenceHelp} />;
-}
-
 type CalorieDayStatus = 'open' | 'good' | 'under' | 'over';
 
 function getCalorieBand(goal: DailyGoalSnapshot) {
@@ -2823,7 +2847,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
         </header>
         <WeekRangeControl start={bankingWeekStart} setStart={setBankingWeekStart} />
       </div>
-      <RichBanking state={state} start={bankingWeekStart} setStart={setBankingWeekStart} onHelp={onBankHelp} />
+      <RichBanking state={state} start={bankingWeekStart} onHelp={onBankHelp} />
 
       <section className="card stats-card week-summary-card" aria-label="Week summary">
         <div className="card-head"><h2>Week summary</h2></div>
@@ -2870,7 +2894,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
         )}
       </section>
 
-      <RichAdherence state={state} start={bankingWeekStart} setStart={setBankingWeekStart} onHelp={onAdherenceHelp} />
+      <RichAdherence state={state} start={bankingWeekStart} onHelp={onAdherenceHelp} />
 
       <section className="card stats-card">
         <div className="card-head"><h2>Patterns</h2></div>
@@ -2954,7 +2978,7 @@ function BankBars({ state, rows }: { state: AppState; rows: { date: string; tota
   );
 }
 
-function RichBanking({ state, start, setStart, onHelp }: { state: AppState; start: string; setStart: (start: string) => void; onHelp: () => void }) {
+function RichBanking({ state, start, onHelp }: { state: AppState; start: string; onHelp: () => void }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const rows = days.map(date => {
     const total = sum(dayEntries(state, date)).calories;
@@ -3001,7 +3025,7 @@ function RichBanking({ state, start, setStart, onHelp }: { state: AppState; star
   );
 }
 
-function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; start: string; setStart: (start: string) => void; onHelp: () => void }) {
+function RichAdherence({ state, start, onHelp }: { state: AppState; start: string; onHelp: () => void }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const rows = days.map(date => {
     const total = sum(dayEntries(state, date)).calories;
@@ -3047,6 +3071,29 @@ function RichAdherence({ state, start, setStart, onHelp }: { state: AppState; st
     </section>
   );
 }
+/** Setup feedback for the Gemini card: model choice is dynamic, so show the pick. */
+function GeminiKeyStatus({ hasKey, check }: { hasKey: boolean; check: GeminiCheck }) {
+  if (check.state === 'testing') return <p className="hint gemini-status">Checking the key with Google...</p>;
+  if (check.state === 'ok') {
+    return (
+      <p className="hint gemini-status is-ready">
+        Ready — Dawni will use <strong>{check.modelId}</strong>.
+        {check.modelCount ? ` ${fmt(check.modelCount)} model${check.modelCount === 1 ? '' : 's'} available to this key.` : ''}
+      </p>
+    );
+  }
+  if (check.state === 'error') {
+    return (
+      <div className="gemini-status is-error">
+        <p className="hint">{check.message}</p>
+        {check.detail ? <details className="extra-info"><summary>Details from Google</summary><div className="extra-info-body"><p className="hint">{check.detail}</p></div></details> : null}
+      </div>
+    );
+  }
+  if (!hasKey) return <p className="hint gemini-status">Not set up. Add a key to use Estimate with Gemini.</p>;
+  return <p className="hint gemini-status">Key saved. Tap Test key to confirm Gemini can reach it and see which model Dawni will use.</p>;
+}
+
 function SettingsView(props: {
   state: AppState;
   goalsEditing: boolean;
@@ -3076,6 +3123,7 @@ function SettingsView(props: {
   const [foodDatabaseUpdating, setFoodDatabaseUpdating] = useState(false);
   const [geminiEditing, setGeminiEditing] = useState(false);
   const [geminiDraft, setGeminiDraft] = useState(() => props.state.settings.geminiApiKey);
+  const [geminiCheck, setGeminiCheck] = useState<GeminiCheck>({ state: 'idle' });
   const counts = backupCounts(props.state);
   const goalUnit = energyUnitValue(props.state.settings.energyUnit);
   const visibleSettings = { ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) };
@@ -3087,12 +3135,30 @@ function SettingsView(props: {
     if (!geminiEditing) setGeminiDraft(props.state.settings.geminiApiKey);
   }, [props.state.settings.geminiApiKey, geminiEditing]);
 
+  // A changed key invalidates whatever the last check told us.
+  useEffect(() => {
+    setGeminiCheck({ state: 'idle' });
+  }, [props.state.settings.geminiApiKey]);
+
   const toggleGeminiEdit = () => {
     if (geminiEditing) {
       void Promise.resolve(props.onGeminiApiKey(geminiDraft)).then(() => setGeminiEditing(false));
     } else {
       setGeminiDraft(props.state.settings.geminiApiKey);
       setGeminiEditing(true);
+    }
+  };
+
+  const testGeminiKey = async () => {
+    const key = (geminiEditing ? geminiDraft : props.state.settings.geminiApiKey).trim();
+    if (!key) return setGeminiCheck({ state: 'error', message: 'Add a key first.' });
+    setGeminiCheck({ state: 'testing' });
+    try {
+      const result = await probeGeminiKey(key);
+      setGeminiCheck({ state: 'ok', modelId: result.modelId, modelCount: result.modelCount });
+    } catch (err) {
+      const error = err as GeminiError;
+      setGeminiCheck({ state: 'error', message: error.message || 'Could not reach Gemini.', detail: error.detail });
     }
   };
 
@@ -3135,6 +3201,15 @@ function SettingsView(props: {
             onChange={event => setGeminiDraft(event.target.value)}
           />
         </Field>
+        <GeminiKeyStatus
+          hasKey={!!(geminiEditing ? geminiDraft : props.state.settings.geminiApiKey).trim()}
+          check={geminiCheck}
+        />
+        <div className="actions">
+          <button className="secondary" type="button" disabled={geminiCheck.state === 'testing'} onClick={testGeminiKey}>
+            {geminiCheck.state === 'testing' ? 'Checking key...' : 'Test key'}
+          </button>
+        </div>
       </section>
       <section className="card ai-prompt-card"><div className="card-head"><h2>AI estimate helper</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Use this prompt with your AI chatbot, then review the estimate before saving it. Dawni treats AI output as editable, not guaranteed.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div><p className="hint ai-prompt-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p></section>
       <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}.` : 'No backup exported yet.'} Dawni keeps your data on this device; export a backup to protect your logs and journal photos. Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos, {counts.customFoodDatabases || 0} custom databases.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>

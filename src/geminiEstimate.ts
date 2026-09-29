@@ -1,11 +1,39 @@
 import { AI_QUICK_LOG_PROMPT } from './aiQuickLog';
+import { readValue, saveValue } from './storage';
 
-/** Used only if `models.list` fails or returns no suitable model. */
-export const GEMINI_MODEL_FALLBACK = 'gemini-1.5-flash';
+/**
+ * Model selection is dynamic: we ask the key which models it can actually use
+ * (`models.list`), rank them newest-family-first, and cascade down the list when
+ * a model rejects the call. Nothing here names a required model, so a new Gemini
+ * family is picked up without a code change.
+ *
+ * This chain is only a last resort for when `models.list` itself fails. Prefer
+ * `-latest` aliases here because they keep working after a model is retired.
+ */
+export const GEMINI_FALLBACK_MODEL_IDS = [
+  'gemini-pro-latest',
+  'gemini-flash-latest',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash'
+];
+
+const GEMINI_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
+const MODEL_CHOICE_CACHE_KEY = 'geminiModelChoice';
+const MODEL_CHOICE_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_MODEL_ATTEMPTS = 8;
 
 type GeminiTextPart = { text: string };
 type GeminiInlinePart = { inlineData: { mimeType: string; data: string } };
 type GeminiPart = GeminiTextPart | GeminiInlinePart;
+
+/** Per-model capability downgrades, turned on only after a model complains. */
+type CompatFlags = {
+  /** false = stop asking for `responseMimeType: application/json`. */
+  jsonMimeType: boolean;
+  /** false = fold the prompt into the user turn instead of `systemInstruction`. */
+  systemInstruction: boolean;
+};
 
 type GeminiResponse = {
   candidates?: Array<{
@@ -27,25 +55,162 @@ type ListModelsResponse = {
   error?: { message?: string };
 };
 
+type ModelChoiceCache = {
+  version: 1;
+  keyHash: string;
+  modelId: string;
+  resolvedAt: string;
+};
+
+export type GeminiError = Error & { status?: number; detail?: string };
+
+function geminiError(message: string, status = 0, detail = ''): GeminiError {
+  const err = new Error(message) as GeminiError;
+  err.status = status;
+  if (detail && detail !== message) err.detail = detail;
+  return err;
+}
+
+/**
+ * A key-level failure means every model would fail the same way (bad key, API
+ * not enabled, billing). Cascading through models would only hide the real fix.
+ */
+function isKeyLevelFailure(status: number, message: string) {
+  if (status === 401 || status === 403) return true;
+  const m = message.toLowerCase();
+  return m.includes('api key not valid')
+    || m.includes('api_key_invalid')
+    || m.includes('api key expired')
+    || m.includes('permission_denied')
+    || m.includes('has not been used in project')
+    || m.includes('it is disabled')
+    || m.includes('serviceusage')
+    || m.includes('billing');
+}
+
+/** A model-level failure means this model is wrong for us — try the next one. */
+function isModelLevelFailure(status: number, message: string) {
+  if (status === 404 || status === 400 || status === 429 || status === 500 || status === 501 || status === 503) return true;
+  const m = message.toLowerCase();
+  return m.includes('not found')
+    || m.includes('not supported')
+    || m.includes('unsupported')
+    || m.includes('quota')
+    || m.includes('resource_exhausted')
+    || m.includes('rate limit')
+    || m.includes('overloaded');
+}
+
+/** Which capability a 400 is complaining about, so we can retry without it. */
+function unsupportedCapability(message: string): keyof CompatFlags | null {
+  const m = message.toLowerCase();
+  if (m.includes('response_mime_type') || m.includes('responsemimetype')) return 'jsonMimeType';
+  if (m.includes('system_instruction') || m.includes('systeminstruction')) return 'systemInstruction';
+  return null;
+}
+
+/** Calm, actionable copy for the cases a new user actually hits. */
+export function friendlyGeminiMessage(status: number, message: string) {
+  const m = message.toLowerCase();
+  if (m.includes('api key not valid') || m.includes('api_key_invalid') || status === 401) {
+    return 'That Gemini API key isn’t valid. Check you copied the whole key from Google AI Studio.';
+  }
+  if (m.includes('api key expired')) {
+    return 'That Gemini API key has expired. Create a new key in Google AI Studio.';
+  }
+  if (m.includes('has not been used in project') || m.includes('it is disabled') || m.includes('serviceusage')) {
+    return 'Gemini isn’t enabled for that Google project yet. Enable the Generative Language API, then try again.';
+  }
+  if (m.includes('billing')) {
+    return 'That Google project needs billing set up before Gemini will respond.';
+  }
+  if (status === 403 || m.includes('permission_denied')) {
+    return 'That key isn’t allowed to call Gemini. Check the key’s restrictions in Google Cloud.';
+  }
+  if (status === 429 || m.includes('quota') || m.includes('resource_exhausted') || m.includes('rate limit')) {
+    return 'Your Gemini key has hit its quota. Wait a little, or check quota and billing in Google Cloud.';
+  }
+  if (status === 503 || m.includes('overloaded')) {
+    return 'Gemini is busy right now. Try the estimate again in a moment.';
+  }
+  if (status === 404 || m.includes('not found')) {
+    return 'None of the Gemini models available to this key could run the estimate.';
+  }
+  return message || 'Gemini could not estimate this meal.';
+}
+
 function modelIdFromApiName(name: string) {
   if (!name) return '';
   return name.startsWith('models/') ? name.slice('models/'.length) : name;
 }
 
-function scoreModelId(id: string) {
-  const s = id.toLowerCase();
-  let score = 0;
-  if (s.includes('flash')) score += 200;
-  if (s.includes('flash-lite') || s.endsWith('-lite') || s.includes('lite')) score -= 45;
-  if (/gemini-2\.[0-9]/.test(s)) score += 85;
-  if (/gemini-1\.5/.test(s)) score += 65;
-  if (s.includes('gemini') && s.includes('pro')) score += 25;
-  if (s.includes('preview') || s.includes('exp')) score -= 12;
-  return score * 10000 - id.length;
+/**
+ * Numeric family version, so a newer family outranks an older one without any
+ * per-release code change. `gemini-2.5-flash` -> 250, `gemini-3-pro` -> 300.
+ */
+function familyVersion(id: string) {
+  const match = id.match(/gemini-(\d+)(?:[.-](\d+))?/);
+  if (!match) return 0;
+  const major = Number(match[1]) || 0;
+  const minor = Number(match[2] ?? 0) || 0;
+  return major * 100 + Math.min(99, minor);
 }
 
+/** Capability tier. "Best available" means a higher tier wins inside a family. */
+function tierScore(id: string) {
+  if (id.includes('ultra')) return 40;
+  if (id.includes('pro')) return 30;
+  if (id.includes('lite')) return 10;
+  if (id.includes('flash')) return 20;
+  return 15;
+}
+
+/** Models that answer `generateContent` but can't do our text+photo JSON call. */
+function isUsableModelId(id: string) {
+  const low = id.toLowerCase();
+  if (!low.startsWith('gemini')) return false;
+  return !/embedding|embed|aqa|tts|audio|imagen|image|veo|live|vision-only/.test(low);
+}
+
+function isAliasId(id: string) {
+  return id.endsWith('-latest');
+}
+
+function isPreviewId(id: string) {
+  return /preview|exp\b|experimental/.test(id);
+}
+
+/** Dated snapshots (…-001, …-05-20) are pinned builds; prefer the moving id. */
+function isSnapshotId(id: string) {
+  return /-\d{2,4}(?:-\d{2})?$/.test(id) && !isAliasId(id);
+}
+
+/**
+ * How dependable an id is, once family and tier are equal. A stable explicit id
+ * is the most predictable; a `-latest` alias is stable but can move under us; a
+ * preview can have tighter quota and be withdrawn. So: stable > alias > preview.
+ */
+function stabilityPenalty(id: string) {
+  if (isPreviewId(id)) return 8;
+  if (isAliasId(id)) return 3;
+  if (isSnapshotId(id)) return 2;
+  return 0;
+}
+
+/**
+ * Best-first: newest family, then highest tier, then most dependable. Aliases
+ * inherit the newest observed family version because Google points them at the
+ * current model, so `gemini-pro-latest` beats a previous family but loses to a
+ * stable id in the newest one.
+ */
 function rankModelIds(ids: string[]) {
-  return [...new Set(ids.filter(Boolean))].sort((a, b) => scoreModelId(b) - scoreModelId(a));
+  const usable = [...new Set(ids.filter(Boolean))].filter(isUsableModelId);
+  const newestVersion = usable.reduce((max, id) => Math.max(max, familyVersion(id)), 0);
+  const score = (id: string) => {
+    const version = isAliasId(id) ? Math.max(familyVersion(id), newestVersion) : familyVersion(id);
+    return version * 1000 + tierScore(id) * 10 - stabilityPenalty(id);
+  };
+  return usable.sort((a, b) => score(b) - score(a) || a.length - b.length || a.localeCompare(b));
 }
 
 async function listGenerateContentModelIds(apiKey: string) {
@@ -54,40 +219,59 @@ async function listGenerateContentModelIds(apiKey: string) {
   do {
     const params = new URLSearchParams({ key: apiKey, pageSize: '100' });
     if (pageToken) params.set('pageToken', pageToken);
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?${params.toString()}`);
+    const response = await fetch(`${GEMINI_API_ROOT}/models?${params.toString()}`);
     const data = (await response.json().catch(() => null)) as ListModelsResponse | null;
+    const message = data?.error?.message || '';
     if (!response.ok) {
-      throw new Error(data?.error?.message || 'Could not list Gemini models for this API key.');
+      throw geminiError(friendlyGeminiMessage(response.status, message), response.status, message);
     }
-    if (!data) throw new Error('Could not read Gemini model list.');
+    if (!data) throw geminiError('Could not read the Gemini model list.', response.status);
     for (const model of data.models || []) {
       const methods = model.supportedGenerationMethods;
       if (!Array.isArray(methods) || !methods.includes('generateContent')) continue;
       const id = modelIdFromApiName(model.name || '');
-      if (!id) continue;
-      const low = id.toLowerCase();
-      if (low.includes('embedding') || low.includes('embed')) continue;
-      collected.push(id);
+      if (id) collected.push(id);
     }
     pageToken = data.nextPageToken;
   } while (pageToken);
   return collected;
 }
 
-async function rankedModelIdsForKey(apiKey: string) {
-  try {
-    const ids = await listGenerateContentModelIds(apiKey);
-    const ranked = rankModelIds(ids);
-    if (ranked.length) return ranked;
-  } catch {
-    /* use fallback below */
+/** Local-only discriminator so a changed key doesn't reuse a stale model choice. */
+function keyFingerprint(apiKey: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < apiKey.length; i += 1) {
+    hash ^= apiKey.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
   }
-  return [GEMINI_MODEL_FALLBACK];
+  return `${(hash >>> 0).toString(36)}:${apiKey.length}`;
+}
+
+async function readCachedModelId(apiKey: string) {
+  const cached = await readValue<ModelChoiceCache>(MODEL_CHOICE_CACHE_KEY);
+  if (!cached || cached.version !== 1 || cached.keyHash !== keyFingerprint(apiKey)) return '';
+  if (!cached.modelId || !isUsableModelId(cached.modelId)) return '';
+  const age = Date.now() - Date.parse(cached.resolvedAt);
+  if (!Number.isFinite(age) || age < 0 || age > MODEL_CHOICE_TTL_MS) return '';
+  return cached.modelId;
+}
+
+async function saveCachedModelId(apiKey: string, modelId: string) {
+  try {
+    await saveValue<ModelChoiceCache>(MODEL_CHOICE_CACHE_KEY, {
+      version: 1,
+      keyHash: keyFingerprint(apiKey),
+      modelId,
+      resolvedAt: new Date().toISOString()
+    });
+  } catch {
+    // A missing cache only costs one extra models.list call next time.
+  }
 }
 
 function inlineImagePart(imageDataUrl: string): GeminiInlinePart {
   const match = imageDataUrl.match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) throw new Error('Could not prepare the photo for Gemini.');
+  if (!match) throw geminiError('Could not prepare the photo for Gemini.');
   return {
     inlineData: {
       mimeType: match[1],
@@ -99,43 +283,31 @@ function inlineImagePart(imageDataUrl: string): GeminiInlinePart {
 function responseText(data: GeminiResponse) {
   const parts = data.candidates?.[0]?.content?.parts || [];
   const text = parts.map(part => part.text || '').join('\n').trim();
-  if (!text) throw new Error('Gemini did not return an estimate.');
+  if (!text) throw geminiError('Gemini did not return an estimate.');
   return text;
-}
-
-function isRetryableModelError(status: number, message: string) {
-  if (status === 429) return true;
-  const m = message.toLowerCase();
-  return m.includes('quota') || m.includes('resource_exhausted') || m.includes('rate limit');
-}
-
-function httpError(status: number, message: string) {
-  const err = new Error(message || 'Gemini could not estimate this meal.');
-  (err as Error & { status?: number }).status = status;
-  return err;
 }
 
 async function generateMealEstimateOnce(
   apiKey: string,
   modelId: string,
-  parts: GeminiPart[]
+  userText: string,
+  imagePart: GeminiInlinePart | null,
+  compat: CompatFlags
 ) {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+  const parts: GeminiPart[] = [
+    { text: compat.systemInstruction ? userText : `${AI_QUICK_LOG_PROMPT}\n\n${userText}` }
+  ];
+  if (imagePart) parts.push(imagePart);
+
+  const response = await fetch(`${GEMINI_API_ROOT}/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: AI_QUICK_LOG_PROMPT }]
-      },
-      contents: [
-        {
-          role: 'user',
-          parts
-        }
-      ],
+      ...(compat.systemInstruction ? { systemInstruction: { parts: [{ text: AI_QUICK_LOG_PROMPT }] } } : {}),
+      contents: [{ role: 'user', parts }],
       generationConfig: {
         temperature: 0.2,
-        responseMimeType: 'application/json'
+        ...(compat.jsonMimeType ? { responseMimeType: 'application/json' } : {})
       }
     })
   });
@@ -143,10 +315,69 @@ async function generateMealEstimateOnce(
   const data = (await response.json().catch(() => null)) as GeminiResponse | null;
   const message = data?.error?.message || '';
   if (!response.ok) {
-    throw httpError(response.status, message || 'Gemini could not estimate this meal.');
+    throw geminiError(friendlyGeminiMessage(response.status, message), response.status, message);
   }
-  if (!data) throw new Error('Gemini returned an unreadable response.');
+  if (!data) throw geminiError('Gemini returned an unreadable response.', response.status);
   return responseText(data);
+}
+
+/**
+ * Tries one model, stepping down capabilities if the model rejects a feature
+ * rather than the request. Returns null when the model itself is unusable.
+ */
+async function tryModel(
+  apiKey: string,
+  modelId: string,
+  userText: string,
+  imagePart: GeminiInlinePart | null,
+  onModelError: (err: GeminiError) => void
+) {
+  const compat: CompatFlags = { jsonMimeType: true, systemInstruction: true };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await generateMealEstimateOnce(apiKey, modelId, userText, imagePart, compat);
+    } catch (err) {
+      const error = err as GeminiError;
+      const status = error.status ?? 0;
+      const raw = error.detail || error.message || '';
+      if (isKeyLevelFailure(status, raw)) throw error;
+
+      const capability = status === 400 ? unsupportedCapability(raw) : null;
+      if (capability && compat[capability]) {
+        compat[capability] = false;
+        continue;
+      }
+      if (isModelLevelFailure(status, raw)) {
+        console.warn(`Gemini model "${modelId}" could not be used.`, raw || error.message);
+        onModelError(error);
+        return null;
+      }
+      throw error;
+    }
+  }
+  return null;
+}
+
+/** 404 tells us least, so keep a more specific error when one turns up. */
+function moreInformative(current: GeminiError | null, next: GeminiError) {
+  if (!current) return next;
+  if (current.status === 404 && next.status !== 404) return next;
+  return current;
+}
+
+/**
+ * Checks a key without spending a generate call: `models.list` is free.
+ * Returns the model Dawni would use and how many candidates the key exposes.
+ */
+export async function probeGeminiKey(apiKey: string) {
+  const key = apiKey.trim();
+  if (!key) throw geminiError('Add a Gemini API key first.');
+  const ranked = rankModelIds(await listGenerateContentModelIds(key));
+  if (!ranked.length) {
+    throw geminiError('That key works, but it has no Gemini models that can run estimates.');
+  }
+  await saveCachedModelId(key, ranked[0]);
+  return { modelId: ranked[0], modelCount: ranked.length };
 }
 
 export async function requestMealEstimate({
@@ -159,7 +390,7 @@ export async function requestMealEstimate({
   imageDataUrl?: string | null;
 }) {
   const key = apiKey.trim();
-  if (!key) throw new Error('Add a Gemini API key in Settings first.');
+  if (!key) throw geminiError('Add a Gemini API key in Settings first.');
 
   const trimmed = userText.trim();
   const textForModel =
@@ -168,26 +399,46 @@ export async function requestMealEstimate({
       ? 'Photo only: identify the food or meal, estimate it for a calorie tracker, and reply only with the JSON object described in your instructions.'
       : '');
   if (!textForModel && !imageDataUrl) {
-    throw new Error('Add a short description or attach a photo.');
+    throw geminiError('Add a short description or attach a photo.');
+  }
+  const imagePart = imageDataUrl ? inlineImagePart(imageDataUrl) : null;
+
+  let lastError: GeminiError | null = null;
+  const onModelError = (err: GeminiError) => {
+    lastError = moreInformative(lastError, err);
+  };
+  const attempted = new Set<string>();
+  const attempt = async (modelId: string) => {
+    if (!modelId || attempted.has(modelId) || attempted.size >= MAX_MODEL_ATTEMPTS) return null;
+    attempted.add(modelId);
+    const text = await tryModel(key, modelId, textForModel, imagePart, onModelError);
+    if (text) await saveCachedModelId(key, modelId);
+    return text;
+  };
+
+  // A warm cache skips the models.list round-trip entirely on the happy path.
+  const cachedModelId = await readCachedModelId(key);
+  if (cachedModelId) {
+    const text = await attempt(cachedModelId);
+    if (text) return text;
   }
 
-  const parts: GeminiPart[] = [{ text: textForModel }];
-  if (imageDataUrl) parts.push(inlineImagePart(imageDataUrl));
-
-  const ranked = await rankedModelIdsForKey(key);
-  const maxTries = Math.min(8, ranked.length);
-
-  for (let index = 0; index < maxTries; index += 1) {
-    const modelId = ranked[index];
-    try {
-      return await generateMealEstimateOnce(key, modelId, parts);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const status = (err as Error & { status?: number }).status ?? 0;
-      const retry = isRetryableModelError(status, message) && index < maxTries - 1;
-      if (!retry) throw err instanceof Error ? err : new Error(message);
-    }
+  let ranked: string[] = [];
+  try {
+    ranked = rankModelIds(await listGenerateContentModelIds(key));
+  } catch (err) {
+    const error = err as GeminiError;
+    // A bad key or disabled API breaks every model, so say so instead of guessing.
+    if (isKeyLevelFailure(error.status ?? 0, error.detail || error.message || '')) throw error;
+    console.warn('Could not list Gemini models; falling back to known model ids.', error.detail || error.message);
+    lastError = moreInformative(lastError, error);
   }
 
-  throw new Error('Gemini could not estimate this meal.');
+  for (const modelId of [...ranked, ...GEMINI_FALLBACK_MODEL_IDS]) {
+    const text = await attempt(modelId);
+    if (text) return text;
+    if (attempted.size >= MAX_MODEL_ATTEMPTS) break;
+  }
+
+  throw lastError || geminiError('Gemini could not estimate this meal.');
 }
