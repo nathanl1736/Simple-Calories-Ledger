@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#151713" />
-    <meta name="app-version" content="2.5.0.0" />
+    <meta name="app-version" content="2.5.0.1" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Dawni" />
     <meta name="application-name" content="Dawni" />
@@ -12,6 +12,27 @@
     <link rel="manifest" href="/Simple-Calories-Ledger/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/Simple-Calories-Ledger/icons/apple-touch-icon.png" />
     <title>Dawni — weekly food journal</title>
+    <script>
+      // Applies the saved theme synchronously, before first paint. The app keeps this cache in step with Settings.
+      (function () {
+        var pref = 'light';
+        try { pref = localStorage.getItem('dawni-theme') || pref; } catch (e) {}
+        var theme = pref === 'system'
+          ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+          : (pref === 'dark' ? 'dark' : 'light');
+        var root = document.documentElement;
+        root.dataset.theme = theme;
+        root.dataset.themePreference = pref;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.content = theme === 'light' ? '#f8f3e9' : '#151713';
+        try { var accent = localStorage.getItem('dawni-accent'); if (accent) root.style.setProperty('--accent', accent); } catch (e) {}
+      })();
+    </script>
+    <style>
+      /* Paints the right background before the stylesheet and app load, so a cold start never flashes. */
+      html { background: #151713; color-scheme: dark; }
+      html[data-theme="light"] { background: #f8f3e9; color-scheme: light; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

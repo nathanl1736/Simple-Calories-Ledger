@@ -292,6 +292,8 @@ function applyThemePreference(theme: ThemePreference) {
   document.documentElement.dataset.themePreference = theme;
   const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (themeColor) themeColor.content = THEME_COLORS[effectiveTheme];
+  // index.html reads this before first paint, so a cold start opens straight in the right theme.
+  try { localStorage.setItem('dawni-theme', theme); } catch { /* private mode */ }
 }
 
 /**
@@ -814,10 +816,15 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--accent', state.settings.accent || '#c9dc86');
-  }, [state.settings.accent]);
+    // Until the saved settings load, keep what index.html applied rather than flashing the defaults.
+    if (!loaded) return;
+    const accent = state.settings.accent || '#c9dc86';
+    document.documentElement.style.setProperty('--accent', accent);
+    try { localStorage.setItem('dawni-accent', accent); } catch { /* private mode */ }
+  }, [state.settings.accent, loaded]);
 
   useEffect(() => {
+    if (!loaded) return;
     const theme = state.settings.theme || DEFAULT.settings.theme;
     applyThemePreference(theme);
     if (theme !== 'system') return;
@@ -829,7 +836,7 @@ export function App() {
     }
     media.addListener(onChange);
     return () => media.removeListener(onChange);
-  }, [state.settings.theme]);
+  }, [state.settings.theme, loaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -1304,7 +1311,8 @@ export function App() {
   };
 
   if (!loaded) {
-    return <main className="app loading"><h1>Dawni</h1><p className="hint">Loading your local tracker...</p></main>;
+    // A blank screen in the right colour: the read takes a few milliseconds, so text here only flickers.
+    return <main className="app loading" aria-busy="true" />;
   }
 
   return (
