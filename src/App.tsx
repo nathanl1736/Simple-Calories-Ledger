@@ -185,35 +185,65 @@ const THEME_COLORS: Record<EffectiveTheme, string> = {
   light: '#f8f3e9'
 };
 
-type ModalScrollLockSnapshot = {
-  scrollY: number;
-  bodyOverflow: string;
-  bodyPosition: string;
-  bodyTop: string;
-  bodyWidth: string;
-  htmlOverflow: string;
-};
-
 const MODAL_SCROLL_LOCK_RELEASED_EVENT = 'modal-scroll-lock-released';
 let modalScrollLockCount = 0;
-let modalScrollLockSnapshot: ModalScrollLockSnapshot | null = null;
+let modalScrollLockY = 0;
+let lockTouchStartY = 0;
+let lockTouchStartX = 0;
 
+/**
+ * True when `target` sits inside a modal element that can still scroll in
+ * `direction` ('down' = content moves up, scrollTop grows).
+ */
+function modalCanScroll(target: EventTarget | null, direction: 'up' | 'down') {
+  let el = target instanceof Element ? target : null;
+  while (el && !el.classList.contains('modal-backdrop')) {
+    if (el instanceof HTMLElement && el.scrollHeight > el.clientHeight + 1) {
+      const overflowY = getComputedStyle(el).overflowY;
+      if (overflowY === 'auto' || overflowY === 'scroll') {
+        if (direction === 'down' ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0) return true;
+      }
+    }
+    el = el.parentElement;
+  }
+  return false;
+}
+
+function onLockTouchStart(event: TouchEvent) {
+  lockTouchStartY = event.touches[0]?.clientY ?? 0;
+  lockTouchStartX = event.touches[0]?.clientX ?? 0;
+}
+
+function onLockTouchMove(event: TouchEvent) {
+  const touch = event.touches[0];
+  if (!touch || event.touches.length > 1) return;
+  const dy = touch.clientY - lockTouchStartY;
+  const dx = touch.clientX - lockTouchStartX;
+  // Sideways drags (sliders, chip rows) can't scroll the page vertically.
+  if (Math.abs(dx) > Math.abs(dy)) return;
+  if (!modalCanScroll(event.target, dy < 0 ? 'down' : 'up')) event.preventDefault();
+}
+
+function onLockWheel(event: WheelEvent) {
+  if (!event.deltaY) return;
+  if (!modalCanScroll(event.target, event.deltaY > 0 ? 'down' : 'up')) event.preventDefault();
+}
+
+/**
+ * Stops the page behind modals from scrolling. This deliberately leaves html and
+ * body styles alone: the previous lock made body position:fixed, and in an iOS
+ * home-screen app (viewport-fit=cover, translucent status bar) WebKit then
+ * measured the viewport about a status bar shorter, so the tab bar and scrim
+ * sat too high, the sticky header vanished, and everything snapped back when
+ * the lock was released at the end of the close animation. Shared across
+ * modals so handoffs never unlock early.
+ */
 function acquireModalScrollLock() {
   if (modalScrollLockCount === 0) {
-    const scrollY = window.scrollY;
-    modalScrollLockSnapshot = {
-      scrollY,
-      bodyOverflow: document.body.style.overflow,
-      bodyPosition: document.body.style.position,
-      bodyTop: document.body.style.top,
-      bodyWidth: document.body.style.width,
-      htmlOverflow: document.documentElement.style.overflow
-    };
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = '100%';
+    modalScrollLockY = window.scrollY;
+    document.addEventListener('touchstart', onLockTouchStart, { passive: true });
+    document.addEventListener('touchmove', onLockTouchMove, { passive: false });
+    document.addEventListener('wheel', onLockWheel, { passive: false });
   }
 
   modalScrollLockCount += 1;
@@ -223,24 +253,20 @@ function acquireModalScrollLock() {
     if (released) return;
     released = true;
     modalScrollLockCount = Math.max(0, modalScrollLockCount - 1);
-    if (modalScrollLockCount > 0 || !modalScrollLockSnapshot) return;
+    if (modalScrollLockCount > 0) return;
 
-    const previous = modalScrollLockSnapshot;
-    modalScrollLockSnapshot = null;
-    document.documentElement.style.overflow = previous.htmlOverflow;
-    document.body.style.overflow = previous.bodyOverflow;
-    document.body.style.position = previous.bodyPosition;
-    document.body.style.top = previous.bodyTop;
-    document.body.style.width = previous.bodyWidth;
-    window.scrollTo(0, previous.scrollY);
-    requestAnimationFrame(() => window.scrollTo(0, previous.scrollY));
+    document.removeEventListener('touchstart', onLockTouchStart);
+    document.removeEventListener('touchmove', onLockTouchMove);
+    document.removeEventListener('wheel', onLockWheel);
+    // Only if something moved the page anyway (e.g. iOS scrolling for the keyboard).
+    if (Math.abs(window.scrollY - modalScrollLockY) > 1) window.scrollTo(0, modalScrollLockY);
     window.dispatchEvent(new Event(MODAL_SCROLL_LOCK_RELEASED_EVENT));
   };
 }
 
 /**
- * Runs `fn` once no modal holds the scroll lock. Releasing the lock restores the
- * old scroll offset, so scrolling to a section any earlier gets undone.
+ * Runs `fn` once no modal holds the scroll lock. Releasing the lock can restore
+ * the old scroll offset, so scrolling to a section any earlier could be undone.
  */
 function afterModalScrollLock(fn: () => void) {
   const run = () => requestAnimationFrame(() => requestAnimationFrame(fn));
@@ -547,7 +573,6 @@ function DayCalorieGoalPanel({
 
 function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => void; children: ReactNode }) {
   const [navHidden, setNavHidden] = useState(false);
-  const [navResetKey, setNavResetKey] = useState(0);
 
   useEffect(() => {
     const inputTypesWithoutKeyboard = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
@@ -565,11 +590,7 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
       if (isModalLayerPresent()) return;
       setNavHidden(isTextEntryElement(document.activeElement));
     };
-    const onModalScrollLockReleased = () => {
-      setNavHidden(false);
-      setNavResetKey(key => key + 1);
-      requestAnimationFrame(refresh);
-    };
+    const onModalScrollLockReleased = () => requestAnimationFrame(refresh);
     const onFocusIn = (event: FocusEvent) => {
       if (isModalLayerPresent()) return;
       setNavHidden(isTextEntryElement(event.target));
@@ -594,7 +615,7 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
     <>
       <div className="status-bar-scrim" aria-hidden="true" />
       <main className="app">{children}</main>
-      <nav key={navResetKey} className={`nav ${navHidden ? 'hidden' : ''}`} aria-label="Main tabs" aria-hidden={navHidden}>
+      <nav className={`nav ${navHidden ? 'hidden' : ''}`} aria-label="Main tabs" aria-hidden={navHidden}>
         <div className="nav-inner">
           {TABS.map(([id, label]) => (
             <button key={id} className={`tab tab-${id} ${tab === id ? 'active' : ''}`} type="button" onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}>
@@ -721,8 +742,8 @@ export function App() {
 
   const setTab = (next: Tab, options: SetTabOptions = {}) => {
     const reTap = next === tab && !options.date;
-    // While a modal holds the scroll lock the body is fixed and scrollY reads 0,
-    // which would wipe the offset we are trying to remember.
+    // A modal can let iOS nudge the page (keyboard), so only remember offsets
+    // taken while no modal is open.
     if (!modalScrollLockCount) tabScrollRef.current[tab] = window.scrollY;
     // Track always opens at the top on today (or the day another screen asked
     // for), and re-tapping a tab resets it.
