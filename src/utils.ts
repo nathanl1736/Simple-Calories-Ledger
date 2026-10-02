@@ -9,10 +9,13 @@ export const n = (value: unknown) => Number(value) || 0;
 export const fmt = (value: unknown) => Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString() : String(value);
 export const signed = (value: number) => `${value > 0 ? '+' : ''}${fmt(value)}`;
 
+// Built from local date parts. Shifting by the UTC offset and reading the ISO
+// string broke on daylight-saving start (e.g. Melbourne's first Sunday in
+// October), where local midnight plus the offset lands after the clock change
+// and the Sunday came out as Saturday.
 export function toKey(date: Date | string | number) {
   const z = new Date(date);
-  z.setMinutes(z.getMinutes() - z.getTimezoneOffset());
-  return z.toISOString().slice(0, 10);
+  return `${z.getFullYear()}-${String(z.getMonth() + 1).padStart(2, '0')}-${String(z.getDate()).padStart(2, '0')}`;
 }
 
 export const todayKey = () => toKey(new Date());
@@ -242,7 +245,7 @@ export function energyUnitValue(value: unknown): EnergyUnit {
 }
 
 export function energyUnitLabel(unit: unknown) {
-  return energyUnitValue(unit) === 'kj' ? 'kJ' : 'kCal';
+  return energyUnitValue(unit) === 'kj' ? 'kJ' : 'Cal';
 }
 
 export function energyLabel(state: AppState) {

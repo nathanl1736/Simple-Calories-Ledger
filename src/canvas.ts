@@ -1,5 +1,5 @@
-import type { Entry, Meal, Totals } from './types';
-import { fmt, n, shortDate } from './utils';
+import type { EnergyUnit, Entry, Meal, Totals } from './types';
+import { energyUnitLabel, energyValueForUnit, entryTotals, fmt, shortDate } from './utils';
 
 export type MealGroup = {
   id: string;
@@ -47,13 +47,38 @@ function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: numb
   ctx.restore();
 }
 
-export async function renderMealCardCanvas(group: MealGroup) {
+/** Mixes two #rrggbb colours; null if either isn't plain hex. */
+function mixHex(a: string, b: string, weightA: number) {
+  const parse = (hex: string) => /^#[0-9a-f]{6}$/i.test(hex.trim()) ? [1, 3, 5].map(i => parseInt(hex.trim().slice(i, i + 2), 16)) : null;
+  const ca = parse(a);
+  const cb = parse(b);
+  if (!ca || !cb) return null;
+  return `rgb(${ca.map((v, i) => Math.round(v * weightA + cb[i] * (1 - weightA))).join(', ')})`;
+}
+
+export async function renderMealCardCanvas(group: MealGroup, energyUnit: EnergyUnit = 'kcal') {
+  const unitLabel = energyUnitLabel(energyUnit);
+  const energy = (kcal: number) => fmt(energyValueForUnit(kcal, energyUnit));
   const W = 1080;
-  const H = 1220;
   const pad = 56;
   const x = pad + 52;
-  let y = pad + 64;
   const maxW = W - pad * 2 - 104;
+  const photos = group.photos.slice(0, 4);
+  const imgs = photos.length ? (await Promise.all(photos.map(src => loadImage(src).catch(() => null)))).filter(Boolean) as HTMLImageElement[] : [];
+  const photoH = imgs.length ? (imgs.length <= 2 ? 360 : 430) : 0;
+  const rows = group.items.slice(0, 10);
+
+  // Lay out first so the card is exactly as tall as its content: a fixed
+  // height left a gap under short meals and cut off long ones.
+  const kickerY = pad + 64;
+  const titleY = kickerY + 88;
+  const photoY = titleY + 40;
+  const totalsY = photoY + (photoH ? photoH + 30 : 0);
+  const totalsH = 152;
+  const listY = totalsY + totalsH + 36;
+  const listH = 104 + rows.length * 62;
+  const H = listY + listH + 40 + pad;
+
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -65,58 +90,57 @@ export async function renderMealCardCanvas(group: MealGroup) {
   const ink = cssVar('--ink', '#f7f2ed');
   const muted = cssVar('--muted', '#a19b90');
   const accent = cssVar('--accent', '#c9dc86');
+  // Pastel accents are unreadable as text on the light theme's cream, so darken
+  // them towards the ink the same way the app's own light theme does.
+  const accentText = document.documentElement.dataset.theme === 'light' ? mixHex(accent, ink, 0.14) || ink : accent;
   const font = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = card;
   roundRect(ctx, pad, pad, W - pad * 2, H - pad * 2, 46);
   ctx.fill();
-  ctx.fillStyle = accent;
+
+  ctx.fillStyle = accentText;
   ctx.font = `900 34px ${font}`;
-  ctx.fillText('Meal Summary', x, y);
-  y += 66;
+  ctx.fillText('Meal Summary', x, kickerY);
   ctx.fillStyle = ink;
   ctx.font = `950 82px ${font}`;
-  ctx.fillText(group.meal, x, y);
+  ctx.fillText(group.meal, x, titleY);
   ctx.textAlign = 'right';
   ctx.fillStyle = muted;
   ctx.font = `900 31px ${font}`;
-  ctx.fillText(shortDate(group.date), x + maxW, y - 10);
+  ctx.fillText(shortDate(group.date), x + maxW, titleY - 10);
   ctx.textAlign = 'left';
-  y += 58;
-  const photos = group.photos.slice(0, 4);
-  if (photos.length) {
-    const imgs = await Promise.all(photos.map(loadImage).map(p => p.catch(() => null)));
-    const good = imgs.filter(Boolean) as HTMLImageElement[];
-    if (good.length) {
-      const gap = 16;
-      const photoH = good.length <= 2 ? 360 : 430;
-      if (good.length === 1) drawCover(ctx, good[0], x, y, maxW, photoH, 30);
-      else {
-        const cw = (maxW - gap) / 2;
-        const ch = good.length <= 2 ? photoH : (photoH - gap) / 2;
-        good.slice(0, 4).forEach((img, i) => drawCover(ctx, img, x + (i % 2) * (cw + gap), y + Math.floor(i / 2) * (ch + gap), cw, ch, 26));
-      }
-      y += photoH + 30;
+
+  if (imgs.length) {
+    const gap = 16;
+    if (imgs.length === 1) drawCover(ctx, imgs[0], x, photoY, maxW, photoH, 30);
+    else {
+      const cw = (maxW - gap) / 2;
+      const ch = imgs.length <= 2 ? photoH : (photoH - gap) / 2;
+      imgs.forEach((img, i) => drawCover(ctx, img, x + (i % 2) * (cw + gap), photoY + Math.floor(i / 2) * (ch + gap), cw, ch, 26));
     }
   }
+
   ctx.fillStyle = card2;
-  roundRect(ctx, x, y, maxW, 134, 30);
+  roundRect(ctx, x, totalsY, maxW, totalsH, 30);
   ctx.fill();
-  ctx.fillStyle = accent;
+  ctx.fillStyle = accentText;
   ctx.font = `950 82px ${font}`;
-  const calText = fmt(group.totals.calories);
-  ctx.fillText(calText, x + 32, y + 84);
+  const calText = energy(group.totals.calories);
+  ctx.fillText(calText, x + 32, totalsY + 86);
+  // Measure while the large font is still set, so the unit sits beside the number.
+  const unitX = x + 54 + ctx.measureText(calText).width;
   ctx.fillStyle = muted;
   ctx.font = `900 32px ${font}`;
-  ctx.fillText('kCal', x + 54 + ctx.measureText(calText).width, y + 78);
-  ctx.fillText(`${group.items.length} item${group.items.length === 1 ? '' : 's'}`, x + 34, y + 116);
-  y += 170;
-  const rows = group.items.slice(0, 10);
+  ctx.fillText(unitLabel, unitX, totalsY + 80);
+  ctx.font = `850 28px ${font}`;
+  ctx.fillText(`${group.items.length} item${group.items.length === 1 ? '' : 's'}`, x + 34, totalsY + 128);
+
   ctx.fillStyle = card2;
-  roundRect(ctx, x, y, maxW, 104 + rows.length * 62, 30);
+  roundRect(ctx, x, listY, maxW, listH, 30);
   ctx.fill();
-  y += 54;
+  let y = listY + 54;
   ctx.fillStyle = muted;
   ctx.font = `900 28px ${font}`;
   ctx.fillText('Food items', x + 30, y);
@@ -128,7 +152,7 @@ export async function renderMealCardCanvas(group: MealGroup) {
     ctx.textAlign = 'right';
     ctx.fillStyle = muted;
     ctx.font = `850 27px ${font}`;
-    ctx.fillText(`${fmt(n(item.calories))} kCal`, x + maxW - 30, y);
+    ctx.fillText(`${energy(entryTotals(item).calories)} ${unitLabel}`, x + maxW - 30, y);
     ctx.textAlign = 'left';
     y += 62;
   });

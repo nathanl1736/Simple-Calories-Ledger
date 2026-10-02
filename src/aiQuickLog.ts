@@ -120,7 +120,7 @@ function repairJsonText(value: string) {
     .replace(/,\s*([}\]])/g, '$1');
 }
 
-function parseJsonObject(value: string) {
+export function parseJsonObject(value: string) {
   const jsonText = extractJsonObject(value);
   try {
     return JSON.parse(jsonText) as unknown;
@@ -129,7 +129,7 @@ function parseJsonObject(value: string) {
   }
 }
 
-function numberValue(value: unknown) {
+export function numberValue(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
     const match = value.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
@@ -138,7 +138,7 @@ function numberValue(value: unknown) {
   return NaN;
 }
 
-function stringValue(value: unknown) {
+export function stringValue(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 

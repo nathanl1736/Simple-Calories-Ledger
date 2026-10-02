@@ -12,7 +12,22 @@ import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateData
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
 import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
-import { probeGeminiKey, requestMealEstimate, type GeminiError } from './geminiEstimate';
+import { probeGeminiKey, requestMealEstimate, requestMenuPick, type GeminiError } from './geminiEstimate';
+import {
+  budgetReason,
+  buildMenuPickContext,
+  buildMenuPickRequest,
+  isMenuPickFresh,
+  loadLastMenuPick,
+  MAX_MENU_PHOTOS,
+  mealBudget,
+  MENU_PHOTO_OPTIONS,
+  MENU_PICK_MEALS,
+  parseMenuPick,
+  saveLastMenuPick,
+  type MenuPickItem,
+  type MenuPickSession
+} from './menuPick';
 import {
   addDays,
   applyDayCalorieOverride,
@@ -55,8 +70,23 @@ import {
   weeklyBankAdjustmentForDate
 } from './utils';
 
-type Tab = 'tracking' | 'journal' | 'library' | 'cards' | 'stats' | 'settings';
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'customDbHelp' | null;
+type Tab = 'tracking' | 'journal' | 'library' | 'stats' | 'settings';
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'geminiSetup' | 'menuPick' | 'customDbHelp' | null;
+type SetTabOptions = { date?: string; resetScroll?: boolean };
+
+const TABS: [Tab, string][] = [
+  ['tracking', 'Track'],
+  ['stats', 'Week'],
+  ['journal', 'Journal'],
+  ['library', 'Foods'],
+  ['settings', 'Settings']
+];
+
+function storedTab(value: string | null): Tab {
+  // Cards used to be its own tab; meal cards now live in Journal's day view.
+  if (value === 'cards') return 'journal';
+  return TABS.some(([id]) => id === value) ? value as Tab : 'tracking';
+}
 type EntryOpenMode = 'manual' | 'prefill' | 'edit';
 type JournalDayViewMode = 'list' | 'collage';
 type JournalLabelMode = 'photo' | 'calories' | 'nameCalories';
@@ -190,6 +220,23 @@ function acquireModalScrollLock() {
   };
 }
 
+/**
+ * Runs `fn` once no modal holds the scroll lock. Releasing the lock restores the
+ * old scroll offset, so scrolling to a section any earlier gets undone.
+ */
+function afterModalScrollLock(fn: () => void) {
+  const run = () => requestAnimationFrame(() => requestAnimationFrame(fn));
+  if (!modalScrollLockCount) {
+    run();
+    return;
+  }
+  const onReleased = () => {
+    window.removeEventListener(MODAL_SCROLL_LOCK_RELEASED_EVENT, onReleased);
+    run();
+  };
+  window.addEventListener(MODAL_SCROLL_LOCK_RELEASED_EVENT, onReleased);
+}
+
 function resolvedTheme(theme: ThemePreference): EffectiveTheme {
   if (theme === 'light' || theme === 'dark') return theme;
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
@@ -248,6 +295,8 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
   const rafRef = useRef<ReturnType<typeof requestAnimationFrame> | undefined>(undefined);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const renderedRef = useRef(rendered);
+  renderedRef.current = rendered;
   const CLOSE_MS = bottomSheet ? 320 : 180;
 
   // Body scroll lock is shared across modal instances so handoffs cannot unlock the page early.
@@ -292,7 +341,10 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       rafRef.current = requestAnimationFrame(() => setEntered(true));
       return () => cancelAnimationFrame(rafRef.current!);
     }
-    if (closingRef.current) return;
+    // Nothing on screen (e.g. first mount while closed): closing anyway would
+    // call onClose a moment later and shut whichever modal opened meanwhile,
+    // which is how the launch-time backup reminder vanished before it was seen.
+    if (!renderedRef.current || closingRef.current) return;
     requestClose(true);
   }, [open, requestClose, bottomSheet]);
 
@@ -438,7 +490,7 @@ function DayCalorieGoalPanel({
               <span className="day-calorie-endpoint" aria-hidden="true">{fmt(energyValue(state, max))}</span>
             </div>
             <div className="day-calorie-input-row">
-              <label className="day-calorie-input-label" htmlFor={inputId}>Type a target ({unit === 'kj' ? 'kJ' : 'kCal'})</label>
+              <label className="day-calorie-input-label" htmlFor={inputId}>Type a target ({energyUnitLabel(unit)})</label>
               <div className="day-calorie-input-controls">
                 <input
                   id={inputId}
@@ -478,14 +530,6 @@ function DayCalorieGoalPanel({
 function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => void; children: ReactNode }) {
   const [navHidden, setNavHidden] = useState(false);
   const [navResetKey, setNavResetKey] = useState(0);
-  const tabs: [Tab, string][] = [
-    ['tracking', 'Track'],
-    ['stats', 'Week'],
-    ['journal', 'Journal'],
-    ['library', 'Foods'],
-    ['cards', 'Cards'],
-    ['settings', 'Settings']
-  ];
 
   useEffect(() => {
     const inputTypesWithoutKeyboard = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
@@ -534,8 +578,8 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
       <main className="app">{children}</main>
       <nav key={navResetKey} className={`nav ${navHidden ? 'hidden' : ''}`} aria-label="Main tabs" aria-hidden={navHidden}>
         <div className="nav-inner">
-          {tabs.map(([id, label]) => (
-            <button key={id} className={`tab ${tab === id ? 'active' : ''}`} type="button" onClick={() => setTab(id)}>
+          {TABS.map(([id, label]) => (
+            <button key={id} className={`tab tab-${id} ${tab === id ? 'active' : ''}`} type="button" onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}>
               <span className="ico" aria-hidden="true" />
               {label}
             </button>
@@ -549,9 +593,8 @@ function AppShell({ tab, setTab, children }: { tab: Tab; setTab: (tab: Tab) => v
 export function App() {
   const [state, setState] = useState<AppState>(() => structuredClone(DEFAULT));
   const [loaded, setLoaded] = useState(false);
-  const [tab, setTabState] = useState<Tab>(() => (localStorage.getItem('calorie-tracker-active-tab') as Tab) || 'tracking');
+  const [tab, setTabState] = useState<Tab>(() => storedTab(localStorage.getItem('calorie-tracker-active-tab')));
   const [selectedDate, setSelectedDate] = useState(todayKey());
-  const [cardsDate, setCardsDate] = useState(todayKey());
   const [journalMonth, setJournalMonth] = useState(() => new Date());
   const [journalDay, setJournalDay] = useState<string | null>(null);
   const [journalDayViewMode, setJournalDayViewMode] = useState<JournalDayViewMode>('collage');
@@ -569,6 +612,7 @@ export function App() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [activeMealCard, setActiveMealCard] = useState<MealGroup | null>(null);
   const [bankingWeekStart, setBankingWeekStart] = useState(() => weekStartMonday(todayKey()));
+  const [settingsFocus, setSettingsFocus] = useState<'gemini' | null>(null);
   const [goalsEditing, setGoalsEditing] = useState(false);
   const [goalDraft, setGoalDraft] = useState<Settings>(DEFAULT.settings);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
@@ -656,19 +700,19 @@ export function App() {
     // safe because setting lastBackupReminderShownAt closes the guard above.
   }, [loaded, modal, state]);
 
-  const setTab = (next: Tab) => {
-    const reTap = next === tab;
+  const setTab = (next: Tab, options: SetTabOptions = {}) => {
+    const reTap = next === tab && !options.date;
     // While a modal holds the scroll lock the body is fixed and scrollY reads 0,
     // which would wipe the offset we are trying to remember.
     if (!modalScrollLockCount) tabScrollRef.current[tab] = window.scrollY;
-    // Track always opens on today at the top, and re-tapping a tab resets it.
-    const resetToTop = next === 'tracking' || reTap;
-    if (next === 'tracking') setSelectedDate(todayKey());
+    // Track always opens at the top on today (or the day another screen asked
+    // for), and re-tapping a tab resets it.
+    const resetToTop = next === 'tracking' || reTap || !!options.resetScroll;
+    if (next === 'tracking') setSelectedDate(options.date || todayKey());
     if (next === 'journal' && reTap) {
       setJournalDay(null);
       setJournalMonth(new Date());
     }
-    if (next === 'cards' && reTap) setCardsDate(todayKey());
     if (next === 'stats' && reTap) {
       setSelectedDate(todayKey());
       setBankingWeekStart(weekStartMonday(todayKey()));
@@ -698,6 +742,19 @@ export function App() {
   useLayoutEffect(() => {
     window.scrollTo({ top: nextTabScrollRef.current, behavior: 'auto' });
   }, [tab]);
+
+  // Shortcuts between screens: a day or week shown in one place opens where it can be acted on.
+  const openDayInTrack = (date: string) => setTab('tracking', { date });
+  const openWeek = (date: string) => {
+    setBankingWeekStart(weekStartMonday(date));
+    setTab('stats', { resetScroll: true });
+  };
+  const openSettingsSection = (sectionId: 'backupSection' | 'geminiSection') => {
+    setModal(null);
+    if (sectionId === 'geminiSection') setSettingsFocus('gemini');
+    setTab('settings', { resetScroll: true });
+    afterModalScrollLock(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
 
   const entries = useMemo(() => dayEntries(state, selectedDate), [state, selectedDate]);
   const totals = useMemo(() => sum(entries), [entries]);
@@ -926,8 +983,32 @@ export function App() {
 
   const openGeminiEstimate = () => {
     if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
-    if (!state.settings.geminiApiKey.trim()) return notify('Add a Gemini API key in Settings first');
+    if (!state.settings.geminiApiKey.trim()) return setModal('geminiSetup');
     setModal('geminiEstimate');
+  };
+
+  const openMenuPick = () => {
+    if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
+    if (!state.settings.geminiApiKey.trim()) return setModal('geminiSetup');
+    setModal('menuPick');
+  };
+
+  const prefillMenuPick = (item: MenuPickItem, meal: Meal) => {
+    const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
+    flushSync(() => {
+      setEntryDraft({
+        ...blankEntryDraft(meal, entryEnergyUnit),
+        name: item.name,
+        calories: draftEnergyText(item.calories, entryEnergyUnit),
+        protein: draftNumberText(item.protein),
+        carbs: draftNumberText(item.carbs),
+        fat: draftNumberText(item.fat),
+        notes: 'Estimated from a menu photo.',
+        estimateSource: 'ai'
+      });
+      setEntryOpenMode('prefill');
+      setModal('entry');
+    });
   };
 
   const estimateWithGemini = async (userText: string, imageDataUrl?: string | null) => {
@@ -1051,7 +1132,9 @@ export function App() {
           onSaveDatabaseFood={saveDatabaseFood}
           onPasteAiQuickLog={pasteAiQuickLogFromClipboard}
           onOpenGeminiEstimate={openGeminiEstimate}
+          onOpenMenuPick={openMenuPick}
           onCopyAiPrompt={copyAiPrompt}
+          onOpenWeek={() => openWeek(selectedDate)}
           reuseSearchCollapseNonce={reuseSearchCollapseNonce}
           onSetDayCalorieTarget={kcal => updateState(draft => applyDayCalorieOverride(draft, selectedDate, kcal))}
         />
@@ -1073,6 +1156,12 @@ export function App() {
             setPhotoPreview(entry.photo || null);
             setModal('photo');
           }}
+          mealGroups={mealGroups}
+          onOpenMealCard={group => {
+            setActiveMealCard(group);
+            setModal('mealCard');
+          }}
+          onOpenDay={openDayInTrack}
         />
       )}
       {tab === 'library' && (
@@ -1092,16 +1181,6 @@ export function App() {
           }}
         />
       )}
-      {tab === 'cards' && (
-        <CardsView state={state} groups={mealGroups} selectedDate={cardsDate} setSelectedDate={setCardsDate} onOpen={group => {
-          setActiveMealCard(group);
-          setModal('mealCard');
-        }} onStartLog={() => {
-          setSelectedDate(cardsDate);
-          setTab('tracking');
-          openEntry('Snack', cardsDate);
-        }} />
-      )}
       {tab === 'stats' && (
         <RichStatsView
           state={state}
@@ -1110,11 +1189,14 @@ export function App() {
           setBankingWeekStart={setBankingWeekStart}
           onBankHelp={() => setModal('bankHelp')}
           onAdherenceHelp={() => setModal('adherenceHelp')}
+          onOpenDay={openDayInTrack}
         />
       )}
       {tab === 'settings' && (
         <SettingsView
           state={state}
+          focus={settingsFocus}
+          onFocusHandled={() => setSettingsFocus(null)}
           goalsEditing={goalsEditing}
           goalDraft={goalDraft}
           setGoalDraft={setGoalDraft}
@@ -1274,7 +1356,7 @@ export function App() {
         group={activeMealCard}
         open={modal === 'mealCard'}
         onClose={() => setModal(null)}
-        onShare={() => activeMealCard && shareMealCard(activeMealCard, notify)}
+        onShare={() => activeMealCard && shareMealCard(activeMealCard, energyUnitValue(state.settings.energyUnit), notify)}
       />
       <Modal open={modal === 'photo'} title="Meal photo" onClose={() => setModal(null)} className="lightbox" bottomSheet>
         <div className="photo-preview-shell">{photoPreview ? <img className="photo-preview-large" src={photoPreview} alt="Meal" /> : <div className="empty">No photo available.</div>}</div>
@@ -1296,6 +1378,32 @@ export function App() {
         onClose={() => setModal(current => (current === 'geminiEstimate' ? null : current))}
         onEstimate={estimateWithGemini}
       />
+      <MenuPickModal
+        open={modal === 'menuPick'}
+        state={state}
+        date={selectedDate}
+        apiKey={state.settings.geminiApiKey}
+        // Same handoff as above: Log this opens Log Food, which must not be closed again.
+        onClose={() => setModal(current => (current === 'menuPick' ? null : current))}
+        onLog={prefillMenuPick}
+        onBackgroundNotice={message => notify(message, 4000)}
+      />
+      <Modal open={modal === 'geminiSetup'} title="Set up Gemini" onClose={() => setModal(null)}>
+        <p className="hint">Estimate with Gemini and Help me pick from a menu use your own Google Gemini API key. It takes a couple of minutes to set up, and the key stays on this device.</p>
+        <ol className="update-list ai-help-list">
+          <li>
+            Create a key in Google AI Studio at{' '}
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/app/apikey</a>.
+          </li>
+          <li>Paste it into Settings → Gemini and tap Save.</li>
+          <li>Tap Test key to check Dawni can reach Gemini.</li>
+        </ol>
+        <div className="help-callout">No key? Copy prompt and Paste AI estimate on Track work with any AI chatbot.</div>
+        <div className="actions vertical">
+          <button className="primary" type="button" onClick={() => openSettingsSection('geminiSection')}>Open Gemini settings</button>
+          <button className="secondary" type="button" onClick={() => setModal(null)}>Not now</button>
+        </div>
+      </Modal>
       <Modal open={modal === 'aiQuickLogHelp'} title="AI estimate helper" onClose={() => setModal(null)}>
         <ol className="update-list ai-help-list">
           <li>Copy the prompt.</li>
@@ -1316,7 +1424,7 @@ export function App() {
           <li>Create or copy an API key for a Google project where the Generative Language API is enabled.</li>
           <li>Paste the key into Dawni&apos;s Gemini API key field in Settings, then tap Save.</li>
           <li>Tap Test key. This is free — it only asks Google which models the key can use, and shows which one Dawni will pick.</li>
-          <li>Manage billing, budgets, and quota limits in Google Cloud. Dawni only uses the key when you tap Estimate with Gemini.</li>
+          <li>Manage billing, budgets, and quota limits in Google Cloud. Dawni only uses the key when you tap Estimate with Gemini or Help me pick from a menu.</li>
           <li>The key is stored locally in this browser and is included in exported backups.</li>
         </ol>
         <div className="help-callout">Dawni asks your key which models it can use and picks the best available one, so it keeps working as Google releases new models. If one model is busy or unavailable, it tries the next.</div>
@@ -1374,11 +1482,7 @@ export function App() {
       <Modal open={modal === 'backupReminder'} title="Backup reminder" onClose={() => setModal(null)}>
         <p className="hint">Your local tracker data is worth protecting. Backups include compressed journal photos, goals, saved foods, and completed days.</p>
         <div className="actions vertical">
-          <button className="primary" type="button" onClick={() => {
-            setModal(null);
-            setTab('settings');
-            setTimeout(() => document.getElementById('backupSection')?.scrollIntoView({ behavior: 'smooth' }), 80);
-          }}>Open Backup</button>
+          <button className="primary" type="button" onClick={() => openSettingsSection('backupSection')}>Open Backup</button>
           <button className="secondary" type="button" onClick={() => setModal(null)}>Later today</button>
         </div>
       </Modal>
@@ -1406,7 +1510,9 @@ function TrackingView(props: {
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   onPasteAiQuickLog: () => Promise<void>;
   onOpenGeminiEstimate: () => void;
+  onOpenMenuPick: () => void;
   onCopyAiPrompt: () => Promise<void>;
+  onOpenWeek: () => void;
   reuseSearchCollapseNonce: number;
   onSetDayCalorieTarget: (kcal: number | null) => void;
 }) {
@@ -1421,6 +1527,7 @@ function TrackingView(props: {
   const overTarget = remaining < 0;
   const displayedRemaining = overTarget ? Math.abs(remaining) : remaining;
   const deg = Math.min(360, Math.max(0, props.totals.calories) / goal * 360);
+  const loggedText = fmt(energyValue(props.state, props.totals.calories));
   const weekSummary = homeWeekSummary(props.state, props.selectedDate);
   const weekCalorieBudget = weekSummary.rows.reduce((acc, row) => acc + row.goal.calories, 0);
   const bankStatTone = weekSummary.completed.length ? budgetDeltaTone(weekSummary.banked) : '';
@@ -1440,7 +1547,7 @@ function TrackingView(props: {
       <section className={`hero today-card ${overTarget ? 'over-target' : ''}`}>
         <div className="remaining">
           <div className="label">{remainingLabel}</div>
-          <div className="value">{fmt(displayedRemaining)} <small>{energyLabel(props.state)}</small></div>
+          <div className="value">{fmt(energyValue(props.state, displayedRemaining))} <small>{energyLabel(props.state)}</small></div>
           <div className="today-context">
             <span className="today-context-chip">Today&apos;s target {energyText(props.state, goalCalories)}</span>
             {calorieTarget.hasOverride ? (
@@ -1451,7 +1558,7 @@ function TrackingView(props: {
             {overTarget && <span className="today-context-chip today-context-chip--balance">Week can still balance</span>}
           </div>
         </div>
-        <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong>{fmt(props.totals.calories)}</strong><span>Logged</span></div></div>
+        <div className="ring" style={{ '--deg': `${deg}deg` } as React.CSSProperties}><div><strong className={loggedText.length > 5 ? 'long' : ''}>{loggedText}</strong><span>Logged</span></div></div>
       </section>
       <DayCalorieGoalPanel
         key={props.selectedDate}
@@ -1463,24 +1570,25 @@ function TrackingView(props: {
         complete={props.complete}
         onPersist={props.onSetDayCalorieTarget}
       />
-      <section className="home-week-strip" aria-label="This week at a glance">
-        <div className="home-week-heading">
+      <button type="button" className="home-week-strip" onClick={props.onOpenWeek}>
+        <span className="home-week-heading">
           <span>Week at a glance</span>
           <strong>{shortDate(weekSummary.days[0])} - {shortDate(weekSummary.days[6])}</strong>
-        </div>
-        <div className={`home-week-stat home-week-stat--bank${bankStatTone ? ` tone-${bankStatTone}` : ''}`}>
+          <span className="home-week-open">View week</span>
+        </span>
+        <span className={`home-week-stat home-week-stat--bank${bankStatTone ? ` tone-${bankStatTone}` : ''}`}>
           <span>Week bank</span>
           <strong className="home-week-stat-value">{weekSummary.completed.length ? weekSummary.bankText : 'Start with today'}</strong>
-        </div>
-        <div className="home-week-stat">
+        </span>
+        <span className="home-week-stat">
           <span>Completed</span>
           <strong className="home-week-stat-value">{weekSummary.completed.length}/7 days</strong>
-        </div>
-        <div className={`home-week-stat home-week-stat--projected${projectedStatTone ? ` tone-${projectedStatTone}` : ''}`}>
+        </span>
+        <span className={`home-week-stat home-week-stat--projected${projectedStatTone ? ` tone-${projectedStatTone}` : ''}`}>
           <span>Projected</span>
           <strong className="home-week-stat-value">{weekSummary.completed.length ? energyText(props.state, weekSummary.projected) : 'Open'}</strong>
-        </div>
-      </section>
+        </span>
+      </button>
       <div className="macro-grid macro-summary">
         <Macro name="Protein" value={props.totals.protein} goal={macroDayGoal.protein} color="--protein" featured />
         <Macro name="Carbs" value={props.totals.carbs} goal={macroDayGoal.carbs} color="--carbs" />
@@ -1494,16 +1602,34 @@ function TrackingView(props: {
       )}
       {!props.complete && <button className="log-btn" type="button" onClick={() => props.onOpenEntry()}>+ Log Food</button>}
       {!props.complete && (
-        <div className="tracking-ai-stack">
-          <div className="tracking-ai-actions">
-            <div className="tracking-ai-paste-col">
-              <button className="ai-quick-log-btn" type="button" onClick={() => props.onPasteAiQuickLog()}>Paste AI estimate</button>
-              <p className="tracking-ai-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p>
-            </div>
-            <button className="secondary ai-copy-prompt-btn" type="button" onClick={() => props.onCopyAiPrompt()}>Copy prompt</button>
+        <section className="tracking-ai-stack" aria-label="AI helpers">
+          <div className="ai-helper-list">
+            <button className="ai-helper-row" type="button" onClick={props.onOpenGeminiEstimate}>
+              <span className="ai-helper-icon ai-helper-icon--estimate" aria-hidden="true" />
+              <span className="ai-helper-text">
+                <strong>Estimate with Gemini</strong>
+                <small>Describe a meal or snap a photo of it</small>
+              </span>
+              <span className="ai-helper-chevron" aria-hidden="true" />
+            </button>
+            <button className="ai-helper-row" type="button" onClick={props.onOpenMenuPick}>
+              <span className="ai-helper-icon ai-helper-icon--menu" aria-hidden="true" />
+              <span className="ai-helper-text">
+                <strong>Help me pick from a menu</strong>
+                <small>Snap the menu, get a pick that fits today</small>
+              </span>
+              <span className="ai-helper-chevron" aria-hidden="true" />
+            </button>
           </div>
-          <button className="log-btn gemini-estimate-btn" type="button" onClick={props.onOpenGeminiEstimate}>Estimate with Gemini</button>
-        </div>
+          <div className="ai-helper-manual">
+            <span className="ai-helper-manual-label">Using another AI chatbot?</span>
+            <div className="ai-helper-manual-actions">
+              <button className="secondary" type="button" onClick={() => props.onCopyAiPrompt()}>Copy prompt</button>
+              <button className="secondary" type="button" onClick={() => props.onPasteAiQuickLog()}>Paste AI estimate</button>
+            </div>
+          </div>
+          <p className="tracking-ai-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p>
+        </section>
       )}
       <section className="card">
         <div className="card-head">
@@ -2029,6 +2155,328 @@ function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onC
   );
 }
 
+function MenuPickModal({ open, state, date, apiKey, onClose, onLog, onBackgroundNotice }: {
+  open: boolean;
+  state: AppState;
+  date: string;
+  apiKey: string;
+  onClose: () => void;
+  onLog: (item: MenuPickItem, meal: Meal) => void;
+  onBackgroundNotice: (message: string) => void;
+}) {
+  // Unlike the estimate sheet, nothing resets on close: the sheet can be closed
+  // while Gemini reads the menu, and the suggestion should still be here after.
+  const [meal, setMeal] = useState<Meal>(() => defaultMealForCurrentTime());
+  const [mealPicked, setMealPicked] = useState(false);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [addingPhotos, setAddingPhotos] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [session, setSession] = useState<MenuPickSession | null>(null);
+  const [showResult, setShowResult] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const openRef = useRef(open);
+  openRef.current = open;
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const context = useMemo(() => buildMenuPickContext(state, date), [state, date]);
+  const budget = mealBudget(context, meal);
+  const activeSession = isMenuPickFresh(session, date) ? session : null;
+  const unit = energyUnitValue(state.settings.energyUnit);
+  const proteinLeft = Math.max(0, context.proteinTarget - context.eaten.protein);
+  const rangeText = budget.low === budget.high
+    ? energyText(state, budget.high)
+    : `${fmt(energyValueForUnit(budget.low, unit))}–${energyText(state, budget.high)}`;
+
+  // Bring back a recent suggestion if the app was closed while ordering.
+  useEffect(() => {
+    let cancelled = false;
+    loadLastMenuPick(date)
+      .then(saved => {
+        if (cancelled || !saved) return;
+        setSession(current => current || saved);
+        setShowResult(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [date]);
+
+  useEffect(() => {
+    if (!open) return;
+    setError('');
+    // A fresh visit with nothing in progress follows the clock.
+    if (!loading && !photos.length && !activeSession) {
+      setMeal(defaultMealForCurrentTime());
+      setMealPicked(false);
+    }
+  }, [open]);
+
+  const addPhotos = async (files: FileList | null) => {
+    const list = Array.from(files || []);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+    const room = MAX_MENU_PHOTOS - photos.length;
+    if (!list.length || room <= 0) return;
+    const accepted = list.slice(0, room);
+    setError('');
+    setNotice(list.length > accepted.length ? `Dawni sends up to ${MAX_MENU_PHOTOS} photos, so only the first ${accepted.length} ${accepted.length === 1 ? 'was' : 'were'} added.` : '');
+    setAddingPhotos(true);
+    const added: string[] = [];
+    let failed = 0;
+    // One at a time: decoding several full-size phone photos at once can run a phone out of memory.
+    for (const file of accepted) {
+      try {
+        const photo = await compressImage(file, MENU_PHOTO_OPTIONS);
+        if (photo) added.push(photo);
+      } catch {
+        failed += 1;
+      }
+    }
+    setPhotos(current => [...current, ...added].slice(0, MAX_MENU_PHOTOS));
+    if (failed) setError(failed === 1 ? 'One photo couldn’t be read. Try taking it again.' : `${failed} photos couldn’t be read. Try taking them again.`);
+    setAddingPhotos(false);
+  };
+
+  const submit = async () => {
+    if (!photos.length) {
+      setError('Add at least one photo of the menu.');
+      return;
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const requestMeal = meal;
+    const requestContext = context;
+    const requestBudget = budget;
+    setLoading(true);
+    setError('');
+    setNotice('');
+    const finishedClosed = (message: string) => {
+      if (!openRef.current) onBackgroundNotice(message);
+    };
+    try {
+      const raw = await requestMenuPick({
+        apiKey,
+        userText: buildMenuPickRequest({ context: requestContext, meal: requestMeal, budget: requestBudget, note, photoCount: photos.length }),
+        imageDataUrls: photos,
+        signal: controller.signal
+      });
+      const result = parseMenuPick(raw);
+      if (!result) {
+        setError('Gemini replied in a format Dawni couldn’t read. Try again.');
+        finishedClosed('Your menu pick couldn’t finish. Open Help me pick from a menu to see why.');
+        return;
+      }
+      if (!result.menuReadable || !result.pick) {
+        setNotice(result.note || 'Gemini couldn’t read a menu in these photos. Try a closer, well-lit photo of the menu text.');
+        finishedClosed('Gemini couldn’t read that menu. Open Help me pick from a menu for tips.');
+        return;
+      }
+      const next: MenuPickSession = {
+        version: 1,
+        date: requestContext.date,
+        createdAt: Date.now(),
+        meal: requestMeal,
+        remainingAtRequest: requestBudget.remaining,
+        proteinLeftAtRequest: Math.max(0, requestContext.proteinTarget - requestContext.eaten.protein),
+        result
+      };
+      setSession(next);
+      setShowResult(true);
+      void saveLastMenuPick(next);
+      finishedClosed('Your menu pick is ready. Tap Help me pick from a menu to see it.');
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setError(err instanceof Error ? err.message : 'Gemini could not suggest anything from this menu.');
+      finishedClosed('Your menu pick couldn’t finish. Open Help me pick from a menu to see why.');
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      setLoading(false);
+    }
+  };
+
+  const startOver = () => {
+    abortRef.current?.abort();
+    setPhotos([]);
+    setNote('');
+    setError('');
+    setNotice('');
+    setSession(null);
+    setShowResult(false);
+    setMeal(defaultMealForCurrentTime());
+    setMealPicked(false);
+    void saveLastMenuPick(null);
+  };
+
+  if (showResult && activeSession && !loading) {
+    const { result } = activeSession;
+    const pick = result.pick as MenuPickItem;
+    const leftAfter = activeSession.remainingAtRequest - pick.calories;
+    const proteinAfter = Math.max(0, activeSession.proteinLeftAtRequest - pick.protein);
+    const fitText = activeSession.remainingAtRequest <= 0
+      ? 'You’d already reached today’s target before this meal. The week can still balance.'
+      : leftAfter >= 0
+        ? `Leaves about ${energyText(state, leftAfter)} and ${fmt(proteinAfter)}g of protein to go for the rest of today.`
+        : `About ${energyText(state, -leftAfter)} over today’s target. The week can still balance.`;
+    const madeAt = new Date(activeSession.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return (
+      <Modal open={open} title="Pick from a menu" onClose={onClose} bottomSheet>
+        <div className="menu-pick-result">
+          <div className="menu-pick-result-head">
+            <div className="section">Best pick for {activeSession.meal.toLowerCase()}</div>
+            <span className="hint">Suggested at {madeAt}</span>
+          </div>
+          <article className="menu-pick-card">
+            <h3>{pick.name}</h3>
+            <div className="meta-chips"><span className="meta-chip source-chip">Estimated</span></div>
+            <div className="database-preview-nutrition menu-pick-nutrition">
+              <div><span>Calories</span><strong>{energyText(state, pick.calories)}</strong></div>
+              <div><span>Protein</span><strong>{fmt(pick.protein)}g</strong></div>
+              <div><span>Carbs</span><strong>{fmt(pick.carbs)}g</strong></div>
+              <div><span>Fat</span><strong>{fmt(pick.fat)}g</strong></div>
+            </div>
+            <p className="menu-pick-fit">{fitText}</p>
+            {pick.reason && <p className="menu-pick-reason">{pick.reason}</p>}
+            {pick.tip && <p className="menu-pick-tip"><strong>Tip:</strong> {pick.tip}</p>}
+            <button className="primary menu-pick-log" type="button" onClick={() => onLog(pick, activeSession.meal)}>Log this</button>
+          </article>
+          {result.alternatives.length > 0 && (
+            <div className="menu-pick-section">
+              <div className="section">Also good</div>
+              <div className="menu-pick-alt-list">
+                {result.alternatives.map(item => (
+                  <div key={item.name} className="menu-pick-alt">
+                    <div className="menu-pick-alt-main">
+                      <strong>{item.name}</strong>
+                      <div className="meta-chips">
+                        <span className="meta-chip accent">{energyText(state, item.calories)}</span>
+                        <MacroChips fat={item.fat} carbs={item.carbs} protein={item.protein} />
+                      </div>
+                      {item.reason && <small>{item.reason}</small>}
+                    </div>
+                    <button className="secondary menu-pick-alt-log" type="button" onClick={() => onLog(item, activeSession.meal)}>Log</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {result.summary && (
+            <div className="help-callout menu-pick-summary">
+              <strong>Why this pick</strong>
+              <p>{result.summary}</p>
+            </div>
+          )}
+          {result.note && <p className="hint menu-pick-caveat">{result.note}</p>}
+          <p className="hint menu-pick-disclaimer">Estimated from a menu photo. Restaurant portions vary, so check the numbers when you log.</p>
+        </div>
+        <div className="actions vertical">
+          {photos.length > 0 && <button className="secondary" type="button" onClick={() => setShowResult(false)}>Change meal, note or photos</button>}
+          <button className="secondary" type="button" onClick={startOver}>Start a new menu</button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal open={open} title="Pick from a menu" onClose={onClose} bottomSheet>
+      <div className="menu-pick-modal">
+        <p className="hint menu-pick-intro">Take a photo of the menu you’re ordering from, either the whole page or just the part you’re choosing from. Gemini suggests a dish that fits the rest of your day.</p>
+
+        <div className="menu-pick-section">
+          <div className="section">Choosing for</div>
+          <div className="meal-chip-row" role="group" aria-label="Meal">
+            {MENU_PICK_MEALS.map(item => (
+              <button key={item} type="button" className={`meal-chip ${meal === item ? 'active' : ''}`} disabled={loading} aria-pressed={meal === item} onClick={() => { setMeal(item); setMealPicked(true); }}>{item}</button>
+            ))}
+          </div>
+          {!mealPicked && <p className="hint menu-pick-meal-hint">Picked from the time ({new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}). Tap to change.</p>}
+        </div>
+
+        <div className="menu-pick-today" aria-label="Today so far">
+          <div className="menu-pick-stat">
+            <span>{budget.remaining >= 0 ? 'Calories left today' : 'Over today’s target'}</span>
+            <strong>{energyText(state, Math.abs(budget.remaining))}</strong>
+            <small>{energyText(state, context.eaten.calories)} of {energyText(state, context.calorieTarget)} eaten</small>
+          </div>
+          <div className="menu-pick-stat">
+            <span>Protein to go</span>
+            <strong>{fmt(proteinLeft)}g</strong>
+            <small>{fmt(context.eaten.protein)}g of {fmt(context.proteinTarget)}g eaten</small>
+          </div>
+          <p className="menu-pick-budget">
+            {budget.remaining > 0
+              ? <>Aim for about <strong>{rangeText}</strong> for {meal.toLowerCase()}. That {budgetReason(meal)}.</>
+              : <>You’ve reached today’s target, so Gemini will look for the lightest option that still satisfies. The week can still balance.</>}
+          </p>
+        </div>
+
+        <div className="menu-pick-section">
+          <div className="section">Menu photos</div>
+          <input ref={photoInputRef} hidden type="file" accept="image/*" multiple onChange={event => addPhotos(event.target.files)} />
+          <div className="menu-photo-grid">
+            {photos.map((src, index) => (
+              <div key={`${index}-${src.length}`} className="menu-photo">
+                <img src={src} alt={`Menu photo ${index + 1}`} />
+                {!loading && (
+                  <button type="button" className="menu-photo-remove" aria-label={`Remove menu photo ${index + 1}`} onClick={() => setPhotos(current => current.filter((_, i) => i !== index))}>
+                    <span aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+            ))}
+            {photos.length < MAX_MENU_PHOTOS && (
+              <button type="button" className="menu-photo-add" disabled={loading || addingPhotos} onClick={() => photoInputRef.current?.click()}>
+                <span className="empty-photo-icon" aria-hidden="true" />
+                <span>{addingPhotos ? 'Adding…' : photos.length ? 'Add page' : 'Add menu photo'}</span>
+              </button>
+            )}
+          </div>
+          <p className="hint menu-photo-tip">Up to {MAX_MENU_PHOTOS} photos. Hold your phone flat over the menu in good light so the small print is readable, and include dish descriptions and sides if you can.</p>
+        </div>
+
+        <Field label="Anything Gemini should know? (optional)" full>
+          <textarea className="menu-pick-note" disabled={loading} value={note} onChange={event => setNote(event.target.value)} placeholder="e.g. high protein, no seafood, I’m sharing the chips" />
+        </Field>
+
+        <details className="extra-info menu-pick-how">
+          <summary>What gets sent to Gemini</summary>
+          <div className="extra-info-body">
+            <ul className="menu-pick-how-list">
+              <li>Your menu photos and note.</li>
+              <li>Today’s calories and macros so far, your targets and goal mode, and what you’ve logged today.</li>
+              <li>The meal you’re choosing for and the time.</li>
+            </ul>
+            <p className="hint">It goes to Google using your own Gemini key. Menu photos aren’t saved to your journal, and nothing is logged until you tap Log this.</p>
+          </div>
+        </details>
+
+        {notice && <div className="help-callout menu-pick-notice">{notice}</div>}
+        {error && <p className="ai-quick-log-error">{error}</p>}
+      </div>
+      <div className="actions vertical">
+        {/* In the sticky bar so it's on screen however far the sheet is scrolled. */}
+        {loading && (
+          <div className="menu-pick-loading" role="status" aria-live="polite">
+            <span className="menu-pick-spinner" aria-hidden="true" />
+            <div>
+              <strong>Reading the menu…</strong>
+              <p className="hint">Usually 10–30 seconds. You can close this sheet and Dawni will let you know when it’s ready.</p>
+            </div>
+          </div>
+        )}
+        {loading
+          ? <button className="secondary" type="button" onClick={() => abortRef.current?.abort()}>Cancel</button>
+          : <button className="primary" type="button" disabled={!photos.length || addingPhotos} onClick={submit}>{activeSession ? 'Suggest again' : 'Suggest what to order'}</button>}
+        {!loading && (activeSession
+          ? <button className="secondary" type="button" onClick={() => setShowResult(true)}>Back to suggestion</button>
+          : <button className="secondary" type="button" onClick={onClose}>Close</button>)}
+      </div>
+    </Modal>
+  );
+}
+
 function AiQuickLogModal({ open, fallbackMeal, seedText, onClose, onParsed }: { open: boolean; fallbackMeal: Meal; seedText: string; onClose: () => void; onParsed: (entry: AiQuickLogEntry) => void }) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
@@ -2211,7 +2659,7 @@ function EntryModal({
           <label>
             <span>Calories & Macros</span>
             <span className="unit-toggle-chip" role="group" aria-label="Energy input unit">
-              <button type="button" className={draft.entryEnergyUnit === 'kcal' ? 'active' : ''} onClick={toggleEntryEnergyUnit}>kCal</button>
+              <button type="button" className={draft.entryEnergyUnit === 'kcal' ? 'active' : ''} onClick={toggleEntryEnergyUnit}>Cal</button>
               <button type="button" className={draft.entryEnergyUnit === 'kj' ? 'active' : ''} onClick={toggleEntryEnergyUnit}>kJ</button>
             </span>
           </label>
@@ -2421,7 +2869,10 @@ function JournalView({
   setLabelMode,
   shuffleSeed,
   onShuffle,
-  onPhoto
+  onPhoto,
+  mealGroups,
+  onOpenMealCard,
+  onOpenDay
 }: {
   state: AppState;
   journalMonth: Date;
@@ -2435,6 +2886,9 @@ function JournalView({
   shuffleSeed: number;
   onShuffle: () => void;
   onPhoto: (entry: Entry) => void;
+  mealGroups: MealGroup[];
+  onOpenMealCard: (group: MealGroup) => void;
+  onOpenDay: (date: string) => void;
 }) {
   const year = journalMonth.getFullYear();
   const month = journalMonth.getMonth();
@@ -2443,6 +2897,7 @@ function JournalView({
     const entries = dayEntries(state, journalDay);
     const photos = entries.filter(entry => entry.photo);
     const dayTotals = sum(entries);
+    const dayGroups = mealGroups.filter(group => group.date === journalDay);
     const setDay = (key: string) => {
       setJournalDay(key);
       setJournalMonth(new Date(`${key}T00:00:00`));
@@ -2524,6 +2979,29 @@ function JournalView({
               </button>
             );
           })}</div> : <div className="empty"><strong>Nothing logged yet.</strong><div>Log something when you&apos;re ready.</div></div>}
+        {dayGroups.length > 0 && (
+          <section className="journal-cards" aria-label="Meal cards">
+            <div className="section">Meal cards</div>
+            <p className="hint journal-cards-hint">Share a meal as a simple summary card.</p>
+            <div className="journal-card-list">
+              {dayGroups.map(group => (
+                <button key={group.id} className="journal-card-row" type="button" data-swipe-lock onClick={() => onOpenMealCard(group)}>
+                  <span className={`meal-card-thumb count-${Math.min(group.photos.length, 4)}`} aria-hidden="true">
+                    {group.photos.length ? group.photos.slice(0, 4).map((src, index) => <img key={`${group.id}-${index}`} src={src} alt="" />) : <span className="empty-photo-icon" />}
+                  </span>
+                  <span className="journal-card-row-body">
+                    <strong>{group.meal}</strong>
+                    <small>{group.items.length} item{group.items.length === 1 ? '' : 's'} · {energyText(state, group.totals.calories)}</small>
+                  </span>
+                  <span className="journal-card-row-action">Card</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+        <button className="secondary journal-open-track" type="button" onClick={() => onOpenDay(journalDay)}>
+          {entries.length ? 'Open this day in Track' : 'Log food for this day'}
+        </button>
         <div className="journal-day-summary-bar" data-swipe-lock aria-label="Journal day totals">
           <div className="journal-day-summary-main">
             <span>Total</span>
@@ -2537,7 +3015,8 @@ function JournalView({
     );
   }
   const first = new Date(year, month, 1);
-  const offset = first.getDay();
+  // Weeks start on Monday, matching the Week tab and the weekly bank.
+  const offset = (first.getDay() + 6) % 7;
   const days = Array.from({ length: 42 }, (_, i) => new Date(year, month, i - offset + 1));
   return (
     <div className="screen-swipe-zone view-transition" ref={settleRef}>
@@ -2548,7 +3027,7 @@ function JournalView({
       </header>
       <MonthNav value={journalMonth} onChange={setJournalMonth} />
       <div className="calendar journal-month-surface">
-        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
           <div key={`${d}${i}`} className="dow">
             {d}
           </div>
@@ -2601,75 +3080,6 @@ function getMealGroups(state: AppState): MealGroup[] {
     map.get(id)?.items.push(entry);
   });
   return [...map.values()].map(group => ({ ...group, items: group.items.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)), totals: sum(group.items), photos: group.items.filter(entry => entry.photo).map(entry => entry.photo as string) })).sort((a, b) => b.date.localeCompare(a.date) || MEALS.indexOf(a.meal) - MEALS.indexOf(b.meal));
-}
-
-function CardsView({
-  state,
-  groups,
-  selectedDate,
-  setSelectedDate,
-  onOpen,
-  onStartLog
-}: {
-  state: AppState;
-  groups: MealGroup[];
-  selectedDate: string;
-  setSelectedDate: (date: string) => void;
-  onOpen: (group: MealGroup) => void;
-  onStartLog: () => void;
-}) {
-  const datedGroups = groups.filter(group => group.date === selectedDate);
-  const settleRef = useSettleAnimation(selectedDate);
-  const prevCardsDateRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (prevCardsDateRef.current !== null && prevCardsDateRef.current !== selectedDate) {
-      requestAnimationFrame(() => {
-        try {
-          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-        } catch {
-          window.scrollTo(0, 0);
-        }
-      });
-    }
-    prevCardsDateRef.current = selectedDate;
-  }, [selectedDate]);
-
-  return (
-    <div className="screen-swipe-zone view-transition" ref={settleRef}>
-      <div className="sticky-screen-top">
-        <header className="page-header has-helper">
-          <div className="page-kicker">Reflect</div>
-          <h1 className="page-title">Cards</h1>
-          <p className="hint page-subtitle">Create simple meal snapshots.</p>
-        </header>
-        <DayNav value={selectedDate} onChange={setSelectedDate} />
-      </div>
-      <section className="card meal-card-intro"><p className="hint">Pick a logged meal group and open a simple screenshot-ready meal summary card.</p></section>
-      {datedGroups.length ? <div className="cards-list">{datedGroups.map(group => {
-        const names = group.items.map(item => item.name).join(', ');
-        const photo = group.photos[0];
-        const photoCount = Math.min(group.photos.length, 4);
-        return (
-          <article key={group.id} className="meal-card-row" data-swipe-lock>
-            <div className={`meal-card-thumb count-${photoCount || 0}`}>
-              {photo ? group.photos.slice(0, 4).map((src, index) => <img key={`${src}${index}`} src={src} alt="" />) : <span className="empty-photo-icon" aria-hidden="true" />}
-            </div>
-            <div className="meal-card-row-body">
-              <strong>{group.meal}</strong>
-              <small>{shortDate(group.date)}</small>
-              <div className="meta-chips meal-card-row-meta">
-                <span className="meta-chip neutral">{group.items.length} item{group.items.length === 1 ? '' : 's'}</span>
-                <span className="meta-chip accent">{energyText(state, group.totals.calories)}</span>
-                <MacroChips protein={group.totals.protein} show={['protein']} />
-              </div>
-              <p>{names}</p>
-            </div>
-            <button className="secondary show-card-btn" type="button" onClick={() => onOpen(group)}>Show card</button>
-          </article>
-        );
-      })}</div> : <div className="empty" data-swipe-lock><strong>No meal cards yet.</strong><div>Log a meal to make a simple share card.</div><button className="empty-action" type="button" onClick={onStartLog}>Log food</button></div>}
-    </div>
-  );
 }
 
 function MealCardModal({ state, group, open, onClose, onShare }: { state: AppState; group: MealGroup | null; open: boolean; onClose: () => void; onShare: () => void }) {
@@ -2728,9 +3138,9 @@ function MealCardModal({ state, group, open, onClose, onShare }: { state: AppSta
   );
 }
 
-async function shareMealCard(group: MealGroup, notify: (text: string) => void) {
+async function shareMealCard(group: MealGroup, energyUnit: EnergyUnit, notify: (text: string) => void) {
   try {
-    const canvas = await renderMealCardCanvas(group);
+    const canvas = await renderMealCardCanvas(group, energyUnit);
     const blob = await canvasToPngBlob(canvas);
     await sharePhotoBlob(blob, `simple-calories-ledger-${group.date}-${group.meal.toLowerCase()}.png`, 'Meal Summary', notify);
   } catch (err) {
@@ -2839,7 +3249,7 @@ function upperBudgetTone(value: number, budget: number): MetricTone {
   return value <= budget ? 'good' : 'warn';
 }
 
-function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void }) {
+function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp, onOpenDay }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void; onOpenDay: (date: string) => void }) {
   const prevBankingWeekRef = useRef<string | null>(null);
   useEffect(() => {
     if (prevBankingWeekRef.current !== null && prevBankingWeekRef.current !== bankingWeekStart) {
@@ -2886,7 +3296,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
         </header>
         <WeekRangeControl start={bankingWeekStart} setStart={setBankingWeekStart} />
       </div>
-      <RichBanking state={state} start={bankingWeekStart} onHelp={onBankHelp} />
+      <RichBanking state={state} start={bankingWeekStart} onHelp={onBankHelp} onOpenDay={onOpenDay} />
 
       <section className="card stats-card week-summary-card" aria-label="Week summary">
         <div className="card-head"><h2>Week summary</h2></div>
@@ -2933,7 +3343,7 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
         )}
       </section>
 
-      <RichAdherence state={state} start={bankingWeekStart} onHelp={onAdherenceHelp} />
+      <RichAdherence state={state} start={bankingWeekStart} onHelp={onAdherenceHelp} onOpenDay={onOpenDay} />
 
       <section className="card stats-card">
         <div className="card-head"><h2>Patterns</h2></div>
@@ -2994,7 +3404,7 @@ function WeekRangeControl({ start, setStart }: { start: string; setStart: (start
   );
 }
 
-function BankBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean; delta: number; status: CalorieDayStatus; goal: DailyGoalSnapshot }[] }) {
+function BankBars({ state, rows, onOpenDay }: { state: AppState; rows: { date: string; total: number; complete: boolean; delta: number; status: CalorieDayStatus; goal: DailyGoalSnapshot }[]; onOpenDay: (date: string) => void }) {
   const maxGoal = Math.max(...rows.map(row => row.goal.calories), 1);
   return (
     <div className="bank-chart">
@@ -3006,18 +3416,18 @@ function BankBars({ state, rows }: { state: AppState; rows: { date: string; tota
         const tone = delta >= 0 ? 'good-fill' : 'warn-fill';
         const deltaTone = row.complete ? budgetDeltaTone(delta) : '';
         return (
-          <div className="bank-col" key={row.date}>
-            <div className={`bank-delta ${deltaTone}`}>{row.complete ? signedEnergyValue(state, delta) : 'Open'}</div>
-            <div className="bank-track"><span className="bank-midline" />{row.complete ? <div className={`bank-fill ${tone} ${direction}`} style={{ height: barHeight }} /> : <div className="bank-open-mark" />}</div>
-            <div className="bank-day">{weekday}</div>
-          </div>
+          <button className="bank-col" key={row.date} type="button" onClick={() => onOpenDay(row.date)} aria-label={`${readable(row.date)}: ${row.complete ? signedEnergyText(state, delta) : 'open'}. Open in Track.`}>
+            <span className={`bank-delta ${deltaTone}`}>{row.complete ? signedEnergyValue(state, delta) : 'Open'}</span>
+            <span className="bank-track"><span className="bank-midline" />{row.complete ? <span className={`bank-fill ${tone} ${direction}`} style={{ height: barHeight }} /> : <span className="bank-open-mark" />}</span>
+            <span className="bank-day">{weekday}</span>
+          </button>
         );
       })}
     </div>
   );
 }
 
-function RichBanking({ state, start, onHelp }: { state: AppState; start: string; onHelp: () => void }) {
+function RichBanking({ state, start, onHelp, onOpenDay }: { state: AppState; start: string; onHelp: () => void; onOpenDay: (date: string) => void }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const rows = days.map(date => {
     const total = sum(dayEntries(state, date)).calories;
@@ -3057,14 +3467,14 @@ function RichBanking({ state, start, onHelp }: { state: AppState; start: string;
           <div className="stat"><span>Completed goal total</span><strong>{energyText(state, completedExpected)}</strong></div>
           <div className="stat"><span>Completed-day average</span><strong className={completedAverageTone}>{energyText(state, completedAverage)}/day</strong></div>
           <div className="stat"><span>Projected week</span><strong className={projectedTone}>{energyText(state, projected)}</strong></div>
-          <BankBars state={state} rows={rows} />
+          <BankBars state={state} rows={rows} onOpenDay={onOpenDay} />
         </>
       ) : <div className="empty">Complete a day in this week to calculate banking.</div>}
     </section>
   );
 }
 
-function RichAdherence({ state, start, onHelp }: { state: AppState; start: string; onHelp: () => void }) {
+function RichAdherence({ state, start, onHelp, onOpenDay }: { state: AppState; start: string; onHelp: () => void; onOpenDay: (date: string) => void }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const rows = days.map(date => {
     const total = sum(dayEntries(state, date)).calories;
@@ -3096,20 +3506,22 @@ function RichAdherence({ state, start, onHelp }: { state: AppState; start: strin
           const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
           const tone = dayToneLabel(row.status, row.complete);
           return (
-            <div key={row.date} className="consistency-day">
-              <div className="consistency-label">{weekday}</div>
-              <div className={`consistency-pill ${tone.className}`} aria-label={tone.label}>
+            <button key={row.date} className="consistency-day" type="button" onClick={() => onOpenDay(row.date)} aria-label={`${readable(row.date)}: ${tone.label}${row.complete ? `, ${energyText(state, row.total)}` : ''}. Open in Track.`}>
+              <span className="consistency-label">{weekday}</span>
+              <span className={`consistency-pill ${tone.className}`}>
                 <span className="dot" aria-hidden="true" />
                 <span className="pill-text">{tone.label}</span>
-              </div>
-              <div className="consistency-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '—'}</div>
-            </div>
+              </span>
+              <span className="consistency-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '—'}</span>
+            </button>
           );
         })}
       </div>
+      <p className="hint consistency-hint">Tap a day to open it in Track.</p>
     </section>
   );
 }
+
 /** Setup feedback for the Gemini card: model choice is dynamic, so show the pick. */
 function GeminiKeyStatus({ hasKey, check }: { hasKey: boolean; check: GeminiCheck }) {
   if (check.state === 'testing') return <p className="hint gemini-status">Checking the key with Google...</p>;
@@ -3129,12 +3541,14 @@ function GeminiKeyStatus({ hasKey, check }: { hasKey: boolean; check: GeminiChec
       </div>
     );
   }
-  if (!hasKey) return <p className="hint gemini-status">Not set up. Add a key to use Estimate with Gemini.</p>;
+  if (!hasKey) return <p className="hint gemini-status">Not set up. Add a key to use Estimate with Gemini and Help me pick from a menu.</p>;
   return <p className="hint gemini-status">Key saved. Tap Test key to confirm Gemini can reach it and see which model Dawni will use.</p>;
 }
 
 function SettingsView(props: {
   state: AppState;
+  focus: 'gemini' | null;
+  onFocusHandled: () => void;
   goalsEditing: boolean;
   goalDraft: Settings;
   setGoalDraft: (settings: Settings) => void;
@@ -3173,6 +3587,14 @@ function SettingsView(props: {
   useEffect(() => {
     if (!geminiEditing) setGeminiDraft(props.state.settings.geminiApiKey);
   }, [props.state.settings.geminiApiKey, geminiEditing]);
+
+  // Arriving from "Set up Gemini" opens the key field ready to paste into.
+  useEffect(() => {
+    if (props.focus !== 'gemini') return;
+    setGeminiDraft(props.state.settings.geminiApiKey);
+    setGeminiEditing(true);
+    props.onFocusHandled();
+  }, [props.focus]);
 
   // A changed key invalidates whatever the last check told us.
   useEffect(() => {
@@ -3218,10 +3640,9 @@ function SettingsView(props: {
         </label>
         <p className="hint">When enabled, saved or overrun calories from completed days are spread evenly across open days from today through Sunday.</p>
       </section>
-      <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || DEFAULT.settings.theme) === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>kCal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
-      <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes Dawni&apos;s local estimate list. Estimates stay editable and won&apos;t change your saved foods or logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
-      <section className="card custom-db-card"><div className="card-head"><h2>Custom food databases</h2><button className="help-btn" type="button" onClick={props.onCustomDatabaseHelp}>?</button></div><p className="hint">Import your own JSON estimate list. Enabled databases appear in food search and remain stored on this device.</p><div className="actions"><button className="primary" type="button" onClick={props.onImportCustomDatabase}>Import JSON</button></div>{props.state.customFoodDatabases.length ? <div className="custom-db-list">{props.state.customFoodDatabases.map(database => <div className="custom-db-row" key={database.id}><div className="custom-db-main"><strong>{database.name}</strong><span>{fmt(database.itemCount)} foods · Imported {new Date(database.importedAt).toLocaleDateString()} · {database.enabled ? 'Enabled' : 'Disabled'}</span></div><label className="toggle-line"><input type="checkbox" checked={database.enabled} onChange={event => props.onToggleCustomDatabase(database.id, event.target.checked)} /><span>{database.enabled ? 'On' : 'Off'}</span></label><button className="small-btn danger" type="button" onClick={() => props.onDeleteCustomDatabase(database.id)}>Delete</button></div>)}</div> : <div className="empty custom-db-empty">No custom databases imported yet.</div>}</section>
-      <section className="card gemini-settings-card">
+      <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || DEFAULT.settings.theme) === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>Cal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
+      <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}.` : 'No backup exported yet.'} Dawni keeps your data on this device; export a backup to protect your logs and journal photos. Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos, {counts.customFoodDatabases || 0} custom databases.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
+      <section className="card gemini-settings-card" id="geminiSection">
         <div className="card-head">
           <h2>Gemini</h2>
           <div className="card-head-trailing">
@@ -3229,7 +3650,7 @@ function SettingsView(props: {
             <button className="help-btn" type="button" onClick={props.onGeminiApiKeyHelp}>?</button>
           </div>
         </div>
-        <p className="hint">Use your own Gemini API key for in-app food estimates. The key stays on this device and is included in backups.</p>
+        <p className="hint">Use your own Gemini API key for Estimate with Gemini and Help me pick from a menu. The key stays on this device and is included in backups.</p>
         <Field label="Gemini API key" full>
           <input
             type="password"
@@ -3250,8 +3671,9 @@ function SettingsView(props: {
           </button>
         </div>
       </section>
-      <section className="card ai-prompt-card"><div className="card-head"><h2>AI estimate helper</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Use this prompt with your AI chatbot, then review the estimate before saving it. Dawni treats AI output as editable, not guaranteed.</p><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div><p className="hint ai-prompt-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p></section>
-      <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}.` : 'No backup exported yet.'} Dawni keeps your data on this device; export a backup to protect your logs and journal photos. Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos, {counts.customFoodDatabases || 0} custom databases.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>
+      <section className="card ai-prompt-card"><div className="card-head"><h2>AI estimate helper</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Use this prompt with your AI chatbot, then review the estimate before saving it. Dawni treats AI output as editable, not guaranteed.</p><details className="extra-info ai-prompt-details"><summary>Show prompt</summary><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /></details><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div><p className="hint ai-prompt-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p></section>
+      <section className="card"><h2>Food estimates</h2><p className="hint">Refreshes Dawni&apos;s local estimate list. Estimates stay editable and won&apos;t change your saved foods or logs.</p><div className="actions"><button className="secondary" type="button" disabled={foodDatabaseUpdating} onClick={() => { setFoodDatabaseUpdating(true); props.onRefreshFoodDatabase().finally(() => setFoodDatabaseUpdating(false)); }}>{foodDatabaseUpdating ? 'Updating estimates...' : 'Update local food estimates'}</button></div></section>
+      <section className="card custom-db-card"><div className="card-head"><h2>Custom food databases</h2><button className="help-btn" type="button" onClick={props.onCustomDatabaseHelp}>?</button></div><p className="hint">Import your own JSON estimate list. Enabled databases appear in food search and remain stored on this device.</p><div className="actions"><button className="primary" type="button" onClick={props.onImportCustomDatabase}>Import JSON</button></div>{props.state.customFoodDatabases.length ? <div className="custom-db-list">{props.state.customFoodDatabases.map(database => <div className="custom-db-row" key={database.id}><div className="custom-db-main"><strong>{database.name}</strong><span>{fmt(database.itemCount)} foods · Imported {new Date(database.importedAt).toLocaleDateString()} · {database.enabled ? 'Enabled' : 'Disabled'}</span></div><label className="toggle-line"><input type="checkbox" checked={database.enabled} onChange={event => props.onToggleCustomDatabase(database.id, event.target.checked)} /><span>{database.enabled ? 'On' : 'Off'}</span></label><button className="small-btn danger" type="button" onClick={() => props.onDeleteCustomDatabase(database.id)}>Delete</button></div>)}</div> : <div className="empty custom-db-empty">No custom databases imported yet.</div>}</section>
       <section className="card"><h2>App</h2><p className="hint"><strong>Dawni</strong><br /><span className="project-note">Weekly Calorie Tracker</span><br />Version {APP_VERSION}</p><div className="actions"><button className="secondary" type="button" onClick={props.onCheckUpdates}>Check for updates</button><button className="secondary danger" type="button" onClick={props.onClear}>Clear local data</button></div></section>
     </>
   );

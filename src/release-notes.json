@@ -1,7 +1,7 @@
 [
-  "Tab bar is now frosted, so content dissolves under it instead of showing through — the hard line across the bottom of the screen is gone.",
-  "Scrolling stops cleanly at the top and bottom instead of bouncing the whole page.",
-  "Home-screen app: content no longer scrolls up behind the clock and battery.",
-  "Long-pressing a tab, a food row or a chip no longer pops up iOS text selection.",
-  "Each tab remembers where you were scrolled, and changing day no longer rebuilds the whole screen."
+  "New: Help me pick from a menu. When you're out, snap the menu and Gemini suggests a dish that fits the rest of your day, with an estimate you can log in one tap.",
+  "Simpler tabs: meal cards now live in each Journal day, so there are five tabs. Tap the week strip on Track to open the full week, or tap any day in Week to jump to it.",
+  "Energy now reads Cal instead of kCal, and kJ mode shows kJ everywhere, including Track's main number and shared meal cards.",
+  "Fixed the week skipping Sunday when daylight saving starts, and the Journal calendar now starts on Monday.",
+  "Fixed the backup reminder vanishing before you could tap it. AI helpers on Track and the order of Settings are tidier too."
 ]
