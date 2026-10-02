@@ -341,6 +341,9 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
   onCloseRef.current = onClose;
   const renderedRef = useRef(rendered);
   renderedRef.current = rendered;
+  const closeDisabledRef = useRef(closeDisabled);
+  closeDisabledRef.current = closeDisabled;
+  const panelRef = useRef<HTMLElement>(null);
   const CLOSE_MS = bottomSheet ? 320 : 180;
 
   // Body scroll lock is shared across modal instances so handoffs cannot unlock the page early.
@@ -366,6 +369,119 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       onCloseRef.current();
     }, CLOSE_MS);
   }, [CLOSE_MS, closeDisabled]);
+
+  // Swipe down to close, like an iOS sheet: from the handle/title bar, or from the
+  // content once it is scrolled to the top. Native listeners, because React's
+  // touch handlers are passive and could not stop the page scrolling.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!rendered || !panel) return;
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+    let eligible = false;
+    let decided = false;
+    let dragging = false;
+    let offset = 0;
+    const scrim = () => panel.parentElement?.querySelector<HTMLElement>(':scope > .modal-scrim') || null;
+    const isTopmost = () => {
+      const backdrops = document.querySelectorAll('.modal-backdrop');
+      return backdrops[backdrops.length - 1] === panel.parentElement;
+    };
+    const reset = () => {
+      dragging = false;
+      decided = false;
+      offset = 0;
+    };
+    const onStart = (event: TouchEvent) => {
+      reset();
+      const target = event.target instanceof Element ? event.target : null;
+      eligible = !!target
+        && event.touches.length === 1
+        && !closeDisabledRef.current
+        && !closingRef.current
+        && isTopmost()
+        // Typing, sliders and swipe-to-confirm keep their own gestures.
+        && !target.closest('input, textarea, select, [contenteditable="true"], .swipe-confirm')
+        && (!!target.closest('.modal-head') || !modalCanScroll(target, 'up'));
+      startX = event.touches[0]?.clientX ?? 0;
+      startY = event.touches[0]?.clientY ?? 0;
+      startTime = performance.now();
+    };
+    const onMove = (event: TouchEvent) => {
+      if (!eligible) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      const dy = touch.clientY - startY;
+      const dx = touch.clientX - startX;
+      if (!decided) {
+        if (Math.abs(dy) < 8 && Math.abs(dx) < 8) return;
+        decided = true;
+        dragging = dy > 0 && Math.abs(dy) > Math.abs(dx);
+        if (!dragging) return;
+        panel.style.transition = 'none';
+      }
+      if (!dragging) return;
+      event.preventDefault();
+      offset = Math.max(0, dy);
+      panel.style.transform = `translate3d(0, ${offset}px, 0)`;
+      const fade = scrim();
+      if (fade) fade.style.opacity = String(Math.max(0.25, 1 - offset / Math.max(panel.offsetHeight, 1)));
+    };
+    const onEnd = () => {
+      if (!dragging) return reset();
+      const elapsed = Math.max(1, performance.now() - startTime);
+      const fast = offset / elapsed > 0.6 && offset > 40;
+      const far = offset > Math.min(140, panel.offsetHeight * 0.25);
+      const fade = scrim();
+      if (fast || far) {
+        panel.style.transition = `transform ${Math.min(CLOSE_MS, 220)}ms cubic-bezier(.2, .8, .2, 1)`;
+        panel.style.transform = 'translate3d(0, 110%, 0)';
+        if (fade) {
+          fade.style.transition = `opacity ${Math.min(CLOSE_MS, 220)}ms ease`;
+          fade.style.opacity = '0';
+        }
+        requestClose();
+      } else {
+        panel.style.transition = 'transform 220ms cubic-bezier(.2, .8, .2, 1)';
+        panel.style.transform = '';
+        if (fade) {
+          fade.style.transition = 'opacity 220ms ease';
+          fade.style.opacity = '';
+        }
+        window.setTimeout(() => {
+          if (closingRef.current) return;
+          panel.style.transition = '';
+          if (fade) fade.style.transition = '';
+        }, 240);
+      }
+      reset();
+    };
+    panel.addEventListener('touchstart', onStart, { passive: true });
+    panel.addEventListener('touchmove', onMove, { passive: false });
+    panel.addEventListener('touchend', onEnd, { passive: true });
+    panel.addEventListener('touchcancel', onEnd, { passive: true });
+    return () => {
+      panel.removeEventListener('touchstart', onStart);
+      panel.removeEventListener('touchmove', onMove);
+      panel.removeEventListener('touchend', onEnd);
+      panel.removeEventListener('touchcancel', onEnd);
+    };
+  }, [rendered, requestClose, CLOSE_MS]);
+
+  // Esc closes the topmost modal on desktop.
+  useEffect(() => {
+    if (!rendered || !open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const backdrops = document.querySelectorAll('.modal-backdrop');
+      if (backdrops[backdrops.length - 1] !== panelRef.current?.parentElement) return;
+      event.preventDefault();
+      requestClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [rendered, open, requestClose]);
 
   useEffect(() => {
     if (open) {
@@ -405,7 +521,7 @@ function Modal({ open, title, children, onClose, wide = false, className = '', b
       onMouseDown={bottomSheet ? undefined : backdropMouse}
     >
       {bottomSheet && <div className="modal-scrim" data-swipe-lock onMouseDown={backdropMouse} />}
-      <section className={panelClass} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={panelRef} className={panelClass} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="close" type="button" onClick={() => requestClose()} aria-label="Close" disabled={closeDisabled}><span aria-hidden="true" /></button>

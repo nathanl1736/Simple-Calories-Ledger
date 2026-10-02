@@ -1,7 +1,7 @@
 [
-  "Fixed the tab bar jumping and the screen flickering when a popup opens or closes in the home-screen app. The page behind a popup now stays exactly where it was.",
-  "The header at the top of Track, Week and Cards no longer disappears while a popup is open.",
+  "Swipe down to close any popup: drag the handle or title bar, or the content once it's scrolled to the top. A short drag springs back.",
+  "Esc closes the top popup on a computer. The close (×) button and tapping the dark area still work.",
+  "Fixed the tab bar jumping and the screen flickering when a popup opens or closes in the home-screen app.",
   "Sharper AI estimates: Gemini now reads Australian nutrition labels properly, including kJ to Cal and per-100 g columns. Label readings are tagged From label.",
-  "Estimate with Gemini takes up to 3 photos, sent at higher quality, e.g. the front of the pack plus the nutrition panel.",
-  "Every AI result shows what Gemini assumed and how confident it is, and warns you if the calories and macros don't add up."
+  "Estimate with Gemini takes up to 3 photos, sent at higher quality, e.g. the front of the pack plus the nutrition panel."
 ]
