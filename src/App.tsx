@@ -4,7 +4,7 @@ import { createPortal, flushSync } from 'react-dom';
 import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
-import { compressImage, downloadBlob } from './image';
+import { compressImage, downloadBlob, SHARP_PHOTO_OPTIONS } from './image';
 import { backupCounts, exportBackup, parseBackup } from './backup';
 import { applyAppUpdate, checkForAppUpdate, clearUpdateReloadMarkers, dismissUpdatePrompt, registerServiceWorker, watchForUpdatesOnResume, type UpdateInfo } from './pwa';
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
@@ -12,6 +12,18 @@ import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateData
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
 import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
+import {
+  buildEstimateRequest,
+  energyFromMacros,
+  estimateNotes,
+  estimateSourceLabel,
+  estimateSourceValue,
+  macrosDisagree,
+  MAX_ESTIMATE_PHOTOS,
+  parseGeminiEstimate,
+  type EstimateConfidence,
+  type GeminiEstimate
+} from './aiEstimate';
 import { probeGeminiKey, requestMealEstimate, requestMenuPick, type GeminiError } from './geminiEstimate';
 import {
   budgetReason,
@@ -114,7 +126,12 @@ type EntryDraft = {
   photo: string | null;
   entryEnergyUnit: EnergyUnit;
   estimateSource: EntryEstimateSource | null;
+  /** What Gemini guessed and how sure it was; shown while reviewing, saved into notes. */
+  estimateDetails: { confidence: EstimateConfidence; assumptions: string[] } | null;
 };
+
+/** The last Gemini estimate request, kept so Refine can send a correction with the same photos. */
+type EstimateSession = { description: string; photos: string[]; meal: Meal; reply: string };
 
 const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kcal'): EntryDraft => ({
   editingId: '',
@@ -138,7 +155,8 @@ const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kc
   favourite: false,
   photo: null,
   entryEnergyUnit,
-  estimateSource: null
+  estimateSource: null,
+  estimateDetails: null
 });
 
 function defaultMealForCurrentTime(): Meal {
@@ -618,6 +636,7 @@ export function App() {
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
   const [aiQuickLogMeal, setAiQuickLogMeal] = useState<Meal>('Snack');
   const [aiQuickLogSeedText, setAiQuickLogSeedText] = useState('');
+  const [estimateSession, setEstimateSession] = useState<EstimateSession | null>(null);
   const [reuseSearchCollapseNonce, setReuseSearchCollapseNonce] = useState(0);
   const tabScrollRef = useRef<Partial<Record<Tab, number>>>({});
   const nextTabScrollRef = useRef(0);
@@ -797,7 +816,8 @@ export function App() {
       notes: entry.notes || '',
       favourite: !!(entry.sourceFoodId && state.foods.find(food => food.id === entry.sourceFoodId)?.favourite),
       photo: entry.photo || null,
-      estimateSource: entry.estimateSource === 'ai' ? 'ai' : null
+      estimateSource: estimateSourceValue(entry.estimateSource),
+      estimateDetails: null
     });
     setEntryOpenMode('edit');
     setModal('entry');
@@ -952,7 +972,8 @@ export function App() {
         fat: draftNumberText(entry.fat),
         portion,
         notes: entry.notes,
-        estimateSource: 'ai'
+        estimateSource: 'ai',
+        estimateDetails: null
       });
       setEntryOpenMode('prefill');
       setModal('entry');
@@ -1003,31 +1024,79 @@ export function App() {
         protein: draftNumberText(item.protein),
         carbs: draftNumberText(item.carbs),
         fat: draftNumberText(item.fat),
-        notes: 'Estimated from a menu photo.',
-        estimateSource: 'ai'
+        notes: estimateNotes(item.fromMenu ? 'Energy printed on the menu.' : 'Estimated from a menu photo.', item.assumptions, item.confidence),
+        estimateSource: item.fromMenu ? 'menu' : 'ai',
+        estimateDetails: { confidence: item.confidence, assumptions: item.assumptions }
       });
       setEntryOpenMode('prefill');
       setModal('entry');
     });
   };
 
-  const estimateWithGemini = async (userText: string, imageDataUrl?: string | null) => {
-    notify('Estimating… You can close this and navigate again once the result is back.', 6000);
+  const prefillGeminiEstimate = (estimate: GeminiEstimate) => {
+    setToast(null); // The "Estimating…" message would otherwise cover the result.
+    const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
+    const fromLabel = estimate.source === 'label';
+    flushSync(() => {
+      setEntryDraft({
+        ...blankEntryDraft(estimate.meal, entryEnergyUnit),
+        name: estimate.name,
+        unitMode: estimate.unitMode,
+        servingLabel: estimate.servingLabel,
+        calories: draftEnergyText(estimate.base.calories, entryEnergyUnit),
+        protein: draftNumberText(Math.round(estimate.base.protein * 10) / 10),
+        carbs: draftNumberText(Math.round(estimate.base.carbs * 10) / 10),
+        fat: draftNumberText(Math.round(estimate.base.fat * 10) / 10),
+        portion: String(estimate.portion),
+        notes: estimateNotes(fromLabel ? 'Read from the nutrition label.' : estimate.notes, estimate.assumptions, estimate.confidence),
+        estimateSource: fromLabel ? 'label' : 'ai',
+        estimateDetails: { confidence: estimate.confidence, assumptions: estimate.assumptions }
+      });
+      setEntryOpenMode('prefill');
+      setModal('entry');
+    });
+  };
+
+  /** Asks Gemini; with `correction`, refines the last estimate using the same photos. */
+  const runGeminiEstimate = async (description: string, photos: string[], correction?: string) => {
+    const meal = correction && estimateSession ? estimateSession.meal : defaultMealForCurrentTime();
     const raw = await requestMealEstimate({
       apiKey: state.settings.geminiApiKey,
-      userText,
-      imageDataUrl
+      userText: buildEstimateRequest({
+        description,
+        photoCount: photos.length,
+        meal,
+        preferences: state.settings.aiPreferences,
+        previous: correction ? estimateSession?.reply : undefined,
+        correction
+      }),
+      imageDataUrls: photos,
+      accept: text => !!parseGeminiEstimate(text, meal)
     });
-    const parsed = parseAiQuickLog(raw, defaultMealForCurrentTime());
+    return { raw, meal, parsed: parseGeminiEstimate(raw, meal) };
+  };
+
+  const estimateWithGemini = async (description: string, photos: string[]) => {
+    notify('Estimating… You can close this and navigate again once the result is back.', 6000);
+    const { raw, meal, parsed } = await runGeminiEstimate(description, photos);
     if (parsed) {
+      setEstimateSession({ description, photos, meal, reply: raw });
       setAiQuickLogSeedText('');
-      prefillAiQuickLog(parsed);
+      prefillGeminiEstimate(parsed);
       return;
     }
     notify('Gemini returned text Dawni could not read. You can fix it below.');
-    setAiQuickLogMeal(defaultMealForCurrentTime());
+    setAiQuickLogMeal(meal);
     setAiQuickLogSeedText(raw);
     setModal('aiQuickLog');
+  };
+
+  const refineGeminiEstimate = async (correction: string) => {
+    if (!estimateSession) throw new Error('Start a new estimate to refine it.');
+    const { raw, parsed } = await runGeminiEstimate(estimateSession.description, estimateSession.photos, correction);
+    if (!parsed) throw new Error('Gemini replied in a format Dawni couldn’t read. Try again.');
+    setEstimateSession({ ...estimateSession, reply: raw, description: `${estimateSession.description}\n(Correction: ${correction.trim()})`.trim() });
+    prefillGeminiEstimate(parsed);
   };
 
   const saveDatabaseFood = async (item: FoodDatabaseItem) => {
@@ -1056,7 +1125,7 @@ export function App() {
   const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 5);
   const incomingVersion = availableUpdate?.version || '';
   const copyAiPrompt = () => navigator.clipboard
-    ? navigator.clipboard.writeText(AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
+    ? navigator.clipboard.writeText(state.settings.aiPreferences.trim() ? `${AI_QUICK_LOG_PROMPT}\n\nAbout me: ${state.settings.aiPreferences.trim()}` : AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
     : (notify('Clipboard is not available'), Promise.resolve());
   const importCustomFoodDatabase = async (file: File) => {
     try {
@@ -1251,6 +1320,9 @@ export function App() {
             draft.settings.geminiApiKey = key.trim();
           }).then(() => notify(key.trim() ? 'Gemini API key saved' : 'Gemini API key cleared'))}
           onGeminiApiKeyHelp={() => setModal('geminiApiKeyHelp')}
+          onAiPreferences={text => updateState(draft => {
+            draft.settings.aiPreferences = text.trim().slice(0, 500);
+          }).then(() => notify(text.trim() ? 'Saved. Gemini will use this.' : 'Cleared'))}
           onCopyAiPrompt={copyAiPrompt}
           onAiPromptHelp={() => setModal('aiQuickLogHelp')}
           onExport={() => exportBackup(state).then(next => persist(next)).then(() => notify('Backup exported')).catch(err => err?.name !== 'AbortError' && notify('Could not export backup'))}
@@ -1314,6 +1386,7 @@ export function App() {
         onSave={saveEntry}
         onPickPhoto={() => photoInputRef.current?.click()}
         onSaveDatabaseFood={saveDatabaseFood}
+        onRefine={estimateSession && entryDraft.estimateDetails && !entryDraft.editingId ? refineGeminiEstimate : undefined}
       />
       <FoodModal
         food={activeFood}
@@ -1738,7 +1811,7 @@ function EntryRow({ state, entry, complete, onPhoto, onEdit, onRepeat, onDelete 
       <div className="entry-main">
         <div className="entry-title"><div className="entry-name">{entry.name}</div>{portion}</div>
         <div className="meta-chips">
-          {entry.estimateSource === 'ai' && <span className="meta-chip source-chip">Estimated</span>}
+          {entry.estimateSource && <span className="meta-chip source-chip">{estimateSourceLabel(entry.estimateSource)}</span>}
           <MacroChips fat={totals.fat} carbs={totals.carbs} protein={totals.protein} />
         </div>
       </div>
@@ -2085,44 +2158,53 @@ function FoodDatabasePreviewModal({ state, item, onUse, onSave, onClose }: { sta
   );
 }
 
-function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onClose: () => void; onEstimate: (userText: string, imageDataUrl?: string | null) => Promise<void> }) {
+function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onClose: () => void; onEstimate: (description: string, photos: string[]) => Promise<void> }) {
   const [text, setText] = useState('');
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [addingPhotos, setAddingPhotos] = useState(false);
   const [error, setError] = useState('');
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) {
       setText('');
-      setPhoto(null);
+      setPhotos([]);
       setLoading(false);
       setError('');
     }
   }, [open]);
 
-  const attachPhoto = async (file?: File | null) => {
-    if (!file) return;
-    try {
-      setError('');
-      setPhoto(await compressImage(file));
-    } catch {
-      setError('Could not attach that photo.');
-    } finally {
-      if (photoInputRef.current) photoInputRef.current.value = '';
+  const addPhotos = async (files: FileList | null) => {
+    const list = Array.from(files || []).slice(0, MAX_ESTIMATE_PHOTOS - photos.length);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+    if (!list.length) return;
+    setError('');
+    setAddingPhotos(true);
+    const added: string[] = [];
+    // One at a time: full-size phone photos decoded together can exhaust memory.
+    for (const file of list) {
+      try {
+        const photo = await compressImage(file, SHARP_PHOTO_OPTIONS);
+        if (photo) added.push(photo);
+      } catch {
+        setError('One photo couldn’t be read. Try taking it again.');
+      }
     }
+    setPhotos(current => [...current, ...added].slice(0, MAX_ESTIMATE_PHOTOS));
+    setAddingPhotos(false);
   };
 
   const submit = async () => {
     const trimmed = text.trim();
-    if (!trimmed && !photo) {
-      setError('Add a short description or attach a photo.');
+    if (!trimmed && !photos.length) {
+      setError('Add a short description or a photo.');
       return;
     }
     setLoading(true);
     setError('');
     try {
-      await onEstimate(trimmed, photo);
+      await onEstimate(trimmed, photos);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gemini could not estimate this meal.');
     } finally {
@@ -2133,21 +2215,45 @@ function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onC
   return (
     <Modal open={open} title="Estimate with Gemini" onClose={onClose} bottomSheet closeDisabled={loading}>
       <form className="gemini-estimate-modal" onSubmit={(event: FormEvent) => { event.preventDefault(); submit(); }}>
-        <p className="hint">Add a short description, attach a photo, or both—then review the estimate before saving.</p>
-        <p className="hint gemini-estimate-tip">Tip: listing the ingredients and amounts you actually used in cooking gives more accurate estimates.</p>
-        <Field label="What did you eat? (optional with a photo)" full>
-          <textarea disabled={loading} value={text} onChange={event => { setText(event.target.value); setError(''); }} placeholder="Example: 2 large black milk teas with mini taro balls, little sugar, little ice. Leave blank if you are sending a photo only." />
+        <p className="hint">Describe what you ate, add photos, or both. You’ll review the numbers before saving.</p>
+        <Field label="What did you eat?" full>
+          <textarea disabled={loading} value={text} onChange={event => { setText(event.target.value); setError(''); }} placeholder="e.g. chicken stir fry, about 150 g chicken, 1 cup rice, 1 tbsp oil. Or for a label: ate half the tub." />
         </Field>
-        <input ref={photoInputRef} hidden type="file" accept="image/*" onChange={event => attachPhoto(event.target.files?.[0])} />
-        <div className="photo-picker full">
-          <button type="button" className="photo-picker-label" disabled={loading} onClick={() => photoInputRef.current?.click()}>
-            <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{photo ? 'Photo attached' : 'Add photo'}</strong><small>{photo ? 'Tap to replace the photo' : 'Optional with text, or use a photo alone—compressed before sending'}</small></span>
-          </button>
-          {photo && <div className="photo-picker-preview show"><img src={photo} alt="Selected meal preview" /></div>}
+        <div className="menu-pick-section">
+          <div className="section">Photos (optional, up to {MAX_ESTIMATE_PHOTOS})</div>
+          <input ref={photoInputRef} hidden type="file" accept="image/*" multiple onChange={event => addPhotos(event.target.files)} />
+          <div className="menu-photo-grid">
+            {photos.map((src, index) => (
+              <div key={`${index}-${src.length}`} className="menu-photo">
+                <img src={src} alt={`Photo ${index + 1}`} />
+                {!loading && (
+                  <button type="button" className="menu-photo-remove" aria-label={`Remove photo ${index + 1}`} onClick={() => setPhotos(current => current.filter((_, i) => i !== index))}>
+                    <span aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+            ))}
+            {photos.length < MAX_ESTIMATE_PHOTOS && (
+              <button type="button" className="menu-photo-add" disabled={loading || addingPhotos} onClick={() => photoInputRef.current?.click()}>
+                <span className="empty-photo-icon" aria-hidden="true" />
+                <span>{addingPhotos ? 'Adding…' : photos.length ? 'Add another' : 'Add photo'}</span>
+              </button>
+            )}
+          </div>
         </div>
+        <details className="extra-info menu-pick-how">
+          <summary>Tips for accurate numbers</summary>
+          <div className="extra-info-body">
+            <ul className="menu-pick-how-list">
+              <li>Packaged food: photograph the nutrition panel flat and close, plus the front of the pack. Say how much you ate (e.g. 150 g, half the tub).</li>
+              <li>Home cooking: list ingredients and amounts, including oil, butter and sauces.</li>
+              <li>Meals out: a photo from above plus a short description works best.</li>
+            </ul>
+          </div>
+        </details>
         {error && <p className="ai-quick-log-error">{error}</p>}
         <div className="actions vertical">
-          <button className="primary" type="submit" disabled={loading || (!text.trim() && !photo)}>{loading ? 'Estimating...' : 'Estimate food'}</button>
+          <button className="primary" type="submit" disabled={loading || addingPhotos || (!text.trim() && !photos.length)}>{loading ? 'Estimating…' : 'Estimate food'}</button>
           <button className="secondary" type="button" disabled={loading} onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -2259,8 +2365,9 @@ function MenuPickModal({ open, state, date, apiKey, onClose, onLog, onBackground
     try {
       const raw = await requestMenuPick({
         apiKey,
-        userText: buildMenuPickRequest({ context: requestContext, meal: requestMeal, budget: requestBudget, note, photoCount: photos.length }),
+        userText: buildMenuPickRequest({ context: requestContext, meal: requestMeal, budget: requestBudget, note, preferences: state.settings.aiPreferences, photoCount: photos.length }),
         imageDataUrls: photos,
+        accept: text => !!parseMenuPick(text),
         signal: controller.signal
       });
       const result = parseMenuPick(raw);
@@ -2330,7 +2437,10 @@ function MenuPickModal({ open, state, date, apiKey, onClose, onLog, onBackground
           </div>
           <article className="menu-pick-card">
             <h3>{pick.name}</h3>
-            <div className="meta-chips"><span className="meta-chip source-chip">Estimated</span></div>
+            <div className="meta-chips">
+              <span className="meta-chip source-chip">{pick.fromMenu ? 'From menu' : 'Estimated'}</span>
+              <span className={`meta-chip confidence-chip confidence-${pick.confidence}`}>{pick.confidence[0].toUpperCase() + pick.confidence.slice(1)} confidence</span>
+            </div>
             <div className="database-preview-nutrition menu-pick-nutrition">
               <div><span>Calories</span><strong>{energyText(state, pick.calories)}</strong></div>
               <div><span>Protein</span><strong>{fmt(pick.protein)}g</strong></div>
@@ -2340,6 +2450,12 @@ function MenuPickModal({ open, state, date, apiKey, onClose, onLog, onBackground
             <p className="menu-pick-fit">{fitText}</p>
             {pick.reason && <p className="menu-pick-reason">{pick.reason}</p>}
             {pick.tip && <p className="menu-pick-tip"><strong>Tip:</strong> {pick.tip}</p>}
+            {pick.assumptions.length > 0 && (
+              <ul className="estimate-assumptions" aria-label="What Gemini assumed">
+                {pick.assumptions.map(item => <li key={item}>{item}</li>)}
+              </ul>
+            )}
+            {macrosDisagree(pick) && <p className="estimate-warning">Calories and macros don’t quite add up, so treat these numbers loosely.</p>}
             <button className="primary menu-pick-log" type="button" onClick={() => onLog(pick, activeSession.meal)}>Log this</button>
           </article>
           {result.alternatives.length > 0 && (
@@ -2352,6 +2468,7 @@ function MenuPickModal({ open, state, date, apiKey, onClose, onLog, onBackground
                       <strong>{item.name}</strong>
                       <div className="meta-chips">
                         <span className="meta-chip accent">{energyText(state, item.calories)}</span>
+                        {item.fromMenu && <span className="meta-chip source-chip">From menu</span>}
                         <MacroChips fat={item.fat} carbs={item.carbs} protein={item.protein} />
                       </div>
                       {item.reason && <small>{item.reason}</small>}
@@ -2578,7 +2695,8 @@ function EntryModal({
   onClose,
   onSave,
   onPickPhoto,
-  onSaveDatabaseFood
+  onSaveDatabaseFood,
+  onRefine
 }: {
   open: boolean;
   openMode: EntryOpenMode;
@@ -2590,7 +2708,12 @@ function EntryModal({
   onSave: (keepOpen?: boolean) => void;
   onPickPhoto: () => void;
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
+  /** Present while the draft is the latest Gemini estimate. */
+  onRefine?: (correction: string) => Promise<void>;
 }) {
+  const [refineText, setRefineText] = useState('');
+  const [refining, setRefining] = useState(false);
+  const [refineError, setRefineError] = useState('');
   const caloriesPanelRef = useRef<HTMLDivElement>(null);
   const caloriesInputRef = useRef<HTMLInputElement>(null);
   const update = (patch: Partial<EntryDraft>) => setDraft(current => ({ ...current, ...patch }));
@@ -2651,6 +2774,28 @@ function EntryModal({
     if (openMode === 'manual') focusCaloriesInput();
   }, [open, openMode]);
 
+  useEffect(() => {
+    if (open) return;
+    setRefineText('');
+    setRefineError('');
+  }, [open]);
+
+  const perUnit = { calories: baseCalories, protein: n(draft.protein), carbs: n(draft.carbs), fat: n(draft.fat) };
+  const macroCheckFails = !!draft.estimateSource && macrosDisagree(perUnit);
+  const refine = async () => {
+    if (!onRefine || !refineText.trim() || refining) return;
+    setRefining(true);
+    setRefineError('');
+    try {
+      await onRefine(refineText);
+      setRefineText('');
+    } catch (err) {
+      setRefineError(err instanceof Error ? err.message : 'Gemini could not refine this estimate.');
+    } finally {
+      setRefining(false);
+    }
+  };
+
   return (
     <Modal open={open} title={draft.editingId ? 'Edit entry' : `Log ${draft.meal.toLowerCase()}`} onClose={onClose} wide bottomSheet>
       <form className="form entry-form" onSubmit={(event: FormEvent) => { event.preventDefault(); onSave(false); }}>
@@ -2679,11 +2824,45 @@ function EntryModal({
               <button type="button" className={draft.unitMode === '100g' ? 'active' : ''} onClick={toggleUnitMode}>Per 100g</button>
             </span>
           </div>
-          {draft.estimateSource === 'ai' && (
-            <div className="meta-chips estimate-source-row">
-              <span className="meta-chip source-chip">Estimated</span>
-              <span className="hint">AI estimate — adjust anything that looks off.</span>
-              <button type="button" className="link-btn" onClick={() => update({ estimateSource: null })}>Not an estimate</button>
+          {draft.estimateSource && (
+            <div className="estimate-review">
+              <div className="meta-chips estimate-source-row">
+                <span className="meta-chip source-chip">{estimateSourceLabel(draft.estimateSource)}</span>
+                {draft.estimateDetails && <span className={`meta-chip confidence-chip confidence-${draft.estimateDetails.confidence}`}>{draft.estimateDetails.confidence[0].toUpperCase() + draft.estimateDetails.confidence.slice(1)} confidence</span>}
+                <button type="button" className="link-btn" onClick={() => update({ estimateSource: null, estimateDetails: null })}>Not an estimate</button>
+              </div>
+              <p className="hint estimate-hint">{draft.estimateSource === 'label'
+                ? 'Read from the label photo. Check it matches the pack and the amount you ate.'
+                : draft.estimateSource === 'menu'
+                  ? 'Energy printed on the menu; macros are estimated.'
+                  : 'AI estimate. Adjust anything that looks off.'}</p>
+              {!!draft.estimateDetails?.assumptions.length && (
+                <ul className="estimate-assumptions" aria-label="What Gemini assumed">
+                  {draft.estimateDetails.assumptions.map(item => <li key={item}>{item}</li>)}
+                </ul>
+              )}
+              {macroCheckFails && (
+                <p className="estimate-warning">Calories and macros don’t quite add up: the macros come to about {energyTextForUnit(energyFromMacros(perUnit), draft.entryEnergyUnit)}. Worth a check, unless it contains alcohol.</p>
+              )}
+              {onRefine && (
+                <div className="estimate-refine">
+                  <input
+                    aria-label="Correction for Gemini"
+                    value={refineText}
+                    disabled={refining}
+                    placeholder="Something off? e.g. small bowl, no cheese"
+                    onChange={event => { setRefineText(event.target.value); setRefineError(''); }}
+                    onKeyDown={event => {
+                      if (event.key !== 'Enter') return;
+                      // Enter would otherwise submit Log Food.
+                      event.preventDefault();
+                      refine();
+                    }}
+                  />
+                  <button type="button" className="secondary" disabled={!refineText.trim() || refining} onClick={refine}>{refining ? 'Refining…' : 'Refine'}</button>
+                </div>
+              )}
+              {refineError && <p className="ai-quick-log-error">{refineError}</p>}
             </div>
           )}
           {multiplier !== 1 && (
@@ -2970,7 +3149,7 @@ function JournalView({
                   {!hideTitleOnThumb && <div className="journal-entry-title">{entry.name}</div>}
                   <div className="meta-chips journal-meta-chips">
                     <span className="meta-chip neutral">{entry.meal || 'Snack'}</span>
-                    {entry.estimateSource === 'ai' && <span className="meta-chip source-chip">Estimated</span>}
+                    {entry.estimateSource && <span className="meta-chip source-chip">{estimateSourceLabel(entry.estimateSource)}</span>}
                     {!hideCalChipOnThumb && <span className="meta-chip accent">{energyText(state, totals.calories)}</span>}
                     <MacroChips fat={totals.fat} carbs={totals.carbs} protein={totals.protein} />
                   </div>
@@ -3565,6 +3744,7 @@ function SettingsView(props: {
   onDeleteCustomDatabase: (id: string) => void;
   onCustomDatabaseHelp: () => void;
   onGeminiApiKey: (key: string) => Promise<void> | void;
+  onAiPreferences: (text: string) => Promise<void> | void;
   onGeminiApiKeyHelp: () => void;
   onCopyAiPrompt: () => Promise<void>;
   onAiPromptHelp: () => void;
@@ -3577,6 +3757,8 @@ function SettingsView(props: {
   const [geminiEditing, setGeminiEditing] = useState(false);
   const [geminiDraft, setGeminiDraft] = useState(() => props.state.settings.geminiApiKey);
   const [geminiCheck, setGeminiCheck] = useState<GeminiCheck>({ state: 'idle' });
+  const [preferencesDraft, setPreferencesDraft] = useState(() => props.state.settings.aiPreferences);
+  const preferencesChanged = preferencesDraft.trim() !== props.state.settings.aiPreferences.trim();
   const counts = backupCounts(props.state);
   const goalUnit = energyUnitValue(props.state.settings.energyUnit);
   const visibleSettings = { ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) };
@@ -3669,6 +3851,21 @@ function SettingsView(props: {
           <button className="secondary" type="button" disabled={geminiCheck.state === 'testing'} onClick={testGeminiKey}>
             {geminiCheck.state === 'testing' ? 'Checking key...' : 'Test key'}
           </button>
+        </div>
+      </section>
+      <section className="card ai-preferences-card">
+        <h2>About you, for AI</h2>
+        <p className="hint">Sent with every Gemini estimate and menu pick, and added to the copied chatbot prompt. Keep it short. It stays on this phone.</p>
+        <Field label="What Gemini should always know" full>
+          <textarea
+            value={preferencesDraft}
+            maxLength={500}
+            onChange={event => setPreferencesDraft(event.target.value)}
+            placeholder="e.g. Melbourne. Vegetarian on weekdays, no seafood. I usually cook with olive oil spray."
+          />
+        </Field>
+        <div className="actions">
+          <button className="secondary" type="button" disabled={!preferencesChanged} onClick={() => props.onAiPreferences(preferencesDraft)}>Save</button>
         </div>
       </section>
       <section className="card ai-prompt-card"><div className="card-head"><h2>AI estimate helper</h2><button className="help-btn" type="button" onClick={props.onAiPromptHelp}>?</button></div><p className="hint">Use this prompt with your AI chatbot, then review the estimate before saving it. Dawni treats AI output as editable, not guaranteed.</p><details className="extra-info ai-prompt-details"><summary>Show prompt</summary><textarea className="ai-prompt-textarea" readOnly value={AI_QUICK_LOG_PROMPT} /></details><div className="actions"><button className="secondary" type="button" onClick={props.onCopyAiPrompt}>Copy prompt</button></div><p className="hint ai-prompt-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p></section>

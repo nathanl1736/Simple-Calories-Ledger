@@ -1,12 +1,14 @@
 import type { AppState, Meal, Totals, TrackingMode } from './types';
 import { numberValue, parseJsonObject, stringValue } from './aiQuickLog';
+import { aboutUserLine, confidenceValue, stringList, type EstimateConfidence } from './aiEstimate';
+import { SHARP_PHOTO_OPTIONS } from './image';
 import { readValue, saveValue } from './storage';
 import { dayEntries, entryTotals, goalForDate, resolveDayCalorieTarget, sum } from './utils';
 
 export const MENU_PICK_MEALS: Meal[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
 export const MAX_MENU_PHOTOS = 4;
 /** Menus need legible small print, so they keep more resolution than food photos. */
-export const MENU_PHOTO_OPTIONS = { maxWidth: Infinity, maxSide: 1800, quality: 0.8 };
+export const MENU_PHOTO_OPTIONS = SHARP_PHOTO_OPTIONS;
 
 export type MenuPickItem = {
   name: string;
@@ -16,6 +18,10 @@ export type MenuPickItem = {
   fat: number;
   reason: string;
   tip: string;
+  /** True when the energy was printed on the menu rather than estimated. */
+  fromMenu: boolean;
+  assumptions: string[];
+  confidence: EstimateConfidence;
 };
 
 export type MenuPickResult = {
@@ -63,13 +69,14 @@ How to choose:
 - Follow the goal mode. Cutting: stay within the range and favour protein and fullness. Maintaining: stay close to the range. Bulking: make sure the meal helps reach the calorie and protein targets.
 - When a lot of protein is still to go, favour higher-protein dishes.
 - Consider what they have already eaten today, for balance and variety.
-- Respect the user's note (dietary needs, cravings, sharing, budget).
+- Respect the user's note and the "About the user" line (dietary needs, cravings, sharing, budget).
 - If the user has already reached today's calorie target, suggest the lightest option that will still satisfy them. Do not lecture.
 
 How to estimate:
-- Estimate one standard restaurant serving of the dish as described, including listed sides and sauces and typical restaurant oil and butter.
-- Calories in kcal, rounded to the nearest 10. Protein, carbs and fat in whole grams.
-- If the menu prints energy, use it. Convert kJ to kcal by dividing by 4.184.
+- If the menu prints energy for a dish (Australian chain menus show kJ by law), use it and set "fromMenu" to true. Convert kJ to kcal by dividing by 4.184. Never put a kJ number in a calorie field.
+- Otherwise estimate one standard Australian restaurant serving of the dish as described, including listed sides and sauces and typical restaurant oil and butter, and set "fromMenu" to false.
+- Calories in kcal, rounded to the nearest 10. Protein, carbs and fat in whole grams. Check that protein x 4 + carbs x 4 + fat x 9 is close to the calories.
+- "assumptions": short phrases for anything you guessed (portion size, dressing, cooking method). "confidence": "high" (energy printed on the menu), "medium" (clear description) or "low" (vague description or hard to read).
 
 Tone:
 - Calm, practical and kind. Australian English. No guilt or shame language (never "cheat", "bad", "burn it off" or "failed").
@@ -85,10 +92,13 @@ Reply with only one JSON object, with no markdown or code fences, in exactly thi
     "carbs": 0,
     "fat": 0,
     "reason": "why this dish fits the rest of the day",
-    "tip": "one optional ordering tweak, or an empty string"
+    "tip": "one optional ordering tweak, or an empty string",
+    "fromMenu": false,
+    "assumptions": [],
+    "confidence": "medium"
   },
   "alternatives": [
-    { "name": "another dish", "calories": 0, "protein": 0, "carbs": 0, "fat": 0, "reason": "one short sentence", "tip": "" }
+    { "name": "another dish", "calories": 0, "protein": 0, "carbs": 0, "fat": 0, "reason": "one short sentence", "tip": "", "fromMenu": false, "assumptions": [], "confidence": "medium" }
   ],
   "summary": "the overall reasoning, mentioning the calories and protein left today",
   "note": "an optional caveat about the photo or the estimate, or an empty string"
@@ -98,6 +108,36 @@ Rules:
 - Give up to 2 alternatives, different from the pick and from each other (for example one lighter, one more filling).
 - Use numbers only for calories, protein, carbs and fat.
 - If you cannot read a menu in the photos, reply with {"menuReadable": false, "note": "what went wrong and how to retake the photo"} instead.`;
+
+const MENU_ITEM_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    name: { type: 'STRING' },
+    calories: { type: 'NUMBER' },
+    protein: { type: 'NUMBER' },
+    carbs: { type: 'NUMBER' },
+    fat: { type: 'NUMBER' },
+    reason: { type: 'STRING' },
+    tip: { type: 'STRING' },
+    fromMenu: { type: 'BOOLEAN' },
+    assumptions: { type: 'ARRAY', items: { type: 'STRING' } },
+    confidence: { type: 'STRING', description: '"high", "medium" or "low"' }
+  },
+  required: ['name', 'calories', 'protein', 'carbs', 'fat', 'reason']
+};
+
+/** Gemini structured output (OpenAPI subset). Values are checked again when parsed. */
+export const MENU_PICK_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    menuReadable: { type: 'BOOLEAN' },
+    pick: MENU_ITEM_SCHEMA,
+    alternatives: { type: 'ARRAY', items: MENU_ITEM_SCHEMA },
+    summary: { type: 'STRING' },
+    note: { type: 'STRING' }
+  },
+  required: ['menuReadable']
+};
 
 export function buildMenuPickContext(state: AppState, date: string): MenuPickContext {
   const entries = dayEntries(state, date);
@@ -166,6 +206,7 @@ export function buildMenuPickRequest({
   meal,
   budget,
   note,
+  preferences = '',
   photoCount,
   now = new Date()
 }: {
@@ -173,6 +214,7 @@ export function buildMenuPickRequest({
   meal: Meal;
   budget: MealBudget;
   note: string;
+  preferences?: string;
   photoCount: number;
   now?: Date;
 }) {
@@ -196,6 +238,7 @@ export function buildMenuPickRequest({
     `Protein: ${whole(eaten.protein)} g eaten of a ${whole(context.proteinTarget)} g target, so ${whole(proteinLeft)} g still to go`,
     `Carbs: ${whole(eaten.carbs)} g of ${whole(context.carbsTarget)} g. Fat: ${whole(eaten.fat)} g of ${whole(context.fatTarget)} g.`,
     `Already logged today: ${logged}`,
+    aboutUserLine(preferences),
     `User note: ${note.trim() || 'none'}`,
     `Menu photos attached: ${photoCount}`
   ].join('\n');
@@ -218,7 +261,10 @@ function menuItem(input: unknown): MenuPickItem | null {
     carbs: grams(raw.carbs),
     fat: grams(raw.fat),
     reason: stringValue(raw.reason),
-    tip: stringValue(raw.tip)
+    tip: stringValue(raw.tip),
+    fromMenu: raw.fromMenu === true,
+    assumptions: stringList(raw.assumptions, 4),
+    confidence: raw.fromMenu === true ? 'high' : confidenceValue(raw.confidence)
   };
 }
 

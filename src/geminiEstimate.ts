@@ -1,5 +1,5 @@
-import { AI_QUICK_LOG_PROMPT } from './aiQuickLog';
-import { MENU_PICK_PROMPT } from './menuPick';
+import { ESTIMATE_SCHEMA, GEMINI_ESTIMATE_PROMPT, JSON_RETRY_NOTE } from './aiEstimate';
+import { MENU_PICK_PROMPT, MENU_PICK_SCHEMA } from './menuPick';
 import { readValue, saveValue } from './storage';
 
 /**
@@ -34,6 +34,8 @@ type CompatFlags = {
   jsonMimeType: boolean;
   /** false = fold the prompt into the user turn instead of `systemInstruction`. */
   systemInstruction: boolean;
+  /** false = stop sending `responseSchema` and rely on the prompt's JSON shape. */
+  responseSchema: boolean;
 };
 
 type GeminiResponse = {
@@ -105,6 +107,7 @@ function isModelLevelFailure(status: number, message: string) {
 /** Which capability a 400 is complaining about, so we can retry without it. */
 function unsupportedCapability(message: string): keyof CompatFlags | null {
   const m = message.toLowerCase();
+  if (m.includes('response_schema') || m.includes('responseschema') || m.includes('schema')) return 'responseSchema';
   if (m.includes('response_mime_type') || m.includes('responsemimetype')) return 'jsonMimeType';
   if (m.includes('system_instruction') || m.includes('systeminstruction')) return 'systemInstruction';
   return null;
@@ -293,9 +296,23 @@ type GeminiCall = {
   systemPrompt: string;
   userText: string;
   imageParts: GeminiInlinePart[];
+  /** Locks the reply to this shape where the model supports structured output. */
+  responseSchema?: object;
+  /** Whether a reply is usable; an unusable one is retried once. */
+  accept?: (text: string) => boolean;
   signal?: AbortSignal;
   fallbackError: string;
 };
+
+/**
+ * Gemini 3 and later are tuned for the default temperature (1.0); Google warns
+ * that lowering it can cause looping or weaker reasoning. Older families get a
+ * low temperature for steadier numbers. Aliases may point at a new family, so
+ * only explicit 1.x/2.x ids are lowered.
+ */
+function temperatureFor(modelId: string) {
+  return /^gemini-[12](?:[.-]|$)/.test(modelId) ? { temperature: 0.2 } : {};
+}
 
 function isAbortError(err: unknown, signal?: AbortSignal) {
   return !!signal?.aborted || (err instanceof Error && err.name === 'AbortError');
@@ -323,8 +340,10 @@ async function generateOnce(apiKey: string, modelId: string, call: GeminiCall, c
       ...(compat.systemInstruction ? { systemInstruction: { parts: [{ text: call.systemPrompt }] } } : {}),
       contents: [{ role: 'user', parts }],
       generationConfig: {
-        temperature: 0.2,
-        ...(compat.jsonMimeType ? { responseMimeType: 'application/json' } : {})
+        ...temperatureFor(modelId),
+        ...(compat.jsonMimeType ? { responseMimeType: 'application/json' } : {}),
+        // A schema needs the JSON mime type, so it goes when that goes.
+        ...(compat.jsonMimeType && compat.responseSchema && call.responseSchema ? { responseSchema: call.responseSchema } : {})
       }
     })
   });
@@ -348,8 +367,8 @@ async function tryModel(
   call: GeminiCall,
   onModelError: (err: GeminiError) => void
 ) {
-  const compat: CompatFlags = { jsonMimeType: true, systemInstruction: true };
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const compat: CompatFlags = { jsonMimeType: true, systemInstruction: true, responseSchema: true };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
       return await generateOnce(apiKey, modelId, call, compat);
     } catch (err) {
@@ -410,11 +429,19 @@ async function requestGeminiJson(apiKey: string, call: GeminiCall) {
     lastError = moreInformative(lastError, err);
   };
   const attempted = new Set<string>();
+  let retried = false;
   const attempt = async (modelId: string) => {
     throwIfAborted(call.signal);
     if (!modelId || attempted.has(modelId) || attempted.size >= MAX_MODEL_ATTEMPTS) return null;
     attempted.add(modelId);
-    const text = await tryModel(key, modelId, call, onModelError);
+    let text = await tryModel(key, modelId, call, onModelError);
+    // One second chance when the reply can't be read, on the same model.
+    if (text && call.accept && !call.accept(text) && !retried) {
+      retried = true;
+      throwIfAborted(call.signal);
+      const again = await tryModel(key, modelId, { ...call, userText: `${call.userText}\n\n${JSON_RETRY_NOTE}` }, onModelError);
+      if (again) text = again;
+    }
     if (text) await saveCachedModelId(key, modelId);
     return text;
   };
@@ -447,28 +474,27 @@ async function requestGeminiJson(apiKey: string, call: GeminiCall) {
   throw lastError || geminiError(call.fallbackError);
 }
 
+/** Estimates a meal, product or label; `userText` is built by `buildEstimateRequest`. */
 export async function requestMealEstimate({
   apiKey,
   userText,
-  imageDataUrl
+  imageDataUrls = [],
+  accept,
+  signal
 }: {
   apiKey: string;
   userText: string;
-  imageDataUrl?: string | null;
+  imageDataUrls?: string[];
+  accept?: (text: string) => boolean;
+  signal?: AbortSignal;
 }) {
-  const trimmed = userText.trim();
-  const textForModel =
-    trimmed ||
-    (imageDataUrl
-      ? 'Photo only: identify the food or meal, estimate it for a calorie tracker, and reply only with the JSON object described in your instructions.'
-      : '');
-  if (!textForModel && !imageDataUrl) {
-    throw geminiError('Add a short description or attach a photo.');
-  }
   return requestGeminiJson(apiKey, {
-    systemPrompt: AI_QUICK_LOG_PROMPT,
-    userText: textForModel,
-    imageParts: imageDataUrl ? [inlineImagePart(imageDataUrl)] : [],
+    systemPrompt: GEMINI_ESTIMATE_PROMPT,
+    userText,
+    imageParts: imageDataUrls.map(inlineImagePart),
+    responseSchema: ESTIMATE_SCHEMA,
+    accept,
+    signal,
     fallbackError: 'Gemini could not estimate this meal.'
   });
 }
@@ -478,11 +504,13 @@ export async function requestMenuPick({
   apiKey,
   userText,
   imageDataUrls,
+  accept,
   signal
 }: {
   apiKey: string;
   userText: string;
   imageDataUrls: string[];
+  accept?: (text: string) => boolean;
   signal?: AbortSignal;
 }) {
   if (!imageDataUrls.length) throw geminiError('Add at least one photo of the menu.');
@@ -490,6 +518,8 @@ export async function requestMenuPick({
     systemPrompt: MENU_PICK_PROMPT,
     userText,
     imageParts: imageDataUrls.map(inlineImagePart),
+    responseSchema: MENU_PICK_SCHEMA,
+    accept,
     signal,
     fallbackError: 'Gemini could not suggest anything from this menu.'
   });

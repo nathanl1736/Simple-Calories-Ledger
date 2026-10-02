@@ -1,5 +1,6 @@
 import type { AppState, Entry, Food, Settings } from './types';
 import { normalizeCustomFoodDatabases } from './customFoodDatabases';
+import { estimateSourceValue } from './aiEstimate';
 import { energyUnitValue, entryTotals, entryUnitModeValue, goalSnapshotFromSettings, lockPastGoals, n, normalizeDateKey, normalizeGoalSnapshot, portionValue, validBackupReminderDays } from './utils';
 
 export const DEFAULT: AppState = {
@@ -17,6 +18,7 @@ export const DEFAULT: AppState = {
     lastBackupReminderShownAt: null,
     backupReminderDays: 7,
     geminiApiKey: '',
+    aiPreferences: '',
     spreadWeeklyBank: false
   },
   entries: [],
@@ -42,7 +44,7 @@ export function normalizeEntry(input: Partial<Entry>): Entry {
   entry.portion = portion;
   Object.assign(entry, entryTotals(entry));
   entry.sourceFoodId = entry.sourceFoodId || null;
-  entry.estimateSource = entry.estimateSource === 'ai' ? 'ai' : null;
+  entry.estimateSource = estimateSourceValue(entry.estimateSource);
   entry.photo = entry.photo || null;
   entry.meal = entry.meal || 'Snack';
   entry.createdAt = entry.createdAt || Date.now();
@@ -80,6 +82,7 @@ export function normalizeStateShape(input: unknown): AppState {
   settings.energyUnit = energyUnitValue(settings.energyUnit);
   settings.backupReminderDays = validBackupReminderDays(settings.backupReminderDays);
   settings.geminiApiKey = typeof settings.geminiApiKey === 'string' ? settings.geminiApiKey : '';
+  settings.aiPreferences = typeof settings.aiPreferences === 'string' ? settings.aiPreferences.slice(0, 500) : '';
   settings.spreadWeeklyBank = !!settings.spreadWeeklyBank;
   if (!['system', 'dark', 'light'].includes(settings.theme)) settings.theme = DEFAULT.settings.theme;
   if (settings.accent === '#efad7c' || settings.accent === '#ccb7f6') settings.accent = '#c9dc86';

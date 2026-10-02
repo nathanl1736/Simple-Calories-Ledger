@@ -63,6 +63,7 @@ For unitMode "100g":
 Rules:
 - Create only one combined entry.
 - If I provide a product photo or nutrition label, identify the product and use the visible label details where possible.
+- Australian labels show energy in kJ. Convert kJ to kcal by dividing by 4.184, and never put a kJ number in "calories".
 - Use kcal for calories.
 - Use grams for protein, carbs, and fat.
 - Use numbers only for calories, protein, carbs, and fat.

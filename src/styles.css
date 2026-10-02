@@ -1253,6 +1253,21 @@ textarea { min-height: 78px; resize: vertical; }
 .menu-pick-summary strong { color: var(--ink); }
 .menu-pick-summary p { margin: 4px 0 0; }
 .menu-pick-caveat, .menu-pick-disclaimer { margin: 0; }
+/* Reviewing an AI estimate in Log Food */
+.estimate-review { display: grid; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: var(--color-surface-soft); border: 1px solid var(--color-border-soft); }
+.estimate-review .estimate-source-row { margin: 0; align-items: center; }
+.estimate-hint { margin: 0; }
+.confidence-chip { border: 1px solid var(--line); background: var(--color-control); }
+.confidence-chip.confidence-high { color: var(--color-good); }
+.confidence-chip.confidence-medium { color: var(--color-text-soft); }
+.confidence-chip.confidence-low { color: var(--color-review); }
+.estimate-assumptions { margin: 0; padding-left: 18px; color: var(--color-text-soft); font-size: var(--type-helper); line-height: 1.45; }
+.estimate-warning { margin: 0; color: var(--color-review); font-size: var(--type-helper); font-weight: var(--weight-label); line-height: 1.4; }
+.estimate-refine { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.estimate-refine .secondary { min-height: 48px; }
+/* Sits inside the calories panel, whose inputs use the big number style. */
+.calories-priority .estimate-refine input { min-height: 48px; padding: 10px 12px; font-size: 16px; font-weight: 640; letter-spacing: 0; text-align: left; }
+.menu-pick-card .estimate-assumptions, .menu-pick-card .estimate-warning { margin: 0; }
 .gemini-status { margin: 10px 0 0; }
 .gemini-status.is-ready { color: var(--color-good); }
 .gemini-status.is-ready strong { font-weight: var(--weight-strong); overflow-wrap: anywhere; }

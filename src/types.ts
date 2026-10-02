@@ -2,8 +2,8 @@ export type Meal = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack' | 'Drink';
 export type EnergyUnit = 'kcal' | 'kj';
 export type TrackingMode = 'Cutting' | 'Maintaining' | 'Bulking';
 export type ThemePreference = 'system' | 'dark' | 'light';
-/** Where an entry's numbers came from when they are an estimate rather than a label. */
-export type EntryEstimateSource = 'ai';
+/** Where AI-provided numbers came from: a guess, a nutrition label read from a photo, or energy printed on a menu. */
+export type EntryEstimateSource = 'ai' | 'label' | 'menu';
 
 export type Settings = {
   calories: number;
@@ -19,6 +19,8 @@ export type Settings = {
   lastBackupReminderShownAt: string | null;
   backupReminderDays: number;
   geminiApiKey: string;
+  /** Sent with every Gemini request, e.g. diet or region. */
+  aiPreferences: string;
   spreadWeeklyBank: boolean;
 };
 
@@ -41,7 +43,7 @@ export type Entry = {
   fat: number;
   portion?: number;
   meal?: Meal;
-  /** Set when the numbers came from an AI estimate, so the log can say so. */
+  /** Set when the numbers came from AI, so the log can say so. */
   estimateSource?: EntryEstimateSource | null;
   notes?: string;
   photo?: string | null;

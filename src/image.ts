@@ -1,3 +1,6 @@
+/** Keeps small print (labels, menus) legible for Gemini; ~300-600 KB per photo. */
+export const SHARP_PHOTO_OPTIONS = { maxWidth: Infinity, maxSide: 1800, quality: 0.82 };
+
 /**
  * Re-encodes a photo as JPEG. Food photos only need to be ~1000px wide; a menu
  * needs its small print legible, so callers can cap the longer side instead.
