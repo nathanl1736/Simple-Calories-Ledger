@@ -1,7 +1,7 @@
 [
-  "Swipe down to close any popup: drag the handle or title bar, or the content once it's scrolled to the top. A short drag springs back.",
-  "Esc closes the top popup on a computer. The close (×) button and tapping the dark area still work.",
-  "Fixed the tab bar jumping and the screen flickering when a popup opens or closes in the home-screen app.",
-  "Sharper AI estimates: Gemini now reads Australian nutrition labels properly, including kJ to Cal and per-100 g columns. Label readings are tagged From label.",
-  "Estimate with Gemini takes up to 3 photos, sent at higher quality, e.g. the front of the pack plus the nutrition panel."
+  "A cleaner Today screen: one summary card shows eaten, Cal left and your target, with macros underneath. Tap the target to change it for today.",
+  "One + button for adding food. It opens search, Estimate with Gemini and Help me pick from a menu, all in one place.",
+  "Meals now have their own icons, a total and a quick + to add to that meal. The Mon–Sun dots under the summary take you to Week.",
+  "New tab icons and simpler names: Today, Week, Journal, Foods, Settings. Text is easier to read, with no more all-caps labels.",
+  "Foods is a simple list: star your regulars and tap + to log one again. Week shows what's left, your daily average and a projected total."
 ]
