@@ -1,7 +1,7 @@
 [
-  "No more flicker when the app starts: it now opens straight in your chosen theme (light, dark or system) instead of flashing light first.",
-  "A cleaner Today screen: one summary card shows eaten, Cal left and your target, with macros underneath. Tap the target to change it for today.",
-  "One + button for adding food. It opens search, Estimate with Gemini and Help me pick from a menu, all in one place.",
-  "Meals now have their own icons, a total and a quick + to add to that meal. The Mon–Sun dots under the summary take you to Week.",
-  "New tab icons and simpler names: Today, Week, Journal, Foods, Settings. Text is easier to read, with no more all-caps labels."
+  "Faster logging: the + button now goes straight to typing in calories, with the keyboard ready. Each meal's + does the same for that meal.",
+  "Search is back on Today, right under your summary. Type, tap a food and swipe to log. The arrow beside it shows your favourites and recent foods.",
+  "Gemini, menu picks and Copy prompt / Paste estimate are under the ✦ button next to search.",
+  "Log food now opens with the numbers at the top, so there's nothing to scroll past.",
+  "No more flicker when the app starts: it now opens straight in your chosen theme (light, dark or system) instead of flashing light first."
 ]

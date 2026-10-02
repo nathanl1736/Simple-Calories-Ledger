@@ -1571,3 +1571,15 @@ textarea { min-height: 78px; resize: vertical; }
   .summary-stat strong { font-size: 19px; }
   .day-header .date-btn { width: 38px; height: 38px; }
 }
+
+/* Today: quick log (2.5.1). Search sits right under the summary so a food is one tap away. */
+.quick-log { margin-bottom: 12px; }
+.quick-log .quick-picker.tracking-search { margin-bottom: 0; background: var(--card); border: 1px solid var(--surface-border); border-radius: var(--radius-card); box-shadow: var(--card-shadow); padding: 10px; gap: 10px; }
+.quick-search-row.has-trailing { grid-template-columns: minmax(0, 1fr) var(--tap) var(--tap); }
+.quick-search-field { position: relative; display: block; min-width: 0; }
+.quick-search-field svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.quick-search-field input { padding-left: 40px; border-radius: var(--radius-pill); background: var(--color-surface-raised); }
+.quick-log .quick-browse-toggle { border-radius: 50%; }
+.quick-ai-btn { width: var(--tap); height: var(--tap); border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 22%, var(--color-control)); color: var(--color-accent-text); border: 1px solid var(--line); }
+.quick-ai-btn:active, .quick-log .quick-browse-toggle:active { transform: scale(.94); }
+.quick-log .quick-picker details { padding: 10px 4px 0; }

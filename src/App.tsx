@@ -1348,7 +1348,9 @@ export function App() {
             }
           }}
           onToggleComplete={() => updateState(draft => setDayComplete(draft, selectedDate, !complete)).then(() => notify(complete ? 'Day reopened' : 'Day completed'))}
-          onOpenAdd={() => setModal('addFood')}
+          onOpenAi={() => setModal('addFood')}
+          onPrefillFood={prefillFood}
+          onSaveDatabaseFood={saveDatabaseFood}
           onOpenTarget={() => setModal('dayTarget')}
           onOpenWeek={() => openWeek(selectedDate)}
         />
@@ -1606,14 +1608,9 @@ export function App() {
         onLog={prefillMenuPick}
         onBackgroundNotice={message => notify(message, 4000)}
       />
-      <Modal open={modal === 'addFood'} title="Add food" onClose={() => setModal(current => (current === 'addFood' ? null : current))} bottomSheet>
+      <Modal open={modal === 'addFood'} title="Log with AI" onClose={() => setModal(current => (current === 'addFood' ? null : current))} bottomSheet>
         <div className="add-sheet">
           <div className="add-list">
-            <button className="add-row" type="button" onClick={() => openEntry()}>
-              <span className="add-icon"><Icon name="search" /></span>
-              <span className="add-text"><strong>Search or enter food</strong><small>Your foods, the food database, or type the numbers in</small></span>
-              <Icon name="chevron" size={18} />
-            </button>
             <button className="add-row" type="button" onClick={openGeminiEstimate}>
               <span className="add-icon"><Icon name="sparkle" /></span>
               <span className="add-text"><strong>Estimate with Gemini</strong><small>Describe it, or photograph the meal or nutrition label</small></span>
@@ -1657,7 +1654,7 @@ export function App() {
           <li>Paste it into Settings → Gemini and tap Save.</li>
           <li>Tap Test key to check Dawni can reach Gemini.</li>
         </ol>
-        <div className="help-callout">No key? Tap + on Today, then Copy prompt and Paste estimate. That works with any AI chatbot.</div>
+        <div className="help-callout">No key? Tap ✦ next to the search bar on Today, then Copy prompt and Paste estimate. That works with any AI chatbot.</div>
         <div className="actions vertical">
           <button className="primary" type="button" onClick={() => openSettingsSection('geminiSection')}>Open Gemini settings</button>
           <button className="secondary" type="button" onClick={() => setModal(null)}>Not now</button>
@@ -1669,7 +1666,7 @@ export function App() {
           <li>Paste it into your AI chatbot.</li>
           <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
           <li>Copy the returned JSON (it must include unitMode: per serving or per 100g, with calories matching that choice so nothing double-counts).</li>
-          <li>On Today, tap + and then Paste estimate.</li>
+          <li>On Today, tap ✦ next to the search bar, then Paste estimate.</li>
           <li>Review the Log Food form, then save normally.</li>
         </ol>
       </Modal>
@@ -1787,7 +1784,9 @@ function TrackingView(props: {
   onDeleteEntry: (id: string) => void;
   onPhotoEntry: (entry: Entry) => void;
   onToggleComplete: () => void;
-  onOpenAdd: () => void;
+  onOpenAi: () => void;
+  onPrefillFood: (food: Food) => void;
+  onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   onOpenTarget: () => void;
   onOpenWeek: () => void;
 }) {
@@ -1854,6 +1853,23 @@ function TrackingView(props: {
         </div>
       </section>
 
+      {!props.complete && (
+        <section className="quick-log" aria-label="Log food">
+          <SavedFoodPicker
+            state={state}
+            foods={state.foods}
+            onChoose={props.onPrefillFood}
+            onSaveDatabaseFood={props.onSaveDatabaseFood}
+            browseToggle
+            trailing={(
+              <button className="quick-ai-btn" type="button" aria-label="Log with AI" onClick={props.onOpenAi}>
+                <Icon name="sparkle" size={20} />
+              </button>
+            )}
+          />
+        </section>
+      )}
+
       <button type="button" className="week-row" onClick={props.onOpenWeek}>
         <span className="week-row-head">
           <span className="week-row-title">This week</span>
@@ -1904,7 +1920,7 @@ function TrackingView(props: {
           })
           : props.entries.length
             ? <EntryList {...rowProps} entries={props.entries} showMeal />
-            : <div className="meals-empty">Nothing logged yet. Tap + to add food.</div>}
+            : <div className="meals-empty">Nothing logged yet. Search above, or tap + to type in the numbers.</div>}
       </section>
 
       <SwipeConfirm
@@ -1916,7 +1932,7 @@ function TrackingView(props: {
       <p className="hint complete-day-hint">{props.complete ? 'This day is complete and counts towards your week.' : 'Completing a day locks it in and adds it to your week bank.'}</p>
 
       {!props.complete && (
-        <button className="fab" type="button" aria-label="Add food" onClick={props.onOpenAdd}>
+        <button className="fab" type="button" aria-label="Log food" onClick={() => props.onOpenEntry()}>
           <Icon name="plus" size={28} />
         </button>
       )}
@@ -2153,7 +2169,18 @@ function QuickResultSection({ title, children }: { title: string; children: Reac
   return <div className="quick-result-section"><div className="quick-section-label">{title}</div><div className="quick-result-list">{children}</div></div>;
 }
 
-function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact = false, browseToggle = false, collapseSignal }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void; compact?: boolean; browseToggle?: boolean; collapseSignal?: number }) {
+/** Moves the Today search bar up under the sticky header once the keyboard opens, so results show below it. */
+function liftSearchAboveKeyboard(input: HTMLInputElement) {
+  window.setTimeout(() => {
+    const row = input.closest('.quick-log') || input;
+    const header = document.querySelector('.sticky-screen-top');
+    const offset = (header?.getBoundingClientRect().height || 0) + 8;
+    const top = row.getBoundingClientRect().top + window.scrollY - offset;
+    if (Math.abs(top - window.scrollY) > 4) window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }, 280);
+}
+
+function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact = false, browseToggle = false, collapseSignal, trailing }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void; compact?: boolean; browseToggle?: boolean; collapseSignal?: number; trailing?: React.ReactNode }) {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -2266,9 +2293,13 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
   return (
     <section className={`quick-picker ${compact ? 'compact' : ''} ${browseToggle ? 'tracking-search' : ''}`}>
       {browseToggle ? (
-        <div className="quick-search-row">
-          <input type="search" aria-label="Search foods" placeholder="Search foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
+        <div className={`quick-search-row ${trailing ? 'has-trailing' : ''}`}>
+          <span className="quick-search-field">
+            <Icon name="search" size={18} />
+            <input type="search" aria-label="Search foods" placeholder="Search foods" value={query} onChange={event => setQuery(event.target.value)} onFocus={event => liftSearchAboveKeyboard(event.currentTarget)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
+          </span>
           <button className={`quick-browse-toggle ${browseOpen ? 'open' : ''}`} type="button" aria-label={browseOpen ? 'Hide favourites and recent foods' : 'Show favourites and recent foods'} aria-expanded={browseOpen} onClick={() => setBrowseOpen(open => !open)}><span aria-hidden="true" /></button>
+          {trailing}
         </div>
       ) : (
         <input type="search" placeholder="Search saved foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
@@ -2900,7 +2931,8 @@ function EntryModal({
   const total = { calories: baseCalories * multiplier, fat: n(draft.fat) * multiplier, carbs: n(draft.carbs) * multiplier, protein: n(draft.protein) * multiplier };
   const scrollCaloriesPanel = (behavior: ScrollBehavior = 'smooth') => {
     requestAnimationFrame(() => {
-      caloriesPanelRef.current?.scrollIntoView({ block: 'start', behavior });
+      // The numbers are the first thing in the sheet, so showing them means back to the top.
+      caloriesPanelRef.current?.closest('.modal-body')?.scrollTo({ top: 0, behavior });
     });
   };
   const focusCaloriesInput = () => {
@@ -2977,7 +3009,6 @@ function EntryModal({
   return (
     <Modal open={open} title={draft.editingId ? 'Edit entry' : `Log ${draft.meal.toLowerCase()}`} onClose={onClose} wide bottomSheet>
       <form className="form entry-form" onSubmit={(event: FormEvent) => { event.preventDefault(); onSave(false); }}>
-        <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} onSaveDatabaseFood={onSaveDatabaseFood} compact />
         <div ref={caloriesPanelRef} className="calories-priority full">
           <label>
             <span>Calories & Macros</span>
@@ -3053,6 +3084,8 @@ function EntryModal({
         </div>
 
         <Field label="Meal" full><div className="meal-chip-row">{MEALS.map(meal => <button key={meal} type="button" className={`meal-chip ${draft.meal === meal ? 'active' : ''}`} onClick={() => update({ meal })}>{meal}</button>)}</div></Field>
+        <Field label="Food name" full><input value={draft.name} placeholder={`${draft.meal} entry`} onChange={event => update({ name: event.target.value })} /></Field>
+        {!draft.editingId && <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} onSaveDatabaseFood={onSaveDatabaseFood} compact />}
         <div className="photo-picker full">
           <button type="button" className="photo-picker-label" onClick={onPickPhoto}>
             <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{draft.photo ? 'Meal photo attached' : 'Add meal photo'}</strong><small>{draft.photo ? 'Tap to replace the photo' : 'Optional journal photo, compressed before saving'}</small></span>
@@ -3061,7 +3094,6 @@ function EntryModal({
         </div>
 
         <div className="entry-form-extras">
-          <Field label="Food name" full><input value={draft.name} placeholder={`${draft.meal} entry`} onChange={event => update({ name: event.target.value })} /></Field>
           <Field label={draft.unitMode === '100g' ? 'Amount eaten (g)' : 'Servings eaten'} full><input inputMode="decimal" value={draft.portion} onChange={event => update({ portion: event.target.value })} /></Field>
           <div className="portion-help full">{draft.unitMode === '100g' ? 'Logged calories and macros = per 100g values x grams eaten / 100.' : 'Logged calories and macros = per-serving values x servings eaten.'}</div>
           <Field label="Notes" full><textarea value={draft.notes} onChange={event => update({ notes: event.target.value })} /></Field>
