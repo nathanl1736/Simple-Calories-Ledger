@@ -76,11 +76,15 @@ How to estimate:
 - If the menu prints energy for a dish (Australian chain menus show kJ by law), use it and set "fromMenu" to true. Convert kJ to kcal by dividing by 4.184. Never put a kJ number in a calorie field.
 - Otherwise estimate one standard Australian restaurant serving of the dish as described, including listed sides and sauces and typical restaurant oil and butter, and set "fromMenu" to false.
 - Calories in kcal, rounded to the nearest 10. Protein, carbs and fat in whole grams. Check that protein x 4 + carbs x 4 + fat x 9 is close to the calories.
-- "assumptions": short phrases for anything you guessed (portion size, dressing, cooking method). "confidence": "high" (energy printed on the menu), "medium" (clear description) or "low" (vague description or hard to read).
+- "assumptions": up to 3 short phrases of a few words each for anything you guessed (portion size, dressing, cooking method), for example "large serve of chips". "confidence": "high" (energy printed on the menu), "medium" (clear description) or "low" (vague description or hard to read).
 
 Tone:
 - Calm, practical and kind. Australian English. No guilt or shame language (never "cheat", "bad", "burn it off" or "failed").
-- Keep "reason" to one or two short sentences and "summary" to two or three short sentences.
+- Keep every text field short. People read this on a phone while ordering, so write plain sentences, not paragraphs, lists or headings.
+- "reason": one sentence, at most about 15 words.
+- "tip": at most about 10 words, or an empty string if there is no useful tweak.
+- "summary": at most two sentences, about 40 words in total. Give the calories and protein left today and the main trade-off. Do not repeat the pick's reason.
+- "note": one short sentence, or an empty string.
 
 Reply with only one JSON object, with no markdown or code fences, in exactly this shape:
 {
@@ -91,8 +95,8 @@ Reply with only one JSON object, with no markdown or code fences, in exactly thi
     "protein": 0,
     "carbs": 0,
     "fat": 0,
-    "reason": "why this dish fits the rest of the day",
-    "tip": "one optional ordering tweak, or an empty string",
+    "reason": "one short sentence on why it fits",
+    "tip": "a short ordering tweak, or an empty string",
     "fromMenu": false,
     "assumptions": [],
     "confidence": "medium"
@@ -100,8 +104,8 @@ Reply with only one JSON object, with no markdown or code fences, in exactly thi
   "alternatives": [
     { "name": "another dish", "calories": 0, "protein": 0, "carbs": 0, "fat": 0, "reason": "one short sentence", "tip": "", "fromMenu": false, "assumptions": [], "confidence": "medium" }
   ],
-  "summary": "the overall reasoning, mentioning the calories and protein left today",
-  "note": "an optional caveat about the photo or the estimate, or an empty string"
+  "summary": "at most two short sentences, mentioning the calories and protein left today",
+  "note": "one short caveat about the photo or the estimate, or an empty string"
 }
 
 Rules:
@@ -117,10 +121,10 @@ const MENU_ITEM_SCHEMA = {
     protein: { type: 'NUMBER' },
     carbs: { type: 'NUMBER' },
     fat: { type: 'NUMBER' },
-    reason: { type: 'STRING' },
-    tip: { type: 'STRING' },
+    reason: { type: 'STRING', description: 'One sentence, at most about 15 words' },
+    tip: { type: 'STRING', description: 'At most about 10 words, or empty' },
     fromMenu: { type: 'BOOLEAN' },
-    assumptions: { type: 'ARRAY', items: { type: 'STRING' } },
+    assumptions: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Up to 3 short phrases' },
     confidence: { type: 'STRING', description: '"high", "medium" or "low"' }
   },
   required: ['name', 'calories', 'protein', 'carbs', 'fat', 'reason']
@@ -133,8 +137,8 @@ export const MENU_PICK_SCHEMA = {
     menuReadable: { type: 'BOOLEAN' },
     pick: MENU_ITEM_SCHEMA,
     alternatives: { type: 'ARRAY', items: MENU_ITEM_SCHEMA },
-    summary: { type: 'STRING' },
-    note: { type: 'STRING' }
+    summary: { type: 'STRING', description: 'At most two short sentences' },
+    note: { type: 'STRING', description: 'One short sentence, or empty' }
   },
   required: ['menuReadable']
 };
@@ -263,7 +267,7 @@ function menuItem(input: unknown): MenuPickItem | null {
     reason: stringValue(raw.reason),
     tip: stringValue(raw.tip),
     fromMenu: raw.fromMenu === true,
-    assumptions: stringList(raw.assumptions, 4),
+    assumptions: stringList(raw.assumptions, 3),
     confidence: raw.fromMenu === true ? 'high' : confidenceValue(raw.confidence)
   };
 }
