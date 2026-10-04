@@ -24,6 +24,7 @@ export const DEFAULT: AppState = {
   entries: [],
   foods: [],
   completedDates: [],
+  dayEstimates: {},
   dailyGoals: {},
   dayCalorieOverrides: {},
   customFoodDatabases: []
@@ -96,6 +97,7 @@ export function normalizeStateShape(input: unknown): AppState {
     entries: Array.isArray(raw.entries) ? raw.entries.map(entry => normalizeEntry(entry)) : [],
     foods: Array.isArray(raw.foods) ? raw.foods.map(food => normalizeFood(food)) : [],
     completedDates: Array.isArray(raw.completedDates) ? raw.completedDates.map(String) : [],
+    dayEstimates: {},
     dailyGoals: {},
     dayCalorieOverrides: {},
     customFoodDatabases: normalizeCustomFoodDatabases((raw as { customFoodDatabases?: unknown }).customFoodDatabases)
@@ -105,6 +107,14 @@ export function normalizeStateShape(input: unknown): AppState {
     const date = normalizeDateKey(key);
     if (date) next.dailyGoals[date] = normalizeGoalSnapshot(value as Partial<Settings>, settings);
   });
+  const rawEstimates = (raw as { dayEstimates?: unknown }).dayEstimates;
+  if (rawEstimates && typeof rawEstimates === 'object') {
+    Object.entries(rawEstimates as Record<string, unknown>).forEach(([key, value]) => {
+      const date = normalizeDateKey(key);
+      const kcal = Number(value);
+      if (date && Number.isFinite(kcal)) next.dayEstimates[date] = Math.round(Math.min(10000, Math.max(-5000, kcal)));
+    });
+  }
   const rawOverrides = (raw as { dayCalorieOverrides?: unknown }).dayCalorieOverrides;
   if (rawOverrides && typeof rawOverrides === 'object') {
     Object.entries(rawOverrides as Record<string, unknown>).forEach(([key, value]) => {

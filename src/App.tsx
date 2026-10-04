@@ -1,7 +1,7 @@
 ﻿import { CSSProperties, FormEvent, ReactNode, type MouseEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { createPortal, flushSync } from 'react-dom';
-import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference } from './types';
+import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference, TrackingMode } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
 import { compressImage, downloadBlob, SHARP_PHOTO_OPTIONS } from './image';
@@ -43,6 +43,7 @@ import {
 import {
   addDays,
   applyDayCalorieOverride,
+  bankDay,
   dayCalorieSliderBounds,
   dayEntries,
   energyLabel,
@@ -63,6 +64,7 @@ import {
   goalForDate,
   goalSnapshotFromSettings,
   isDayComplete,
+  LIGHT_DAY_SHARE,
   lockPastGoals,
   MEALS,
   mealGroupId,
@@ -72,18 +74,23 @@ import {
   readable,
   resolveDayCalorieTarget,
   setDayComplete,
+  setDayEstimate,
   shortDate,
   sum,
   todayKey,
   toKey,
   uid,
   validBackupReminderDays,
+  weekBank,
   weekStartMonday,
-  weeklyBankAdjustmentForDate
+  weeklyBankAdjustmentForDate,
+  type BankDay,
+  type DayBankStatus,
+  type WeekBank
 } from './utils';
 
 type Tab = 'tracking' | 'journal' | 'library' | 'stats' | 'settings';
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'geminiSetup' | 'menuPick' | 'customDbHelp' | 'addFood' | 'dayTarget' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'bankHelp' | 'adherenceHelp' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'geminiSetup' | 'menuPick' | 'customDbHelp' | 'addFood' | 'dayTarget' | 'roughMeal' | null;
 type SetTabOptions = { date?: string; resetScroll?: boolean };
 
 const TABS: [Tab, string][] = [
@@ -645,7 +652,7 @@ function DayCalorieGoalPanel({
   suggested,
   effective,
   hasOverride,
-  complete,
+  past,
   onPersist
 }: {
   state: AppState;
@@ -653,7 +660,7 @@ function DayCalorieGoalPanel({
   suggested: number;
   effective: number;
   hasOverride: boolean;
-  complete: boolean;
+  past: boolean;
   onPersist: (kcal: number | null) => void;
 }) {
   const [typedValue, setTypedValue] = useState('');
@@ -672,7 +679,7 @@ function DayCalorieGoalPanel({
     onPersist(kcal);
     setTypedValue('');
   };
-  if (complete) return <p className="hint">This day is complete, so its target is locked. Reopen the day to change it.</p>;
+  if (past) return <p className="hint">This day has finished, so it keeps its usual target.</p>;
   return (
         <div className="day-calorie-goal-expand">
           <p className="hint day-calorie-goal-hint">Eating more or less on purpose today? Set this day&apos;s calories here. Protein, carbs and fat keep your usual targets.</p>
@@ -959,7 +966,6 @@ export function App() {
 
   const entries = useMemo(() => dayEntries(state, selectedDate), [state, selectedDate]);
   const totals = useMemo(() => sum(entries), [entries]);
-  const complete = isDayComplete(state, selectedDate);
   const mealGroups = useMemo(() => getMealGroups(state), [state]);
   // The selected day without the entry being edited, so Log food can show what saving it leaves.
   const entryDay = useMemo(() => ({
@@ -969,8 +975,7 @@ export function App() {
     date: selectedDate
   }), [entries, entryDraft.editingId, state, selectedDate]);
 
-  const openEntry = (meal: Meal = defaultMealForCurrentTime(), date = selectedDate) => {
-    if (isDayComplete(state, date)) return notify('Reopen the day before changing food logs');
+  const openEntry = (meal: Meal = defaultMealForCurrentTime()) => {
     flushSync(() => {
       setEntryDraft(blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)));
       setEntryOpenMode('manual');
@@ -1096,13 +1101,42 @@ export function App() {
 
   const repeatEntry = async (entry: Entry) => {
     const destination = todayKey();
-    if (isDayComplete(state, destination)) return notify('Reopen today before repeating food logs');
     await updateState(draft => {
       const { photo: _photo, ...entryWithoutPhoto } = entry;
       const copy = normalizeEntry({ ...entryWithoutPhoto, id: uid(), date: destination, photo: null, createdAt: Date.now(), updatedAt: Date.now() });
       draft.entries.push(copy);
     });
     notify('Entry repeated to today');
+  };
+
+  /** Calories only, tagged Rough guess, and kept out of saved foods and recents. */
+  const logRoughMeal = async (meal: Meal, kcal: number, size: string | null) => {
+    const entry = normalizeEntry({
+      id: uid(),
+      sourceFoodId: null,
+      date: selectedDate,
+      name: `${meal} (${size ? size.toLowerCase() : 'rough'})`,
+      unitMode: 'serving',
+      portion: 1,
+      baseCalories: kcal,
+      baseProtein: 0,
+      baseCarbs: 0,
+      baseFat: 0,
+      calories: kcal,
+      protein: 0,
+      carbs: 0,
+      fat: 0,
+      meal,
+      estimateSource: 'rough',
+      notes: 'Rough guess for a meal that was hard to track. Edit it if you find out more.',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+    await updateState(draft => {
+      draft.entries.push(entry);
+    });
+    setModal(null);
+    notify(`Rough ${meal.toLowerCase()} logged: ${energyText(state, kcal)}`);
   };
 
   const deleteEntry = async (id: string) => {
@@ -1167,7 +1201,6 @@ export function App() {
   };
 
   const pasteAiQuickLogFromClipboard = async () => {
-    if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
     if (!navigator.clipboard?.readText) return notify('Clipboard paste is not available here.');
     try {
       const raw = await navigator.clipboard.readText();
@@ -1189,13 +1222,11 @@ export function App() {
   };
 
   const openGeminiEstimate = () => {
-    if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
     if (!state.settings.geminiApiKey.trim()) return setModal('geminiSetup');
     setModal('geminiEstimate');
   };
 
   const openMenuPick = () => {
-    if (isDayComplete(state, selectedDate)) return notify('Reopen the day before changing food logs');
     if (!state.settings.geminiApiKey.trim()) return setModal('geminiSetup');
     setModal('menuPick');
   };
@@ -1366,7 +1397,6 @@ export function App() {
           setSelectedDate={setSelectedDate}
           entries={entries}
           totals={totals}
-          complete={complete}
           dayLogView={dayLogView}
           setDayLogView={setDayLogView}
           onOpenEntry={openEntry}
@@ -1374,13 +1404,6 @@ export function App() {
           onRepeatEntry={repeatEntry}
           onDeleteEntry={deleteEntry}
           onPhotoEntry={entry => {
-            if (complete) {
-              if (entry.photo) {
-                setPhotoPreview(entry.photo);
-                setModal('photo');
-              }
-              return;
-            }
             if (entry.photo) {
               setActivePhotoEntryId(entry.id);
               setModal('entryPhoto');
@@ -1389,7 +1412,10 @@ export function App() {
               entryPhotoInputRef.current?.click();
             }
           }}
-          onToggleComplete={() => updateState(draft => setDayComplete(draft, selectedDate, !complete)).then(() => notify(complete ? 'Day reopened' : 'Day completed'))}
+          onConfirmDay={on => updateState(draft => setDayComplete(draft, selectedDate, on)).then(() => notify(on ? 'Counted toward your week' : 'Undone'))}
+          onSetEstimate={kcal => updateState(draft => setDayEstimate(draft, selectedDate, kcal)).then(() => notify(kcal == null ? 'Rough guess cleared' : 'Rough guess saved'))}
+          onUseLog={() => updateState(draft => setDayComplete(setDayEstimate(draft, selectedDate, null), selectedDate, true)).then(() => notify('Using your log'))}
+          onRoughMeal={() => setModal('roughMeal')}
           onOpenAi={() => setModal('addFood')}
           onPrefillFood={prefillFood}
           onSaveDatabaseFood={saveDatabaseFood}
@@ -1683,8 +1709,16 @@ export function App() {
           suggested={resolveDayCalorieTarget(state, selectedDate).suggested}
           effective={resolveDayCalorieTarget(state, selectedDate).effective}
           hasOverride={resolveDayCalorieTarget(state, selectedDate).hasOverride}
-          complete={complete}
+          past={selectedDate < todayKey()}
           onPersist={kcal => updateState(draft => applyDayCalorieOverride(draft, selectedDate, kcal))}
+        />
+      </Modal>
+      <Modal open={modal === 'roughMeal'} title="Add a rough meal" onClose={() => setModal(null)} bottomSheet>
+        <RoughMealPanel
+          key={selectedDate}
+          state={state}
+          defaultMeal={selectedDate === todayKey() ? defaultMealForCurrentTime() : 'Dinner'}
+          onLog={logRoughMeal}
         />
       </Modal>
       <Modal open={modal === 'geminiSetup'} title="Set up Gemini" onClose={() => setModal(null)}>
@@ -1758,11 +1792,16 @@ export function App() {
         </div>
       </Modal>
       <Modal open={modal === 'bankHelp'} title="Weekly calorie bank" onClose={() => setModal(null)}>
-        <p className="hint">Completed days count toward your weekly balance. Open days stay out of the total until you mark them complete.</p>
-        <div className="help-callout">Cutting shows calories saved, bulking shows catch-up or surplus progress, and maintaining shows distance from your weekly range.</div>
+        <p className="hint">Each finished day adds what you ate under target to your bank, or takes off what you ate over. Days count on their own at midnight, so there’s nothing to swipe. Tap Done for today if you want today counted sooner.</p>
+        <ul className="update-list bank-help-list">
+          <li><strong>Looks light:</strong> a day logged under {Math.round(LIGHT_DAY_SHARE * 100)}% of target waits for a check, so a forgotten dinner doesn’t bank as savings.</li>
+          <li><strong>Nothing logged:</strong> counts as on target, so it can’t help or hurt the bank. If it was bigger, give it a rough guess.</li>
+          <li><strong>Ate out or hard to track:</strong> add a rough meal by size, or give the whole day a rough guess. Rough numbers show with ≈.</li>
+          <li><strong>Spread across the week</strong> (in Settings) shares the bank out over the days left, but never takes a day below 80% of target. The bank resets each Monday.</li>
+        </ul>
       </Modal>
       <Modal open={modal === 'adherenceHelp'} title="Consistency this week" onClose={() => setModal(null)}>
-        <p className="hint">Consistency is based only on completed days. “On track” uses your saved targets for each day. Open days stay open.</p>
+        <p className="hint">Consistency scores the days that count toward your bank, rough guesses included. “On track” uses each day’s saved target. Today, days ahead, light days waiting for a check and days with nothing logged aren’t scored.</p>
       </Modal>
       <Modal open={modal === 'version'} title="Update available" onClose={() => setModal(null)}>
         <div className="version-badge">{incomingVersion && incomingVersion !== APP_VERSION ? `Version ${APP_VERSION} → ${incomingVersion}` : `Version ${APP_VERSION}`}</div>
@@ -1818,7 +1857,6 @@ function TrackingView(props: {
   setSelectedDate: (date: string) => void;
   entries: Entry[];
   totals: ReturnType<typeof sum>;
-  complete: boolean;
   dayLogView: 'group' | 'list';
   setDayLogView: (view: 'group' | 'list') => void;
   onOpenEntry: (meal?: Meal) => void;
@@ -1826,7 +1864,10 @@ function TrackingView(props: {
   onRepeatEntry: (entry: Entry) => void;
   onDeleteEntry: (id: string) => void;
   onPhotoEntry: (entry: Entry) => void;
-  onToggleComplete: () => void;
+  onConfirmDay: (on: boolean) => void;
+  onSetEstimate: (kcal: number | null) => void;
+  onUseLog: () => void;
+  onRoughMeal: () => void;
   onOpenAi: () => void;
   onPrefillFood: (food: Food) => void;
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
@@ -1846,7 +1887,13 @@ function TrackingView(props: {
   const unit = energyLabel(state);
   const remainingText = fmt(energyValue(state, Math.abs(remaining)));
   const ringLabel = overTarget ? `${unit} over` : bulking ? `${unit} to go` : `${unit} left`;
-  const weekSummary = homeWeekSummary(state, props.selectedDate);
+  const isPast = props.selectedDate < todayKey();
+  const day = bankDay(state, props.selectedDate);
+  const week = weekBank(state, weekStartMonday(props.selectedDate));
+  const weekMeta = [
+    week.counted.length ? `${signedEnergyText(state, week.banked)} banked` : '',
+    week.toCheck.length ? `${week.toCheck.length} to check` : ''
+  ].filter(Boolean).join(' · ') || 'Nothing counted yet';
   const note = calorieTarget.hasOverride
     ? `Custom target for this day. Your usual target is ${energyText(state, calorieTarget.suggested)}.`
     : bankAdjustment !== 0
@@ -1858,7 +1905,18 @@ function TrackingView(props: {
     ['Fat', props.totals.fat, baseDayGoal.fat, '--fat']
   ];
   const settleRef = useSettleAnimation(props.selectedDate);
-  const rowProps = { state, complete: props.complete, onPhoto: props.onPhotoEntry, onEdit: props.onEditEntry, onRepeat: props.onRepeatEntry, onDelete: props.onDeleteEntry };
+  const statusCard = (
+    <DayStatusCard
+      key={props.selectedDate}
+      state={state}
+      day={day}
+      onConfirmDay={props.onConfirmDay}
+      onSetEstimate={props.onSetEstimate}
+      onUseLog={props.onUseLog}
+      onRoughMeal={props.onRoughMeal}
+    />
+  );
+  const rowProps = { state, onPhoto: props.onPhotoEntry, onEdit: props.onEditEntry, onRepeat: props.onRepeatEntry, onDelete: props.onDeleteEntry };
   return (
     <div className="screen-swipe-zone today-screen view-transition" ref={settleRef}>
       <div className="sticky-screen-top">
@@ -1877,13 +1935,13 @@ function TrackingView(props: {
               <span>{ringLabel}</span>
             </div>
           </div>
-          <button className="summary-stat summary-target" type="button" onClick={props.onOpenTarget} disabled={props.complete} aria-label={`Target ${energyText(state, goalCalories)}${props.complete ? '' : '. Change this day’s target'}`}>
+          <button className="summary-stat summary-target" type="button" onClick={props.onOpenTarget} disabled={isPast} aria-label={`Target ${energyText(state, goalCalories)}${isPast ? '' : '. Change this day’s target'}`}>
             <strong>{fmt(energyValue(state, goalCalories))}</strong>
-            <span>Target{!props.complete && <Icon name="edit" size={13} />}</span>
+            <span>Target{!isPast && <Icon name="edit" size={13} />}</span>
           </button>
         </div>
         {(note || overTarget) && (
-          <p className="summary-note">{overTarget ? `Over ${bulking ? 'target' : 'today'} by ${energyText(state, Math.abs(remaining))}. The week can still balance.` : note}</p>
+          <p className="summary-note">{overTarget ? `Over ${bulking || isPast ? 'target' : 'today'} by ${energyText(state, Math.abs(remaining))}. The week can still balance.` : note}</p>
         )}
         <div className="summary-macros">
           {macros.map(([name, value, target, color]) => (
@@ -1896,36 +1954,33 @@ function TrackingView(props: {
         </div>
       </section>
 
-      {!props.complete && (
-        <section className="quick-log" aria-label="Log food">
-          <SavedFoodPicker
-            state={state}
-            foods={state.foods}
-            onChoose={props.onPrefillFood}
-            onSaveDatabaseFood={props.onSaveDatabaseFood}
-            browseToggle
-            trailing={(
-              <button className="quick-ai-btn" type="button" aria-label="Log with AI" onClick={props.onOpenAi}>
-                <Icon name="sparkle" size={20} />
-              </button>
-            )}
-          />
-        </section>
-      )}
+      {isPast && statusCard}
+
+      <section className="quick-log" aria-label="Log food">
+        <SavedFoodPicker
+          state={state}
+          foods={state.foods}
+          onChoose={props.onPrefillFood}
+          onSaveDatabaseFood={props.onSaveDatabaseFood}
+          browseToggle
+          trailing={(
+            <button className="quick-ai-btn" type="button" aria-label="Log with AI" onClick={props.onOpenAi}>
+              <Icon name="sparkle" size={20} />
+            </button>
+          )}
+        />
+      </section>
 
       <button type="button" className="week-row" onClick={props.onOpenWeek}>
         <span className="week-row-head">
           <span className="week-row-title">This week</span>
-          <span className="week-row-meta">
-            {weekSummary.completed.length ? `${weekSummary.bankText} banked · ${weekSummary.completed.length}/7 done` : 'Complete a day to start your bank'}
-          </span>
+          <span className="week-row-meta">{weekMeta}</span>
           <Icon name="chevron" size={18} />
         </span>
         <span className="week-dots" aria-hidden="true">
-          {weekSummary.rows.map((row, index) => {
-            const tone = !row.complete ? 'open' : row.status === 'good' ? 'good' : 'review';
+          {week.days.map((row, index) => {
             return (
-              <span key={row.date} className={`week-dot ${tone} ${row.date === props.selectedDate ? 'is-selected' : ''}`}>
+              <span key={row.date} className={`week-dot ${dayTone(row)} ${row.status === 'estimated' ? 'rough' : ''} ${row.date === props.selectedDate ? 'is-selected' : ''}`}>
                 <i />
                 {WEEKDAY_LETTERS[index]}
               </span>
@@ -1951,11 +2006,9 @@ function TrackingView(props: {
                     <strong>{meal}</strong>
                     <small>{items.length ? `${energyText(state, mealTotal)} · ${items.length} item${items.length === 1 ? '' : 's'}` : 'Nothing yet'}</small>
                   </span>
-                  {!props.complete && (
-                    <button className="meal-add" type="button" aria-label={`Add to ${meal.toLowerCase()}`} onClick={() => props.onOpenEntry(meal)}>
-                      <Icon name="plus" size={20} />
-                    </button>
-                  )}
+                  <button className="meal-add" type="button" aria-label={`Add to ${meal.toLowerCase()}`} onClick={() => props.onOpenEntry(meal)}>
+                    <Icon name="plus" size={20} />
+                  </button>
                 </div>
                 {items.length > 0 && <EntryList {...rowProps} entries={items} />}
               </div>
@@ -1966,32 +2019,201 @@ function TrackingView(props: {
             : <div className="meals-empty">Nothing logged yet. Search above, or tap + to type in the numbers.</div>}
       </section>
 
-      <SwipeConfirm
-        label={props.complete ? 'Swipe to reopen day' : 'Swipe to complete day'}
-        confirmLabel={props.complete ? 'Release to reopen' : 'Release to complete'}
-        className={`complete-day-btn ${props.complete ? 'reopen' : ''}`}
-        onConfirm={props.onToggleComplete}
-      />
-      <p className="hint complete-day-hint">{props.complete ? 'This day is complete and counts towards your week.' : 'Completing a day locks it in and adds it to your week bank.'}</p>
+      {!isPast && statusCard}
 
-      {!props.complete && (
-        <button className="fab" type="button" aria-label="Log food" onClick={() => props.onOpenEntry()}>
-          <Icon name="plus" size={28} />
-        </button>
-      )}
+      <button className="fab" type="button" aria-label="Log food" onClick={() => props.onOpenEntry()}>
+        <Icon name="plus" size={28} />
+      </button>
     </div>
   );
 }
 
-function EntryList({ state, entries, complete, onPhoto, onEdit, onRepeat, onDelete, showMeal = false }: { state: AppState; entries: Entry[]; complete: boolean; onPhoto: (entry: Entry) => void; onEdit: (entry: Entry) => void; onRepeat: (entry: Entry) => void; onDelete: (id: string) => void; showMeal?: boolean }) {
+const ROUGH_DAY_OPTIONS: { kcal: number; label: string }[] = [
+  { kcal: 0, label: 'About on target' },
+  { kcal: 500, label: 'A bit over' },
+  { kcal: 1000, label: 'Big day' }
+];
+
+/** Where a day stands in the week bank, and the one or two things worth doing about it. Replaces the old swipe to complete. */
+function DayStatusCard({ state, day, onConfirmDay, onSetEstimate, onUseLog, onRoughMeal }: {
+  state: AppState;
+  day: BankDay;
+  onConfirmDay: (on: boolean) => void;
+  onSetEstimate: (kcal: number | null) => void;
+  onUseLog: () => void;
+  onRoughMeal: () => void;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [checkingDone, setCheckingDone] = useState(false);
+  const eaten = day.totals.calories;
+  const target = day.goal.calories;
+  const isToday = day.date === todayKey();
+  const light = eaten < target * LIGHT_DAY_SHARE;
+  const confirmed = isDayComplete(state, day.date);
+  const estimate = state.dayEstimates?.[day.date] ?? 0;
+  const result = day.delta > 0
+    ? `${energyText(state, day.delta)} under target`
+    : day.delta < 0 ? `${energyText(state, -day.delta)} over target` : 'Right on target';
+  const roughMeal = <button className="secondary" type="button" onClick={onRoughMeal}>Add a rough meal</button>;
+  const roughDay = <button className="text-btn" type="button" onClick={() => setPicking(true)}>Rough guess for the day</button>;
+  const option = (item: { kcal: number; label: string }) => (
+    <button
+      key={item.kcal}
+      type="button"
+      className={`rough-option ${day.status === 'estimated' && estimate === item.kcal ? 'active' : ''}`}
+      onClick={() => { setPicking(false); onSetEstimate(item.kcal); }}
+    >
+      <strong>{item.label}</strong>
+      <small>About {energyText(state, target + item.kcal)}</small>
+    </button>
+  );
+
+  let tone = 'open';
+  let title: string;
+  let body: string;
+  let actions: ReactNode = null;
+  if (picking) {
+    title = 'How did the day go, roughly?';
+    body = 'Your week bank will use this instead of the log. Pick the closest.';
+    actions = (
+      <>
+        <div className="rough-day-options">{ROUGH_DAY_OPTIONS.map(option)}</div>
+        <button className="text-btn" type="button" onClick={() => setPicking(false)}>Cancel</button>
+      </>
+    );
+  } else if (day.status === 'today' && checkingDone) {
+    tone = 'check';
+    title = `Only ${energyText(state, eaten)} of ${energyText(state, target)} logged`;
+    body = 'Is that everything for today?';
+    actions = (
+      <>
+        <button className="primary" type="button" onClick={() => { setCheckingDone(false); onConfirmDay(true); }}>That&apos;s everything</button>
+        {roughMeal}
+        <button className="text-btn" type="button" onClick={() => setCheckingDone(false)}>Not yet</button>
+      </>
+    );
+  } else if (day.status === 'today') {
+    title = 'Today counts at midnight';
+    body = eaten > 0
+      ? 'It joins your week bank automatically. Tap Done if you’ve finished eating and want it counted now.'
+      : 'Log what you eat and it joins your week bank automatically at midnight.';
+    actions = (
+      <>
+        {eaten > 0 && <button className="primary" type="button" onClick={() => (light ? setCheckingDone(true) : onConfirmDay(true))}>Done for today</button>}
+        {roughMeal}
+        {roughDay}
+      </>
+    );
+  } else if (day.status === 'counted') {
+    tone = 'counted';
+    title = isToday ? 'Done for today' : 'Counted';
+    body = isToday
+      ? `${result}, and it’s in your week bank.`
+      : `${result}. Missed something? Log it here, or add a rough meal.`;
+    actions = (
+      <>
+        {roughMeal}
+        {confirmed && (isToday || light)
+          ? <button className="text-btn" type="button" onClick={() => onConfirmDay(false)}>Undo</button>
+          : roughDay}
+      </>
+    );
+  } else if (day.status === 'light') {
+    tone = 'check';
+    title = 'Looks light. Anything missing?';
+    body = `Only ${energyText(state, eaten)} of ${energyText(state, target)} logged. Until you check it, this day counts as on target.`;
+    actions = (
+      <>
+        {roughMeal}
+        <button className="secondary" type="button" onClick={() => onConfirmDay(true)}>That&apos;s everything</button>
+        {roughDay}
+      </>
+    );
+  } else if (day.status === 'untracked') {
+    tone = 'none';
+    title = 'Nothing logged';
+    body = 'This day counts as on target, so it won’t change your bank. If it was bigger, pick a rough guess.';
+    actions = (
+      <>
+        <div className="rough-day-options">{ROUGH_DAY_OPTIONS.filter(item => item.kcal > 0).map(option)}</div>
+        {roughMeal}
+      </>
+    );
+  } else if (day.status === 'estimated') {
+    tone = 'rough';
+    title = `Rough guess: ${(ROUGH_DAY_OPTIONS.find(item => item.kcal === estimate)?.label || signedEnergyText(state, estimate)).toLowerCase()}`;
+    body = `Counts as about ${energyText(state, target + estimate)} in your week bank${eaten > 0 ? `, instead of the ${energyText(state, eaten)} logged` : ''}.`;
+    actions = (
+      <>
+        <button className="secondary" type="button" onClick={() => setPicking(true)}>Change</button>
+        {eaten > 0
+          ? <button className="text-btn" type="button" onClick={onUseLog}>Use my log instead</button>
+          : <button className="text-btn" type="button" onClick={() => onSetEstimate(null)}>Clear guess</button>}
+      </>
+    );
+  } else {
+    title = 'Coming up';
+    body = 'It joins your week bank once the day is over.';
+  }
+
+  return (
+    <section className={`card day-status ${tone}`} aria-label="This day in your week bank">
+      <div className="day-status-head"><span className="day-status-dot" aria-hidden="true" /><strong>{title}</strong></div>
+      <p className="hint">{body}</p>
+      {actions && <div className="day-status-actions">{actions}</div>}
+    </section>
+  );
+}
+
+const ROUGH_MEAL_SIZES: { size: string; kcal: number; hint: string }[] = [
+  { size: 'Light', kcal: 500, hint: 'Salad, sushi, a poke bowl' },
+  { size: 'Regular', kcal: 800, hint: 'A restaurant main or a burrito' },
+  { size: 'Big', kcal: 1200, hint: 'Burger and chips, pizza, creamy pasta' },
+  { size: 'Feast', kcal: 1800, hint: 'Shared plates, dessert or a few drinks' }
+];
+
+/** One tap for a meal that was hard to track: a size, not a breakdown. */
+function RoughMealPanel({ state, defaultMeal, onLog }: { state: AppState; defaultMeal: Meal; onLog: (meal: Meal, kcal: number, size: string | null) => void }) {
+  const [meal, setMeal] = useState<Meal>(defaultMeal);
+  const [typed, setTyped] = useState('');
+  const unit = energyUnitValue(state.settings.energyUnit);
+  const typedKcal = energyInputToKcal(typed, unit);
+  return (
+    <div className="rough-meal">
+      <p className="hint">Ate out, or forgot to log it? Pick the closest size. It logs calories only, marked as a rough guess, and you can edit it later.</p>
+      <div className="chips rough-meal-meals" role="group" aria-label="Meal">
+        {MEALS.map(item => (
+          <button key={item} type="button" className={`chip ${item === meal ? 'active' : ''}`} aria-pressed={item === meal} onClick={() => setMeal(item)}>{item}</button>
+        ))}
+      </div>
+      <div className="add-list">
+        {ROUGH_MEAL_SIZES.map(item => (
+          <button key={item.size} className="add-row rough-size" type="button" onClick={() => onLog(meal, item.kcal, item.size)}>
+            <span className="add-text"><strong>{item.size}</strong><small>{item.hint}</small></span>
+            <span className="rough-size-energy">~{energyText(state, item.kcal)}</span>
+          </button>
+        ))}
+      </div>
+      <form className="rough-meal-custom" onSubmit={event => { event.preventDefault(); if (typedKcal > 0) onLog(meal, typedKcal, null); }}>
+        <label className="field">
+          <span>Or type a number ({energyUnitLabel(unit)})</span>
+          <input inputMode="numeric" type="number" min="1" value={typed} onChange={event => setTyped(event.target.value)} placeholder={unit === 'kj' ? 'e.g. 4000' : 'e.g. 950'} />
+        </label>
+        <button className="secondary" type="submit" disabled={!(typedKcal > 0)}>Log</button>
+      </form>
+    </div>
+  );
+}
+
+function EntryList({ state, entries, onPhoto, onEdit, onRepeat, onDelete, showMeal = false }: { state: AppState; entries: Entry[]; onPhoto: (entry: Entry) => void; onEdit: (entry: Entry) => void; onRepeat: (entry: Entry) => void; onDelete: (id: string) => void; showMeal?: boolean }) {
   return (
     <div data-swipe-lock className="entry-list-stack">
-      {entries.map(entry => <EntryRow key={entry.id} state={state} entry={entry} complete={complete} showMeal={showMeal} onPhoto={onPhoto} onEdit={onEdit} onRepeat={onRepeat} onDelete={onDelete} />)}
+      {entries.map(entry => <EntryRow key={entry.id} state={state} entry={entry} showMeal={showMeal} onPhoto={onPhoto} onEdit={onEdit} onRepeat={onRepeat} onDelete={onDelete} />)}
     </div>
   );
 }
 
-function EntryRow({ state, entry, complete, showMeal = false, onPhoto, onEdit, onRepeat, onDelete }: { state: AppState; entry: Entry; complete: boolean; showMeal?: boolean; onPhoto: (entry: Entry) => void; onEdit: (entry: Entry) => void; onRepeat: (entry: Entry) => void; onDelete: (id: string) => void }) {
+function EntryRow({ state, entry, showMeal = false, onPhoto, onEdit, onRepeat, onDelete }: { state: AppState; entry: Entry; showMeal?: boolean; onPhoto: (entry: Entry) => void; onEdit: (entry: Entry) => void; onRepeat: (entry: Entry) => void; onDelete: (id: string) => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -2058,8 +2280,8 @@ function EntryRow({ state, entry, complete, showMeal = false, onPhoto, onEdit, o
         {menuOpen && createPortal(
           <div ref={menuRef} className="entry-menu" data-swipe-lock style={menuStyle}>
             <button type="button" onClick={() => { setMenuOpen(false); onRepeat(entry); }}>Repeat</button>
-            {!complete && <button type="button" onClick={() => { setMenuOpen(false); onEdit(entry); }}>Edit</button>}
-            {!complete && <button type="button" className="danger-text" onClick={() => { setMenuOpen(false); onDelete(entry.id); }}>Delete</button>}
+            <button type="button" onClick={() => { setMenuOpen(false); onEdit(entry); }}>Edit</button>
+            <button type="button" className="danger-text" onClick={() => { setMenuOpen(false); onDelete(entry.id); }}>Delete</button>
           </div>,
           document.body
         )}
@@ -3131,7 +3353,9 @@ function EntryModal({
               {draft.estimateSource !== 'ai' && (
                 <p className="hint estimate-hint">{draft.estimateSource === 'label'
                   ? 'Read from the label photo. Check it matches the pack and the amount you ate.'
-                  : 'Energy printed on the menu; macros are estimated.'}</p>
+                  : draft.estimateSource === 'rough'
+                    ? 'A rough size for a meal that was hard to track. Change the number if you find out more.'
+                    : 'Energy printed on the menu; macros are estimated.'}</p>
               )}
               {!!draft.estimateDetails?.assumptions.length && (
                 <ul className="estimate-assumptions" aria-label="What Gemini assumed">
@@ -3640,29 +3864,32 @@ function getCalorieBand(goal: DailyGoalSnapshot) {
   return { lower: 0, target, upper: target };
 }
 
-function classifyCalorieDay(total: number, complete: boolean, goal: DailyGoalSnapshot): CalorieDayStatus {
-  if (!complete) return 'open';
+function classifyCalorieDay(intake: number | null, goal: DailyGoalSnapshot): CalorieDayStatus {
+  if (intake == null) return 'open';
   const band = getCalorieBand(goal);
-  if (goal.trackingMode === 'Cutting') return total <= band.target ? 'good' : 'over';
-  if (goal.trackingMode === 'Bulking') {
-    if (total < band.lower) return 'under';
-    return total <= band.upper ? 'good' : 'over';
-  }
-  if (total < band.lower) return 'under';
-  return total <= band.upper ? 'good' : 'over';
+  if (goal.trackingMode === 'Cutting') return intake <= band.target ? 'good' : 'over';
+  if (intake < band.lower) return 'under';
+  return intake <= band.upper ? 'good' : 'over';
 }
 
 function statsRuleText(goal: DailyGoalSnapshot, unit: EnergyUnit) {
-  if (goal.trackingMode === 'Bulking') return `On track = completed days from ${energyTextForUnit(goal.calories, unit)} to ${energyTextForUnit(goal.calories + 300, unit)}.`;
-  if (goal.trackingMode === 'Maintaining') return `On track = completed days within ${energyTextForUnit(goal.calories - 150, unit)}-${energyTextForUnit(goal.calories + 150, unit)}.`;
-  return `On track = completed days at or under ${energyTextForUnit(goal.calories, unit)}.`;
+  if (goal.trackingMode === 'Bulking') return `On track = counted days from ${energyTextForUnit(goal.calories, unit)} to ${energyTextForUnit(goal.calories + 300, unit)}.`;
+  if (goal.trackingMode === 'Maintaining') return `On track = counted days within ${energyTextForUnit(goal.calories - 150, unit)}-${energyTextForUnit(goal.calories + 150, unit)}.`;
+  return `On track = counted days at or under ${energyTextForUnit(goal.calories, unit)}.`;
 }
 
-function dayToneLabel(status: CalorieDayStatus, complete: boolean) {
-  if (!complete) return { label: 'Open', className: 'open' as const };
-  if (status === 'good') return { label: 'On track', className: 'good' as const };
-  return { label: 'Review', className: 'review' as const };
+/** Dot and pill colour for a day in the week. */
+type DayTone = 'good' | 'review' | 'check' | 'today' | 'none' | 'open';
+
+function dayTone(day: BankDay): DayTone {
+  if (day.intake != null) return classifyCalorieDay(day.intake, day.goal) === 'good' ? 'good' : 'review';
+  if (day.status === 'light') return 'check';
+  if (day.status === 'today') return 'today';
+  if (day.status === 'untracked') return 'none';
+  return 'open';
 }
+
+const DAY_TONE_LABEL: Record<DayTone, string> = { good: 'On track', review: 'Review', check: 'Check', today: 'Today', none: 'No log', open: 'Later' };
 
 function signedEnergyText(state: AppState, kcal: number) {
   return `${kcal > 0 ? '+' : ''}${energyText(state, kcal)}`;
@@ -3673,41 +3900,39 @@ function signedEnergyValue(state: AppState, kcal: number) {
   return `${value > 0 ? '+' : ''}${fmt(value)}`;
 }
 
-
-function homeWeekSummary(state: AppState, selectedDate: string) {
-  const start = weekStartMonday(selectedDate);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const rows = days.map(date => {
-    const total = sum(dayEntries(state, date)).calories;
-    const complete = isDayComplete(state, date);
-    const goal = goalForDate(state, date);
-    return { date, total, complete, goal, delta: complete ? goal.calories - total : 0, status: classifyCalorieDay(total, complete, goal) };
-  });
-  const completed = rows.filter(row => row.complete);
-  const banked = completed.reduce((acc, row) => acc + row.delta, 0);
-  const completedEaten = completed.reduce((acc, row) => acc + row.total, 0);
-  const completedAverage = completedEaten / (completed.length || 1);
-  const projected = completed.length ? completedAverage * 7 : 0;
-  return {
-    days,
-    rows,
-    completed,
-    banked,
-    projected,
-    bankText: signedEnergyText(state, banked)
-  };
+/** A planning number, rounded to the nearest 10 so it doesn't look more exact than it is. */
+function aboutEnergyText(state: AppState, kcal: number) {
+  return `${fmt(Math.round(energyValue(state, kcal) / 10) * 10)} ${energyLabel(state)}`;
 }
+
+const weekdayName = (date: string, style: 'long' | 'short' = 'long') => new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: style });
 
 type MetricTone = 'good' | 'warn' | '';
 
-function budgetDeltaTone(delta: number): MetricTone {
-  if (delta > 0) return 'good';
-  if (delta < 0) return 'warn';
-  return '';
+/** Whether a gap from target (target minus eaten) is good news depends on the goal. */
+function gapTone(mode: TrackingMode | null, gap: number, tolerance: number): MetricTone {
+  if (mode === 'Maintaining') return Math.abs(gap) <= tolerance ? 'good' : 'warn';
+  if (mode === 'Bulking') return gap <= 0 ? 'good' : 'warn';
+  return gap >= 0 ? 'good' : 'warn';
 }
 
-function upperBudgetTone(value: number, budget: number): MetricTone {
-  return value <= budget ? 'good' : 'warn';
+/** The plain answer to "how much can I eat for the rest of the week?". */
+function bankAnswer(state: AppState, week: WeekBank) {
+  const { remaining, perDay, overAtFloor, banked } = week;
+  if (!remaining.length) {
+    if (banked > 0) return `Finished ${energyText(state, banked)} under target.`;
+    if (banked < 0) return `Finished ${energyText(state, -banked)} over target.`;
+    return 'Finished right on target.';
+  }
+  const amount = aboutEnergyText(state, perDay);
+  const includesToday = remaining[0].date === todayKey();
+  const single = remaining.length === 1;
+  if (overAtFloor > 0) {
+    const when = single ? (includesToday ? 'today' : `on ${weekdayName(remaining[0].date)}`) : 'a day';
+    return `Aim for about ${amount} ${when}. The week will still finish about ${aboutEnergyText(state, overAtFloor)} over, and the bank resets Monday.`;
+  }
+  if (single) return includesToday ? `Today can be about ${amount} in total.` : `${weekdayName(remaining[0].date)} can be about ${amount}.`;
+  return `The ${remaining.length} days left${includesToday ? ', including today,' : ''} can average about ${amount} each.`;
 }
 
 function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekStart, onBankHelp, onAdherenceHelp, onOpenDay }: { state: AppState; selectedDate: string; bankingWeekStart: string; setBankingWeekStart: (start: string) => void; onBankHelp: () => void; onAdherenceHelp: () => void; onOpenDay: (date: string) => void }) {
@@ -3726,27 +3951,9 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
   }, [bankingWeekStart]);
 
   const settleRef = useSettleAnimation(bankingWeekStart);
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(bankingWeekStart, i));
-  const weekRows = weekDays.map(date => {
-    const totals = sum(dayEntries(state, date));
-    const complete = isDayComplete(state, date);
-    const goal = goalForDate(state, date);
-    const delta = complete ? goal.calories - totals.calories : 0;
-    return { date, totals, complete, goal, delta, status: classifyCalorieDay(totals.calories, complete, goal) };
-  });
-  const weekCompleted = weekRows.filter(row => row.complete);
-  const weekCompletedEaten = weekCompleted.reduce((acc, row) => acc + row.totals.calories, 0);
-  const weekCompletedGoal = weekCompleted.reduce((acc, row) => acc + row.goal.calories, 0);
-  const weekCompletedAvgCalories = weekCompletedEaten / (weekCompleted.length || 1);
-  const weekCompletedAvgProtein = weekCompleted.reduce((acc, row) => acc + row.totals.protein, 0) / (weekCompleted.length || 1);
-  const weekCompletedAvgCalorieGoal = weekCompletedGoal / (weekCompleted.length || 1);
-  const weekCompletedAvgProteinGoal = weekCompleted.reduce((acc, row) => acc + row.goal.protein, 0) / (weekCompleted.length || 1);
-  const projectedWeek = weekCompleted.length ? weekCompletedAvgCalories * 7 : 0;
-
-  const last7Days = Array.from({ length: 7 }, (_, i) => addDays(selectedDate, i - 6));
-  const last7Rows = last7Days.map(date => ({ date, totals: sum(dayEntries(state, date)), complete: isDayComplete(state, date), goal: goalForDate(state, date) }));
-  const last7Logged = last7Rows.filter(row => row.totals.calories > 0);
-  const last7Completed = last7Rows.filter(row => row.complete);
+  const week = weekBank(state, bankingWeekStart);
+  const last7 = Array.from({ length: 7 }, (_, i) => bankDay(state, addDays(selectedDate, i - 6)));
+  const last7Counted = last7.filter(day => day.intake != null);
   return (
     <div className="screen-swipe-zone view-transition" ref={settleRef}>
       <div className="sticky-screen-top">
@@ -3755,46 +3962,46 @@ function RichStatsView({ state, selectedDate, bankingWeekStart, setBankingWeekSt
         </header>
         <WeekRangeControl start={bankingWeekStart} setStart={setBankingWeekStart} />
       </div>
-      <RichBanking state={state} start={bankingWeekStart} onHelp={onBankHelp} onOpenDay={onOpenDay} />
+      <RichBanking state={state} week={week} onHelp={onBankHelp} onOpenDay={onOpenDay} />
 
-      <RichAdherence state={state} start={bankingWeekStart} onHelp={onAdherenceHelp} onOpenDay={onOpenDay} />
+      <RichAdherence state={state} week={week} onHelp={onAdherenceHelp} onOpenDay={onOpenDay} />
 
       <section className="card stats-card">
         <div className="card-head"><h2>Patterns</h2></div>
-        {last7Completed.length ? (
+        {last7Counted.length ? (
           <>
-            <div className="stat"><span>Completed-day average (past 7)</span><strong>{energyText(state, last7Completed.reduce((acc, row) => acc + row.totals.calories, 0) / (last7Completed.length || 1))}</strong></div>
-            <div className="stat"><span>Completed days (past 7)</span><strong>{last7Completed.length} / 7</strong></div>
+            <div className="stat"><span>Average on counted days (past 7)</span><strong>{energyText(state, last7Counted.reduce((acc, day) => acc + (day.intake || 0), 0) / last7Counted.length)}</strong></div>
+            <div className="stat"><span>Counted days (past 7)</span><strong>{last7Counted.length} / 7</strong></div>
           </>
-        ) : <div className="empty">{last7Logged.length ? 'Mark a day complete to see completed-day patterns.' : 'No logged days in this window yet.'}</div>}
-        <ConsumptionBars state={state} rows={last7Rows.map(row => ({ date: row.date, total: row.totals.calories, complete: row.complete, goal: row.goal }))} />
+        ) : <div className="empty">Nothing counted in the past 7 days yet.</div>}
+        <ConsumptionBars state={state} days={last7} />
       </section>
     </div>
   );
 }
 
-function ConsumptionBars({ state, rows }: { state: AppState; rows: { date: string; total: number; complete: boolean; goal: DailyGoalSnapshot }[] }) {
-  const bands = rows.map(row => getCalorieBand(row.goal));
-  const maxTotal = Math.max(...bands.map(band => band.upper), ...rows.map(row => row.total), 1);
+function ConsumptionBars({ state, days }: { state: AppState; days: BankDay[] }) {
+  const bands = days.map(day => getCalorieBand(day.goal));
+  const shown = days.map(day => day.intake ?? day.totals.calories);
+  const maxTotal = Math.max(...bands.map(band => band.upper), ...shown, 1);
   return (
-    <div className="consumption-chart" aria-label="Consumed calories over the last 7 days">
-      {rows.map((row, index) => {
+    <div className="consumption-chart" aria-label="Calories over the last 7 days">
+      {days.map((day, index) => {
+        const total = shown[index];
         const band = bands[index];
-        const height = row.total ? Math.max(8, row.total / maxTotal * 100) : 3;
+        const height = total ? Math.max(8, total / maxTotal * 100) : 3;
         const targetBottom = Math.max(0, Math.min(1, band.target / maxTotal)) * 100;
         const lowerBottom = Math.max(0, Math.min(1, band.lower / maxTotal)) * 100;
         const upperBottom = Math.max(0, Math.min(1, band.upper / maxTotal)) * 100;
-        const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
-        const status = classifyCalorieDay(row.total, row.complete, row.goal);
         return (
-          <div className="consumption-col" key={row.date}>
-            <div className="consumption-value">{row.total ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : 'Open'}</div>
+          <div className="consumption-col" key={day.date}>
+            <div className="consumption-value">{total ? `${day.status === 'estimated' ? '≈' : ''}${fmt(energyValueForUnit(total, state.settings.energyUnit))}` : '—'}</div>
             <div className="consumption-track">
-              {row.goal.trackingMode === 'Maintaining' && <span className="consumption-range" style={{ bottom: `${lowerBottom}%`, height: `${Math.max(2, upperBottom - lowerBottom)}%` }} />}
+              {day.goal.trackingMode === 'Maintaining' && <span className="consumption-range" style={{ bottom: `${lowerBottom}%`, height: `${Math.max(2, upperBottom - lowerBottom)}%` }} />}
               <span className="consumption-goal" style={{ bottom: `${targetBottom}%` }} />
-              <div className={`consumption-fill ${status}`} style={{ height: `${height}%` }} />
+              <div className={`consumption-fill ${classifyCalorieDay(day.intake, day.goal)}`} style={{ height: `${height}%` }} />
             </div>
-            <div className="consumption-day">{weekday}</div>
+            <div className="consumption-day">{weekdayName(day.date, 'short').slice(0, 3)}</div>
           </div>
         );
       })}
@@ -3818,22 +4025,38 @@ function WeekRangeControl({ start, setStart }: { start: string; setStart: (start
   );
 }
 
-function BankBars({ state, rows, onOpenDay }: { state: AppState; rows: { date: string; total: number; complete: boolean; delta: number; status: CalorieDayStatus; goal: DailyGoalSnapshot }[]; onOpenDay: (date: string) => void }) {
-  const maxGoal = Math.max(...rows.map(row => row.goal.calories), 1);
+const BANK_STATUS_TEXT: Record<DayBankStatus, string> = {
+  counted: '',
+  estimated: 'rough guess',
+  light: 'looks light, check it',
+  untracked: 'nothing logged, counts as on target',
+  today: 'today, still in progress',
+  upcoming: 'coming up'
+};
+
+function BankBars({ state, days, onOpenDay }: { state: AppState; days: BankDay[]; onOpenDay: (date: string) => void }) {
+  const maxGoal = Math.max(...days.map(day => day.goal.calories), 1);
   return (
     <div className="bank-chart">
-      {rows.map(row => {
-        const delta = row.complete ? row.delta : 0;
-        const barHeight = row.complete ? Math.min(46, Math.max(8, Math.abs(delta) / maxGoal * 54)) : 6;
-        const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
-        const direction = delta >= 0 ? 'up' : 'down';
-        const tone = delta >= 0 ? 'good-fill' : 'warn-fill';
-        const deltaTone = row.complete ? budgetDeltaTone(delta) : '';
+      {days.map(day => {
+        const counts = day.intake != null;
+        const rough = day.status === 'estimated';
+        const barHeight = counts ? Math.min(46, Math.max(8, Math.abs(day.delta) / maxGoal * 54)) : 6;
+        const tone = counts ? gapTone(day.goal.trackingMode, day.delta, 150) : '';
+        const label = counts
+          ? `${rough ? '≈' : ''}${signedEnergyValue(state, day.delta)}`
+          : day.status === 'light' ? 'Check' : day.status === 'today' ? 'Today' : day.status === 'untracked' ? '—' : ' ';
+        const spoken = counts ? `${rough ? 'rough guess, ' : ''}${signedEnergyText(state, day.delta)}` : BANK_STATUS_TEXT[day.status];
         return (
-          <button className="bank-col" key={row.date} type="button" onClick={() => onOpenDay(row.date)} aria-label={`${readable(row.date)}: ${row.complete ? signedEnergyText(state, delta) : 'open'}. Open this day.`}>
-            <span className={`bank-delta ${deltaTone}`}>{row.complete ? signedEnergyValue(state, delta) : 'Open'}</span>
-            <span className="bank-track"><span className="bank-midline" />{row.complete ? <span className={`bank-fill ${tone} ${direction}`} style={{ height: barHeight }} /> : <span className="bank-open-mark" />}</span>
-            <span className="bank-day">{weekday}</span>
+          <button className={`bank-col ${day.status}`} key={day.date} type="button" onClick={() => onOpenDay(day.date)} aria-label={`${readable(day.date)}: ${spoken}. Open this day.`}>
+            <span className={`bank-delta ${day.status === 'light' ? 'check' : tone}`}>{label}</span>
+            <span className="bank-track">
+              <span className="bank-midline" />
+              {counts
+                ? <span className={`bank-fill ${tone === 'good' ? 'good-fill' : 'warn-fill'} ${day.delta >= 0 ? 'up' : 'down'} ${rough ? 'rough' : ''}`} style={{ height: barHeight }} />
+                : <span className={`bank-open-mark ${day.status}`} />}
+            </span>
+            <span className="bank-day">{weekdayName(day.date, 'short').slice(0, 3)}</span>
           </button>
         );
       })}
@@ -3841,102 +4064,112 @@ function BankBars({ state, rows, onOpenDay }: { state: AppState; rows: { date: s
   );
 }
 
-function RichBanking({ state, start, onHelp, onOpenDay }: { state: AppState; start: string; onHelp: () => void; onOpenDay: (date: string) => void }) {
-  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const rows = days.map(date => {
-    const dayTotals = sum(dayEntries(state, date));
-    const total = dayTotals.calories;
-    const complete = isDayComplete(state, date);
-    const goal = goalForDate(state, date);
-    return { date, total, protein: dayTotals.protein, complete, goal, delta: complete ? goal.calories - total : 0, status: classifyCalorieDay(total, complete, goal) };
-  });
-  const completed = rows.filter(row => row.complete);
-  const banked = completed.reduce((acc, row) => acc + row.delta, 0);
-  const completedEaten = completed.reduce((acc, row) => acc + row.total, 0);
-  const weekBudget = rows.reduce((acc, row) => acc + row.goal.calories, 0);
-  const completedAverage = completedEaten / (completed.length || 1);
-  const projected = completed.length ? completedAverage * 7 : 0;
-  const completedExpected = completed.reduce((acc, row) => acc + row.goal.calories, 0);
-  const completedDailyGoal = completedExpected / (completed.length || 1);
-  const remainingWeek = weekBudget - completedEaten;
-  const bankTone = budgetDeltaTone(banked);
-  const remainingTone = budgetDeltaTone(remainingWeek);
-  const completedAverageTone = upperBudgetTone(completedAverage, completedDailyGoal);
-  const projectedTone = upperBudgetTone(projected, weekBudget);
-  const firstCompletedMode = completed[0]?.goal.trackingMode;
-  const bankMode = firstCompletedMode && completed.every(row => row.goal.trackingMode === firstCompletedMode) ? firstCompletedMode : null;
-  const bankLabel = bankMode === 'Bulking'
-    ? banked > 0 ? 'Calories to catch up' : 'Weekly surplus progress'
-    : bankMode === 'Maintaining' ? 'Weekly balance' : bankMode === 'Cutting' ? 'Banked from completed days' : 'Weekly goal balance';
-  const bankValue = bankMode === 'Bulking' && banked < 0 ? -banked : banked;
-  const bankHeroText = bankMode === 'Bulking' && banked > 0 ? energyText(state, bankValue) : signedEnergyText(state, bankValue);
+function RichBanking({ state, week, onHelp, onOpenDay }: { state: AppState; week: WeekBank; onHelp: () => void; onOpenDay: (date: string) => void }) {
+  const { days, counted, remaining, banked, toCheck } = week;
+  const started = days[0].date <= todayKey();
+  const finished = !remaining.length;
+  const firstMode = (counted[0] || days[0]).goal.trackingMode;
+  const mode = counted.every(day => day.goal.trackingMode === firstMode) ? firstMode : null;
+  const cutting = !mode || mode === 'Cutting';
+  const eaten = counted.reduce((acc, day) => acc + (day.intake || 0), 0);
+  const countedTarget = counted.reduce((acc, day) => acc + day.goal.calories, 0);
+  const average = counted.length ? eaten / counted.length : 0;
+  const logged = counted.filter(day => day.status === 'counted');
+  const roughCount = counted.length - logged.length;
+  const untrackedCount = days.filter(day => day.status === 'untracked').length;
+  const heroValue = cutting
+    ? signedEnergyText(state, banked)
+    : banked === 0 ? 'On target' : `${energyText(state, Math.abs(banked))} ${banked > 0 ? 'under' : 'over'}`;
+  const checkNames = toCheck.length === 1
+    ? weekdayName(toCheck[0].date)
+    : toCheck.map(day => weekdayName(day.date, 'short')).join(', ').replace(/, ([^,]*)$/, ' and $1');
+  if (!started || (finished && !counted.length)) {
+    return (
+      <section className="card stats-card">
+        <div className="card-head"><h2>Weekly calorie bank</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
+        <div className="empty">{started ? 'Nothing was logged this week.' : `This week hasn’t started yet. Its budget is ${energyText(state, week.budget)}.`}</div>
+      </section>
+    );
+  }
   return (
     <section className="card stats-card">
       <div className="card-head"><h2>Weekly calorie bank</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
-      {completed.length ? (
-        <>
-          <div className="bank-hero"><div className="label">{bankLabel}</div><div className={`value ${bankTone}`}>{bankHeroText}</div><div className="bank-note">Based on {completed.length} completed day{completed.length === 1 ? '' : 's'}. Open days don’t count yet.</div></div>
-          <div className="bank-stats">
-            <div><span>Left this week</span><strong className={remainingTone}>{energyText(state, remainingWeek)}</strong></div>
-            <div><span>Daily average</span><strong className={completedAverageTone}>{energyText(state, completedAverage)}</strong></div>
-            <div><span>Projected week</span><strong className={projectedTone}>{energyText(state, projected)}</strong></div>
-          </div>
-          <BankBars state={state} rows={rows} onOpenDay={onOpenDay} />
-          <details className="extra-info bank-details">
-            <summary>More details</summary>
-            <div className="extra-info-body">
-              <div className="stat"><span>Weekly budget</span><strong>{energyText(state, weekBudget)}</strong></div>
-              <div className="stat"><span>Eaten on completed days</span><strong>{energyText(state, completedEaten)}</strong></div>
-              <div className="stat"><span>Target for completed days</span><strong>{energyText(state, completedExpected)}</strong></div>
-              <div className="stat"><span>Average protein</span><strong>{fmt(completed.reduce((acc, row) => acc + row.protein, 0) / (completed.length || 1))}g / {fmt(completed.reduce((acc, row) => acc + row.goal.protein, 0) / (completed.length || 1))}g</strong></div>
-              <p className="hint">Averages and projections use completed days only.</p>
-            </div>
-          </details>
-        </>
-      ) : <div className="empty">Complete a day in this week to calculate banking.</div>}
+      <div className="bank-hero">
+        <div className="label">{finished ? 'Week result' : cutting ? 'Banked so far' : 'So far this week'}</div>
+        <div className={`value ${gapTone(mode, banked, 150 * Math.max(1, counted.length))}`}>{heroValue}</div>
+        <p className="bank-answer">{bankAnswer(state, week)}</p>
+        <div className="bank-note">
+          {`Based on ${counted.length} counted day${counted.length === 1 ? '' : 's'}${roughCount ? `, ${roughCount} of them rough guesses` : ''}.`}
+          {untrackedCount ? ' Days with nothing logged count as on target.' : ''}
+        </div>
+      </div>
+      {toCheck.length > 0 && (
+        <button type="button" className="bank-check" onClick={() => onOpenDay(toCheck[0].date)}>
+          <span className="bank-check-text">
+            <strong>{checkNames} look{toCheck.length === 1 ? 's' : ''} light</strong>
+            <small>
+              {toCheck.length === 1 ? `${energyText(state, toCheck[0].totals.calories)} of ${energyText(state, toCheck[0].goal.calories)} logged. ` : ''}
+              Check {toCheck.length === 1 ? 'it' : 'them'} so a missed meal doesn’t count as savings.
+            </small>
+          </span>
+          <Icon name="chevron" size={18} />
+        </button>
+      )}
+      <div className="bank-stats">
+        {finished
+          ? <div><span>Weekly budget</span><strong>{energyText(state, week.budget)}</strong></div>
+          : <div><span>Left this week</span><strong className={week.left < 0 ? 'warn' : ''}>{energyText(state, week.left)}</strong></div>}
+        <div><span>Daily average</span><strong className={counted.length ? gapTone(mode, countedTarget / counted.length - average, 150) : ''}>{counted.length ? energyText(state, average) : '—'}</strong></div>
+        <div><span>Days counted</span><strong>{counted.length} of 7</strong></div>
+      </div>
+      <BankBars state={state} days={days} onOpenDay={onOpenDay} />
+      <p className="hint bank-legend">≈ rough guess · — nothing logged · Tap a day to open it.</p>
+      <details className="extra-info bank-details">
+        <summary>More details</summary>
+        <div className="extra-info-body">
+          {!finished && <div className="stat"><span>Weekly budget</span><strong>{energyText(state, week.budget)}</strong></div>}
+          <div className="stat"><span>Eaten on counted days</span><strong>{energyText(state, eaten)}</strong></div>
+          <div className="stat"><span>Target for counted days</span><strong>{energyText(state, countedTarget)}</strong></div>
+          <div className="stat"><span>At your counted-day pace</span><strong>{counted.length ? energyText(state, average * 7) : '—'}</strong></div>
+          {logged.length > 0 && <div className="stat"><span>Average protein</span><strong>{fmt(logged.reduce((acc, day) => acc + day.totals.protein, 0) / logged.length)}g / {fmt(logged.reduce((acc, day) => acc + day.goal.protein, 0) / logged.length)}g</strong></div>}
+          <p className="hint">Days count automatically once they’re over. A day logged under {Math.round(LIGHT_DAY_SHARE * 100)}% of target waits for a check, and a day with nothing logged counts as on target.</p>
+        </div>
+      </details>
     </section>
   );
 }
 
-function RichAdherence({ state, start, onHelp, onOpenDay }: { state: AppState; start: string; onHelp: () => void; onOpenDay: (date: string) => void }) {
-  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const rows = days.map(date => {
-    const total = sum(dayEntries(state, date)).calories;
-    const complete = isDayComplete(state, date);
-    const goal = goalForDate(state, date);
-    const status = classifyCalorieDay(total, complete, goal);
-    return { date, total, complete, goal, status, success: status === 'good' };
-  });
-  const completed = rows.filter(row => row.complete);
-  const success = rows.filter(row => row.success);
-  const score = completed.length ? Math.round(success.length / completed.length * 100) : 0;
-  const firstGoal = completed[0]?.goal || goalForDate(state, todayKey());
-  const oneRule = completed.every(row => row.goal.trackingMode === firstGoal.trackingMode && row.goal.calories === firstGoal.calories);
-  const ruleText = oneRule ? statsRuleText(firstGoal, state.settings.energyUnit) : 'On track = each completed day against its saved goal.';
+function RichAdherence({ state, week, onHelp, onOpenDay }: { state: AppState; week: WeekBank; onHelp: () => void; onOpenDay: (date: string) => void }) {
+  const scored = week.counted;
+  const success = scored.filter(day => classifyCalorieDay(day.intake, day.goal) === 'good');
+  const score = scored.length ? Math.round(success.length / scored.length * 100) : 0;
+  const firstGoal = scored[0]?.goal || goalForDate(state, todayKey());
+  const oneRule = scored.every(day => day.goal.trackingMode === firstGoal.trackingMode && day.goal.calories === firstGoal.calories);
+  const ruleText = oneRule ? statsRuleText(firstGoal, state.settings.energyUnit) : 'On track = each counted day against its saved goal.';
   return (
     <section className="card stats-card">
       <div className="card-head"><h2>Consistency this week</h2><button className="help-btn" type="button" onClick={onHelp}>?</button></div>
-      {completed.length ? (
+      {scored.length ? (
         <div className="adherence-hero">
-          <div className="label">On-track completed days</div>
-          <div className={`score ${score >= 70 ? 'good' : ''}`}>{success.length}<span className="unit">/{completed.length}</span></div>
-          <div className="bank-note">{ruleText} Open days stay open.</div>
+          <div className="label">On-track counted days</div>
+          <div className={`score ${score >= 70 ? 'good' : ''}`}>{success.length}<span className="unit">/{scored.length}</span></div>
+          <div className="bank-note">{ruleText}</div>
         </div>
       ) : (
-        <div className="empty">Complete a day in this week to see consistency.</div>
+        <div className="empty">No counted days in this week yet.</div>
       )}
       <div className="consistency-week" aria-label="Consistency by day">
-        {rows.map(row => {
-          const weekday = new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3);
-          const tone = dayToneLabel(row.status, row.complete);
+        {week.days.map(day => {
+          const tone = dayTone(day);
+          const label = DAY_TONE_LABEL[tone];
           return (
-            <button key={row.date} className="consistency-day" type="button" onClick={() => onOpenDay(row.date)} aria-label={`${readable(row.date)}: ${tone.label}${row.complete ? `, ${energyText(state, row.total)}` : ''}. Open this day.`}>
-              <span className="consistency-label">{weekday}</span>
-              <span className={`consistency-pill ${tone.className}`}>
+            <button key={day.date} className="consistency-day" type="button" onClick={() => onOpenDay(day.date)} aria-label={`${readable(day.date)}: ${label}${day.intake != null ? `, ${energyText(state, day.intake)}` : ''}. Open this day.`}>
+              <span className="consistency-label">{weekdayName(day.date, 'short').slice(0, 3)}</span>
+              <span className={`consistency-pill ${tone === 'none' ? 'open' : tone}`}>
                 <span className="dot" aria-hidden="true" />
-                <span className="pill-text">{tone.label}</span>
+                <span className="pill-text">{label}</span>
               </span>
-              <span className="consistency-value">{row.complete ? fmt(energyValueForUnit(row.total, state.settings.energyUnit)) : '—'}</span>
+              <span className="consistency-value">{day.intake != null ? `${day.status === 'estimated' ? '≈' : ''}${fmt(energyValueForUnit(day.intake, state.settings.energyUnit))}` : '—'}</span>
             </button>
           );
         })}
@@ -4058,12 +4291,12 @@ function SettingsView(props: {
       <section className="card"><div className="card-head"><h2>Goals</h2><button className="small-btn" type="button" onClick={() => props.goalsEditing ? props.onSaveGoals() : (props.setGoalDraft({ ...props.state.settings, calories: energyValueForUnit(props.state.settings.calories, goalUnit) }), props.setGoalsEditing(true))}>{props.goalsEditing ? 'Save goals' : 'Edit'}</button></div><div className="form"><Field label="Mode" full><select disabled={!props.goalsEditing} value={draft.trackingMode} onChange={event => patchGoal({ trackingMode: event.target.value as Settings['trackingMode'] })}><option>Cutting</option><option>Maintaining</option><option>Bulking</option></select></Field><Field label={`Calories (${energyUnitLabel(goalUnit)})`}><input disabled={!props.goalsEditing} inputMode="decimal" value={props.goalsEditing ? String(draft.calories || '') : fmt(draft.calories)} onChange={event => patchGoal({ calories: n(event.target.value) })} /></Field><Field label="Fat"><input disabled={!props.goalsEditing} value={draft.fat} onChange={event => patchGoal({ fat: n(event.target.value) })} /></Field><Field label="Carbs"><input disabled={!props.goalsEditing} value={draft.carbs} onChange={event => patchGoal({ carbs: n(event.target.value) })} /></Field><Field label="Protein"><input disabled={!props.goalsEditing} value={draft.protein} onChange={event => patchGoal({ protein: n(event.target.value) })} /></Field></div></section>
       <section className="card">
         <h2>Weekly banking</h2>
-        <p className="hint">Use completed days to make the rest of the week easier to plan.</p>
+        <p className="hint">Days count toward your week bank on their own once they’re over.</p>
         <label className="check-pill full">
           <input type="checkbox" checked={props.state.settings.spreadWeeklyBank} onChange={event => props.onSpreadWeeklyBank(event.target.checked)} />
           <span>Spread banked calories across remaining days</span>
         </label>
-        <p className="hint">When enabled, saved or overrun calories from completed days are spread evenly across open days from today through Sunday.</p>
+        <p className="hint">When on, what you’ve banked or gone over is shared evenly across the days left, from today to Sunday. Going over never takes a day below 80% of its target; the rest stays in that week’s result.</p>
       </section>
       <section className="card"><h2>Display</h2><div className="field full"><span>Theme</span><div className="smooth-toggle theme-toggle" role="group" aria-label="Theme">{(['system', 'dark', 'light'] as ThemePreference[]).map(theme => <button key={theme} type="button" className={(props.state.settings.theme || DEFAULT.settings.theme) === theme ? 'active' : ''} onClick={() => props.onTheme(theme)}>{theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div><div className="field full"><span>Energy unit</span><div className="smooth-toggle" role="group" aria-label="Energy unit"><button type="button" className={goalUnit === 'kcal' ? 'active' : ''} onClick={toggleEnergyUnit}>Cal</button><button type="button" className={goalUnit === 'kj' ? 'active' : ''} onClick={toggleEnergyUnit}>kJ</button></div></div><div className="section spaced">Accent</div><div className="preset-row">{['#c9dc86', '#a8c9d8', '#dec77f', '#dc9b8e', '#c6b3df'].map(color => <button key={color} className="preset" style={{ '--c': color } as React.CSSProperties} type="button" onClick={() => props.onAccent(color)} aria-label={`Accent ${color}`} />)}</div><input type="color" value={props.state.settings.accent} onChange={event => props.onAccent(event.target.value)} /></section>
       <section className="card" id="backupSection"><h2>Backup</h2><p className="hint">{props.state.settings.lastBackupAt ? `Last backup: ${new Date(props.state.settings.lastBackupAt).toLocaleString()}.` : 'No backup exported yet.'} Dawni keeps your data on this device; export a backup to protect your logs and journal photos. Current data: {counts.entries} entries, {counts.foods} saved foods, {counts.photos} photos, {counts.customFoodDatabases || 0} custom databases.</p><Field label="Reminder" full><select value={props.state.settings.backupReminderDays} onChange={event => props.onBackupDays(n(event.target.value))}><option value="3">Every 3 days</option><option value="7">Every 7 days</option><option value="14">Every 14 days</option></select></Field><div className="actions"><button className="primary" type="button" onClick={props.onExport}>Export backup</button><button className="secondary" type="button" onClick={props.onImport}>Import backup</button></div></section>

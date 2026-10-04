@@ -2,8 +2,8 @@ export type Meal = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack' | 'Drink';
 export type EnergyUnit = 'kcal' | 'kj';
 export type TrackingMode = 'Cutting' | 'Maintaining' | 'Bulking';
 export type ThemePreference = 'system' | 'dark' | 'light';
-/** Where AI-provided numbers came from: a guess, a nutrition label read from a photo, or energy printed on a menu. */
-export type EntryEstimateSource = 'ai' | 'label' | 'menu';
+/** Where estimated numbers came from: an AI guess, a nutrition label read from a photo, energy printed on a menu, or a rough size picked for a meal that was hard to track. */
+export type EntryEstimateSource = 'ai' | 'label' | 'menu' | 'rough';
 
 export type Settings = {
   calories: number;
@@ -103,7 +103,10 @@ export type AppState = {
   settings: Settings;
   entries: Entry[];
   foods: Food[];
+  /** Days confirmed as fully logged (Done for today, or That's everything on a light day). They count toward the week bank even when they look light. */
   completedDates: string[];
+  /** Rough guesses for days whose log can't be trusted, in kcal above that day's target (0 = about on target). The week bank uses the guess instead of the log. */
+  dayEstimates: Record<string, number>;
   dailyGoals: Record<string, DailyGoalSnapshot>;
   /** Optional per-day calorie target (kcal) for open days; does not change macro targets on Track. */
   dayCalorieOverrides: Record<string, number>;

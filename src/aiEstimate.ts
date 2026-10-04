@@ -246,7 +246,8 @@ export function macrosDisagree(totals: Totals) {
 const SOURCE_LABEL: Record<EntryEstimateSource, string> = {
   ai: 'Estimated',
   label: 'From label',
-  menu: 'From menu'
+  menu: 'From menu',
+  rough: 'Rough guess'
 };
 
 export function estimateSourceLabel(source: EntryEstimateSource | null | undefined) {
@@ -254,7 +255,7 @@ export function estimateSourceLabel(source: EntryEstimateSource | null | undefin
 }
 
 export function estimateSourceValue(value: unknown): EntryEstimateSource | null {
-  return value === 'ai' || value === 'label' || value === 'menu' ? value : null;
+  return value === 'ai' || value === 'label' || value === 'menu' || value === 'rough' ? value : null;
 }
 
 /** Notes saved with the entry, so the guesses stay visible after logging. */

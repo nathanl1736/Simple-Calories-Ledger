@@ -380,7 +380,6 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
 .bar { height: 6px; background: var(--color-border-soft); border-radius: 999px; overflow: hidden; margin: 10px 0; }
 .bar div { height: 100%; border-radius: 999px; }
 
-.complete-day-btn { width: 100%; min-height: 58px; border-radius: 18px; background: var(--accent); color: var(--color-accent-ink); font-weight: 700; font-size: 17px; margin-bottom: 14px; }
 
 .ai-prompt-disclaimer { margin: 10px 0 0; }
 
@@ -393,15 +392,11 @@ h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; l
 .quick-picks-summary::after { content: ""; width: 9px; height: 9px; flex: 0 0 9px; border-top: 3px solid currentColor; border-right: 3px solid currentColor; color: var(--muted); transform: rotate(135deg); margin-left: auto; transition: transform .18s ease; }
 .quick-picks[open] .quick-picks-summary::after { transform: rotate(-45deg); }
 .swipe-confirm { width: 100%; height: 62px; border-radius: 999px; background: var(--color-surface-soft); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; user-select: none; box-shadow: inset 0 0 0 1px var(--color-inset-highlight); margin-bottom: 22px; }
-.swipe-confirm.reopen { border-color: color-mix(in srgb, var(--danger) 28%, var(--line)); }
 .swipe-confirm-fill { position: absolute; inset: 0 auto 0 0; width: var(--swipe); background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 34%, transparent), color-mix(in srgb, var(--accent) 14%, transparent)); border-radius: 999px; transition: width .16s ease; }
-.swipe-confirm.reopen .swipe-confirm-fill { background: linear-gradient(90deg, color-mix(in srgb, var(--danger) 28%, transparent), color-mix(in srgb, var(--danger) 10%, transparent)); }
 .swipe-confirm-handle { position: absolute; left: max(6px, calc(var(--swipe) - 56px)); top: 6px; width: 50px; height: 50px; border-radius: 999px; background: var(--accent); box-shadow: 0 10px 24px rgba(0,0,0,.26); transition: left .16s ease; }
-.swipe-confirm.reopen .swipe-confirm-handle { background: var(--danger); }
 .swipe-confirm-handle:before { content: ""; position: absolute; left: 16px; top: 23px; width: 18px; height: 4px; border-radius: 999px; background: var(--color-handle-mark); box-shadow: 0 7px 0 var(--color-handle-mark-soft), 0 -7px 0 var(--color-handle-mark-soft); }
 .swipe-confirm-label { position: relative; z-index: 1; color: var(--color-text-soft); font-size: 17px; font-weight: 700; padding-left: 38px; pointer-events: none; }
 .swipe-confirm.dragging .swipe-confirm-fill, .swipe-confirm.dragging .swipe-confirm-handle { transition: none; }
-.complete-day-btn { margin: 14px 0 0; }
 
 .card, .entry, .food-row { background: var(--card); border: 1px solid var(--surface-border); border-radius: var(--radius-card); transition: transform var(--motion-fast) var(--ease-ios), border-color var(--motion-fast) ease, background-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
 .card { padding: var(--space-card); margin-bottom: var(--gap-card); }
@@ -1529,8 +1524,6 @@ textarea { min-height: 78px; resize: vertical; }
 .entry-cal { min-width: 0; color: var(--ink); font-size: 15px; font-weight: 600; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .entry-cal small { margin-left: 3px; color: var(--muted); font-size: 12px; font-weight: 500; }
 .entry-menu-btn { width: 36px; height: 36px; background: transparent; }
-.complete-day-btn { margin: 4px 0 0; }
-.complete-day-hint { margin: 8px 8px 0; text-align: center; }
 
 /* Floating add button */
 .fab { position: fixed; z-index: 35; right: max(16px, calc((100vw - var(--app-shell-width)) / 2 + 16px)); bottom: calc(96px + env(safe-area-inset-bottom)); width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--color-accent-ink); box-shadow: 0 10px 26px color-mix(in srgb, var(--ink) 22%, transparent); }
@@ -1593,3 +1586,53 @@ textarea { min-height: 78px; resize: vertical; }
 .quick-ai-btn { width: var(--tap); height: var(--tap); border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 22%, var(--color-control)); color: var(--color-accent-text); border: 1px solid var(--line); }
 .quick-ai-btn:active, .quick-log .quick-browse-toggle:active { transform: scale(.94); }
 .quick-log .quick-picker details { padding: 10px 4px 0; }
+
+/* Today: where the day stands in the week bank (2.6). Replaces swipe to complete. */
+.day-status { padding: 14px 16px; margin-bottom: 12px; }
+.day-status-head { display: flex; align-items: center; gap: 8px; font-size: 16px; line-height: 1.3; }
+.day-status-head strong { font-weight: 600; }
+.day-status-dot { width: 12px; height: 12px; flex: 0 0 auto; border-radius: 50%; border: 2px dashed var(--color-border); box-sizing: border-box; }
+.day-status.counted .day-status-dot { border: 0; background: var(--color-good); }
+.day-status.rough .day-status-dot { border: 2px solid var(--color-good); }
+.day-status.none .day-status-dot { border: 0; background: var(--color-border); }
+.day-status.check { border-color: color-mix(in srgb, var(--color-review) 45%, var(--surface-border)); background: color-mix(in srgb, var(--color-review) 7%, var(--card)); }
+.day-status.check .day-status-dot { border-color: var(--color-review); }
+.day-status .hint { margin: 6px 0 0; }
+.day-status-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.day-status-actions .primary, .day-status-actions .secondary { min-height: 42px; padding: 0 14px; font-size: 14px; }
+.rough-day-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; width: 100%; }
+.rough-option { display: grid; gap: 2px; padding: 10px 12px; border-radius: 14px; background: var(--color-control); color: var(--ink); text-align: left; }
+.rough-option strong { font-size: 14px; font-weight: 600; }
+.rough-option small { color: var(--muted); font-size: 12.5px; }
+.rough-option.active { background: color-mix(in srgb, var(--accent) 18%, var(--color-control)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* Rough meal sheet */
+.rough-meal { display: grid; gap: 14px; }
+.rough-meal .hint { margin: 0; }
+.rough-meal-meals .chip { padding: 8px 12px; font-size: 14px; }
+.rough-meal-meals .chip.active { background: color-mix(in srgb, var(--accent) 22%, var(--color-control)); color: var(--color-accent-text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.add-row.rough-size { grid-template-columns: minmax(0, 1fr) auto; }
+.rough-size-energy { color: var(--ink); font-size: 15px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rough-meal-custom { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; }
+.rough-meal-custom .field { margin: 0; }
+
+/* Week: day states and the answer line (2.6) */
+.bank-answer { margin: 8px 0 4px; color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.35; }
+.bank-check { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 18px; align-items: center; gap: 10px; padding: 12px 14px; margin-bottom: 12px; border-radius: 16px; background: color-mix(in srgb, var(--color-review) 9%, var(--color-surface-soft)); border: 1px solid color-mix(in srgb, var(--color-review) 38%, var(--line)); color: inherit; text-align: left; }
+.bank-check-text strong { display: block; font-size: 15px; font-weight: 600; }
+.bank-check-text small { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.bank-check .icon { color: var(--muted); }
+.bank-delta.check { color: var(--color-review); }
+.bank-fill.rough { opacity: .55; }
+.bank-open-mark.light { height: 10px; top: calc(50% - 5px); background: transparent; border: 2px dashed var(--color-review); box-sizing: border-box; opacity: 1; }
+.bank-open-mark.today { background: color-mix(in srgb, var(--accent) 70%, var(--ink)); opacity: .85; }
+.bank-open-mark.upcoming { height: 8px; top: calc(50% - 4px); background: transparent; border: 2px dashed var(--color-border); box-sizing: border-box; }
+.bank-col.today .bank-day { color: var(--ink); font-weight: 700; }
+.bank-legend { margin: 8px 0 0; text-align: center; font-size: 12px; }
+.bank-help-list { margin-top: 12px; }
+.consistency-pill.check { color: var(--color-review); background: transparent; border: 1px dashed color-mix(in srgb, var(--color-review) 60%, var(--line)); }
+.consistency-pill.today { color: var(--color-accent-text); background: color-mix(in srgb, var(--accent) 12%, var(--color-surface-soft)); border-color: color-mix(in srgb, var(--accent) 30%, var(--color-border-soft)); }
+.week-dot.check i { border: 2px dashed var(--color-review); }
+.week-dot.today i { border: 2px solid color-mix(in srgb, var(--accent) 70%, var(--ink)); }
+.week-dot.none i { border: 0; background: var(--color-border); opacity: .6; }
+.week-dot.rough i { opacity: .55; }

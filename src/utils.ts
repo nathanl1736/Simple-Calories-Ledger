@@ -112,17 +112,36 @@ export function isDayComplete(state: AppState, key: string) {
 
 export function setDayComplete(state: AppState, key: string, on: boolean): AppState {
   const date = normalizeDateKey(key);
+  // A day can't be finished before it starts.
+  if (on && date > todayKey()) return state;
   const completedDates = state.completedDates.map(normalizeDateKey).filter(Boolean);
   const dailyGoals = { ...(state.dailyGoals || {}) };
-  const dayCalorieOverrides = { ...(state.dayCalorieOverrides || {}) };
   if (on && date && !dailyGoals[date]) dailyGoals[date] = goalSnapshotFromSettings(state.settings);
-  if (on && date) delete dayCalorieOverrides[date];
   return {
     ...state,
     completedDates: on ? [...new Set([...completedDates, date])] : completedDates.filter(item => item !== date),
-    dailyGoals,
-    dayCalorieOverrides
+    dailyGoals
   };
+}
+
+export function dayEstimate(state: AppState, key: string): number | null {
+  const value = state.dayEstimates?.[normalizeDateKey(key)];
+  return value == null || !Number.isFinite(value) ? null : value;
+}
+
+/** Sets a rough guess for a day (kcal above its target), or clears it with null. */
+export function setDayEstimate(state: AppState, key: string, kcal: number | null): AppState {
+  const date = normalizeDateKey(key);
+  if (!date || (kcal != null && date > todayKey())) return state;
+  const dayEstimates = { ...(state.dayEstimates || {}) };
+  const dailyGoals = { ...(state.dailyGoals || {}) };
+  if (kcal == null) {
+    delete dayEstimates[date];
+  } else {
+    dayEstimates[date] = Math.round(kcal);
+    if (!dailyGoals[date]) dailyGoals[date] = goalSnapshotFromSettings(state.settings);
+  }
+  return { ...state, dayEstimates, dailyGoals };
 }
 
 export function goalSnapshotFromSettings(settings: Settings): DailyGoalSnapshot {
@@ -156,22 +175,104 @@ export function goalForDate(state: AppState, key: string): DailyGoalSnapshot {
   return goalSnapshotFromSettings(state.settings);
 }
 
+/** Under this share of its target, a finished day's log probably has a meal missing, so it waits for a check before it banks. */
+export const LIGHT_DAY_SHARE = 0.6;
+/** Sharing out an overrun never takes a day below this share of its target; the rest stays in that week's result. */
+export const SPREAD_FLOOR_SHARE = 0.8;
+
+/**
+ * How a day takes part in the week bank:
+ * - counted: finished, and the bank uses what was logged
+ * - estimated: the bank uses a rough guess instead of the log
+ * - light: logged under LIGHT_DAY_SHARE of target, held out until checked
+ * - untracked: nothing logged, so it counts as on target
+ * - today: still in progress
+ * - upcoming: hasn't started
+ */
+export type DayBankStatus = 'counted' | 'estimated' | 'light' | 'untracked' | 'today' | 'upcoming';
+
+export type BankDay = {
+  date: string;
+  status: DayBankStatus;
+  goal: DailyGoalSnapshot;
+  /** What was logged. */
+  totals: Totals;
+  /** What the bank counts as eaten, or null while the day doesn't count. */
+  intake: number | null;
+  /** Target minus intake for a day that counts, else 0. Positive is under target. */
+  delta: number;
+};
+
+export function bankDay(state: AppState, key: string): BankDay {
+  const date = normalizeDateKey(key);
+  const today = todayKey();
+  const goal = goalForDate(state, date);
+  const totals = sum(dayEntries(state, date));
+  const estimate = dayEstimate(state, date);
+  let status: DayBankStatus;
+  if (date > today) status = 'upcoming';
+  else if (estimate != null) status = 'estimated';
+  // An empty day can't be a saving, even one swiped complete before 2.6.
+  else if (totals.calories <= 0) status = date === today ? 'today' : 'untracked';
+  else if (isDayComplete(state, date)) status = 'counted';
+  else if (date === today) status = 'today';
+  else status = totals.calories < goal.calories * LIGHT_DAY_SHARE ? 'light' : 'counted';
+  const intake = status === 'counted' ? totals.calories : status === 'estimated' ? goal.calories + (estimate || 0) : null;
+  return { date, status, goal, totals, intake, delta: intake == null ? 0 : goal.calories - intake };
+}
+
+export type WeekBank = {
+  days: BankDay[];
+  /** Days the bank uses: counted logs and rough guesses. */
+  counted: BankDay[];
+  /** Light days waiting for a check. */
+  toCheck: BankDay[];
+  /** Days still to eat: today while it's in progress, then the days ahead. */
+  remaining: BankDay[];
+  banked: number;
+  budget: number;
+  /** Food already logged on today while it's in progress. */
+  eatenToday: number;
+  /** What the remaining days can still eat in total: their targets plus the bank, less what today has had. */
+  left: number;
+  /** What each remaining day can average, never below SPREAD_FLOOR_SHARE of target. */
+  perDay: number;
+  /** How far over the week finishes if the remaining days eat perDay; only above 0 when the floor applies. */
+  overAtFloor: number;
+};
+
+export function weekBank(state: AppState, start: string): WeekBank {
+  const days = Array.from({ length: 7 }, (_, i) => bankDay(state, addDays(start, i)));
+  const counted = days.filter(day => day.intake != null);
+  const remaining = days.filter(day => day.status === 'today' || day.status === 'upcoming');
+  const banked = counted.reduce((acc, day) => acc + day.delta, 0);
+  const remainingTarget = remaining.reduce((acc, day) => acc + day.goal.calories, 0);
+  const eatenToday = remaining.reduce((acc, day) => acc + (day.status === 'today' ? day.totals.calories : 0), 0);
+  const even = remaining.length ? (remainingTarget + banked) / remaining.length : 0;
+  const floor = remaining.length ? remainingTarget * SPREAD_FLOOR_SHARE / remaining.length : 0;
+  const perDay = Math.max(even, floor);
+  return {
+    days,
+    counted,
+    toCheck: days.filter(day => day.status === 'light'),
+    remaining,
+    banked,
+    budget: days.reduce((acc, day) => acc + day.goal.calories, 0),
+    eatenToday,
+    left: remainingTarget + banked - eatenToday,
+    perDay,
+    overAtFloor: (perDay - even) * remaining.length
+  };
+}
+
 export function weeklyBankAdjustmentForDate(state: AppState, key: string): number {
   if (!state.settings.spreadWeeklyBank) return 0;
   const date = normalizeDateKey(key);
-  const today = todayKey();
-  if (!date || date < today || isDayComplete(state, date)) return 0;
-
-  const start = weekStartMonday(date);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  const completedBank = days
-    .filter(day => isDayComplete(state, day))
-    .reduce((acc, day) => acc + goalForDate(state, day).calories - sum(dayEntries(state, day)).calories, 0);
-  if (completedBank === 0) return 0;
-
-  const remainingDays = days.filter(day => day >= today && !isDayComplete(state, day));
-  if (!remainingDays.includes(date) || !remainingDays.length) return 0;
-  return completedBank / remainingDays.length;
+  if (!date) return 0;
+  const week = weekBank(state, weekStartMonday(date));
+  if (!week.banked || !week.remaining.some(day => day.date === date)) return 0;
+  const goal = goalForDate(state, date).calories;
+  return Math.max(week.banked / week.remaining.length, -goal * (1 - SPREAD_FLOOR_SHARE));
 }
 
 export function dayCalorieSliderBounds(suggested: number): { min: number; max: number } {
@@ -194,9 +295,9 @@ function overrideNearSuggestedTolerance(suggested: number) {
 export function resolveDayCalorieTarget(state: AppState, date: string): { suggested: number; effective: number; hasOverride: boolean } {
   const key = normalizeDateKey(date);
   const suggested = suggestedTrackDayCalories(state, key);
-  const complete = isDayComplete(state, key);
   const raw = state.dayCalorieOverrides?.[key];
-  if (complete || raw == null || !Number.isFinite(raw)) {
+  // A day target plans today or a day ahead; a finished day shows its usual target.
+  if (key < todayKey() || raw == null || !Number.isFinite(raw)) {
     return { suggested, effective: suggested, hasOverride: false };
   }
   const { min, max } = dayCalorieSliderBounds(suggested);
@@ -228,7 +329,8 @@ export function applyDayCalorieOverride(state: AppState, date: string, kcal: num
 export function datesWithRecords(state: AppState) {
   return [...new Set([
     ...state.entries.map(entry => normalizeDateKey(entry.date)).filter(Boolean),
-    ...state.completedDates.map(normalizeDateKey).filter(Boolean)
+    ...state.completedDates.map(normalizeDateKey).filter(Boolean),
+    ...Object.keys(state.dayEstimates || {}).map(normalizeDateKey).filter(Boolean)
   ])].sort();
 }
 

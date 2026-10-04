@@ -1,7 +1,7 @@
 [
-  "Help me pick from a menu keeps its advice short: a one-line reason, a brief tip and a two-sentence summary, so it's quick to read while you order.",
-  "Checking an estimate now fits on one screen: the food name, the numbers, how much you ate, the logged total and what Gemini assumed. Foods picked from search and Edit entry work the same way.",
-  "The swipe now says what it will log, like “Swipe to log 92 Cal”, with what that leaves for the day just above it. The Close button has gone: tap ✕ or swipe down.",
-  "Fixed switching between Per serving and Per 100g, which could turn a 140 g yoghurt into 140 servings (9,240 Cal). It now keeps the total the same, and tapping the option that's already on does nothing.",
-  "Refine keeps the meal, photo and favourite you picked, a menu pick can't be swapped for an older Gemini estimate, and a blank amount logs what the sheet shows instead of 1 g."
+  "No more swipe to complete. Days now count toward your week bank on their own at midnight. Tap Done for today if you want today counted sooner, and past days stay editable without reopening them.",
+  "Forgot to log, or ate out? A day logged under 60% of its target waits for a quick check instead of banking the missing meal as savings, and a day with nothing logged counts as on target. Add a rough meal by size (Light, Regular, Big, Feast), or give the whole day a rough guess.",
+  "The Week page leads with the answer: what you've banked and roughly how much the days left can eat, like “Sunday can be about 2,100 Cal”. Left this week now takes off what you've already eaten today and no longer counts days that have been and gone.",
+  "Spreading the bank across the week never drops a day below 80% of its target after a big day. Whatever's left over stays in that week's result, and the bank resets Monday.",
+  "Week colours follow your goal, so eating under target shows amber when you're bulking, and rough guesses are marked with ≈."
 ]

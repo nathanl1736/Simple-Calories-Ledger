@@ -17,6 +17,9 @@ npm.cmd install
 npm.cmd run dev
 npm.cmd run build
 npm.cmd run preview
+npm.cmd test
 ```
+
+`npm test` checks the weekly calorie bank maths in `tests/` and needs Node 22.6 or newer.
 
 The GitHub Pages base path is configured as `/Simple-Calories-Ledger/` in `vite.config.ts`.
