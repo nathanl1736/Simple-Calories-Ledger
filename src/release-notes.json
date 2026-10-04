@@ -1,7 +1,7 @@
 [
-  "Fixed the backup reminder popping up even though you'd backed up recently, sometimes straight after exporting. It now counts from your last backup and only appears when one is due.",
-  "Faster logging: the + button now goes straight to typing in calories, with the keyboard ready. Each meal's + does the same for that meal.",
-  "Search is back on Today, right under your summary. Type, tap a food and swipe to log. The arrow beside it shows your favourites and recent foods.",
-  "Gemini, menu picks and Copy prompt / Paste estimate are under the ✦ button next to search.",
-  "Log food now opens with the numbers at the top, so there's nothing to scroll past."
+  "Checking an estimate now fits on one screen: the food name, the numbers, how much you ate, the logged total and what Gemini assumed. Foods picked from search and Edit entry work the same way.",
+  "The swipe now says what it will log, like “Swipe to log 92 Cal”, with what that leaves for the day just above it. The Close button has gone: tap ✕ or swipe down.",
+  "Fixed switching between Per serving and Per 100g, which could turn a 140 g yoghurt into 140 servings (9,240 Cal). It now keeps the total the same, and tapping the option that's already on does nothing.",
+  "Refine keeps the meal, photo and favourite you picked, a menu pick can't be swapped for an older Gemini estimate, and a blank amount logs what the sheet shows instead of 1 g.",
+  "Fixed the backup reminder popping up even though you'd backed up recently, sometimes straight after exporting. It now counts from your last backup and only appears when one is due."
 ]

@@ -169,6 +169,41 @@ function defaultMealForCurrentTime(): Meal {
 
 const draftNumberText = (value: unknown) => String(Number.isFinite(Number(value)) ? Number(value) : 0);
 const draftEnergyText = (kcal: number, unit: EnergyUnit) => energyInputFromKcal(kcal, unit) || '0';
+const roundedText = (value: number, decimals: number) => String(Number(value.toFixed(decimals)));
+/** Scales a typed number, leaving a blank field blank. */
+const scaledDraftText = (value: string, factor: number, decimals: number) => value.trim() === '' ? value : roundedText(n(value) * factor, decimals);
+const positiveOr = (value: unknown, fallback: number) => n(value) > 0 ? n(value) : fallback;
+/**
+ * Servings eaten, or grams in 100g mode. A blank or invalid amount counts as one
+ * serving or 100 g, the same for the total shown, the swipe and what gets saved.
+ */
+const draftPortion = (draft: Pick<EntryDraft, 'portion' | 'unitMode'>) => positiveOr(draft.portion, draft.unitMode === '100g' ? 100 : 1);
+
+/**
+ * Changes what the numbers are per (one serving or 100 g) without changing what
+ * gets logged: 140 g at 66 Cal per 100 g becomes 1 serving of 92 Cal, and back.
+ */
+function switchDraftBasis(draft: EntryDraft, next: EntryDraft['unitMode']): Partial<EntryDraft> {
+  if (draft.unitMode === next) return {};
+  const scale = (factor: number) => ({
+    calories: scaledDraftText(draft.calories, factor, draft.entryEnergyUnit === 'kj' ? 1 : 0),
+    fat: scaledDraftText(draft.fat, factor, 1),
+    carbs: scaledDraftText(draft.carbs, factor, 1),
+    protein: scaledDraftText(draft.protein, factor, 1)
+  });
+  if (next === 'serving') {
+    const grams = draftPortion(draft);
+    // Keep a known serving size (1 slice = 30 g); otherwise what was eaten becomes the serving.
+    const servingGrams = positiveOr(draft.servingGrams, grams);
+    return { unitMode: next, portion: roundedText(grams / servingGrams, 2), servingGrams: roundedText(servingGrams, 1), ...scale(servingGrams / 100) };
+  }
+  const servings = draftPortion(draft);
+  const servingGrams = positiveOr(draft.servingGrams, 0);
+  // With no serving weight there is nothing to convert with, so the numbers stay and
+  // the grams are set to log the same total until the real amount is typed.
+  if (!servingGrams) return { unitMode: next, portion: roundedText(servings * 100, 1) };
+  return { unitMode: next, portion: roundedText(servings * servingGrams, 1), ...scale(100 / servingGrams) };
+}
 
 type Toast = { id: number; text: string } | null;
 type GeminiCheck = {
@@ -926,6 +961,13 @@ export function App() {
   const totals = useMemo(() => sum(entries), [entries]);
   const complete = isDayComplete(state, selectedDate);
   const mealGroups = useMemo(() => getMealGroups(state), [state]);
+  // The selected day without the entry being edited, so Log food can show what saving it leaves.
+  const entryDay = useMemo(() => ({
+    eaten: sum(entries.filter(entry => entry.id !== entryDraft.editingId)).calories,
+    target: resolveDayCalorieTarget(state, selectedDate).effective,
+    bulking: goalForDate(state, selectedDate).trackingMode === 'Bulking',
+    date: selectedDate
+  }), [entries, entryDraft.editingId, state, selectedDate]);
 
   const openEntry = (meal: Meal = defaultMealForCurrentTime(), date = selectedDate) => {
     if (isDayComplete(state, date)) return notify('Reopen the day before changing food logs');
@@ -985,7 +1027,7 @@ export function App() {
       baseProtein: n(entryDraft.protein),
       baseCarbs: n(entryDraft.carbs),
       baseFat: n(entryDraft.fat),
-      portion: n(entryDraft.portion) || 1,
+      portion: draftPortion(entryDraft),
       calories: energyInputToKcal(entryDraft.calories, entryDraft.entryEnergyUnit),
       protein: n(entryDraft.protein),
       carbs: n(entryDraft.carbs),
@@ -1160,6 +1202,8 @@ export function App() {
 
   const prefillMenuPick = (item: MenuPickItem, meal: Meal) => {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
+    // Refine re-asks the last Gemini estimate, so an earlier one must not replace this pick.
+    setEstimateSession(null);
     flushSync(() => {
       setEntryDraft({
         ...blankEntryDraft(meal, entryEnergyUnit),
@@ -1177,24 +1221,28 @@ export function App() {
     });
   };
 
-  const prefillGeminiEstimate = (estimate: GeminiEstimate) => {
+  /** With `keepChoices` (a refine), Gemini's new numbers replace the old ones but the meal, photo and favourite picked while reviewing stay. */
+  const prefillGeminiEstimate = (estimate: GeminiEstimate, keepChoices = false) => {
     setToast(null); // The "Estimating…" message would otherwise cover the result.
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
     const fromLabel = estimate.source === 'label';
     flushSync(() => {
-      setEntryDraft({
-        ...blankEntryDraft(estimate.meal, entryEnergyUnit),
-        name: estimate.name,
-        unitMode: estimate.unitMode,
-        servingLabel: estimate.servingLabel,
-        calories: draftEnergyText(estimate.base.calories, entryEnergyUnit),
-        protein: draftNumberText(Math.round(estimate.base.protein * 10) / 10),
-        carbs: draftNumberText(Math.round(estimate.base.carbs * 10) / 10),
-        fat: draftNumberText(Math.round(estimate.base.fat * 10) / 10),
-        portion: String(estimate.portion),
-        notes: estimateNotes(fromLabel ? 'Read from the nutrition label.' : estimate.notes, estimate.assumptions, estimate.confidence),
-        estimateSource: fromLabel ? 'label' : 'ai',
-        estimateDetails: { confidence: estimate.confidence, assumptions: estimate.assumptions }
+      setEntryDraft(current => {
+        const next: EntryDraft = {
+          ...blankEntryDraft(estimate.meal, entryEnergyUnit),
+          name: estimate.name,
+          unitMode: estimate.unitMode,
+          servingLabel: estimate.servingLabel,
+          calories: draftEnergyText(estimate.base.calories, entryEnergyUnit),
+          protein: draftNumberText(Math.round(estimate.base.protein * 10) / 10),
+          carbs: draftNumberText(Math.round(estimate.base.carbs * 10) / 10),
+          fat: draftNumberText(Math.round(estimate.base.fat * 10) / 10),
+          portion: String(estimate.portion),
+          notes: estimateNotes(fromLabel ? 'Read from the nutrition label.' : estimate.notes, estimate.assumptions, estimate.confidence),
+          estimateSource: fromLabel ? 'label' : 'ai',
+          estimateDetails: { confidence: estimate.confidence, assumptions: estimate.assumptions }
+        };
+        return keepChoices ? { ...next, meal: current.meal, photo: current.photo, favourite: current.favourite } : next;
       });
       setEntryOpenMode('prefill');
       setModal('entry');
@@ -1240,7 +1288,7 @@ export function App() {
     const { raw, parsed } = await runGeminiEstimate(estimateSession.description, estimateSession.photos, correction);
     if (!parsed) throw new Error('Gemini replied in a format Dawni couldn’t read. Try again.');
     setEstimateSession({ ...estimateSession, reply: raw, description: `${estimateSession.description}\n(Correction: ${correction.trim()})`.trim() });
-    prefillGeminiEstimate(parsed);
+    prefillGeminiEstimate(parsed, true);
   };
 
   const saveDatabaseFood = async (item: FoodDatabaseItem) => {
@@ -1528,6 +1576,7 @@ export function App() {
         onPickPhoto={() => photoInputRef.current?.click()}
         onSaveDatabaseFood={saveDatabaseFood}
         onRefine={estimateSession && entryDraft.estimateDetails && !entryDraft.editingId ? refineGeminiEstimate : undefined}
+        day={entryDay}
       />
       <FoodModal
         food={activeFood}
@@ -2055,7 +2104,7 @@ function SwipeConfirm({ label, confirmLabel, className = '', onConfirm }: { labe
       data-swipe-lock
       role="button"
       tabIndex={0}
-      aria-label={confirmLabel || label}
+      aria-label={label}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -2899,7 +2948,8 @@ function EntryModal({
   onSave,
   onPickPhoto,
   onSaveDatabaseFood,
-  onRefine
+  onRefine,
+  day
 }: {
   open: boolean;
   openMode: EntryOpenMode;
@@ -2913,6 +2963,8 @@ function EntryModal({
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   /** Present while the draft is the latest Gemini estimate. */
   onRefine?: (correction: string) => Promise<void>;
+  /** The day being logged to, without this entry. Energy in kcal. */
+  day: { eaten: number; target: number; bulking: boolean; date: string };
 }) {
   const [refineText, setRefineText] = useState('');
   const [refining, setRefining] = useState(false);
@@ -2921,11 +2973,13 @@ function EntryModal({
   const caloriesInputRef = useRef<HTMLInputElement>(null);
   const update = (patch: Partial<EntryDraft>) => setDraft(current => ({ ...current, ...patch }));
   const baseCalories = energyInputToKcal(draft.calories, draft.entryEnergyUnit);
-  const multiplier = draft.unitMode === '100g' ? (n(draft.portion) || 100) / 100 : n(draft.portion) || 1;
+  const multiplier = draft.unitMode === '100g' ? draftPortion(draft) / 100 : draftPortion(draft);
   const total = { calories: baseCalories * multiplier, fat: n(draft.fat) * multiplier, carbs: n(draft.carbs) * multiplier, protein: n(draft.protein) * multiplier };
+  // Reviewing a picked food, an AI estimate or a saved entry starts from what it is; typing one in starts from the numbers.
+  const reviewing = openMode !== 'manual';
   const scrollCaloriesPanel = (behavior: ScrollBehavior = 'smooth') => {
     requestAnimationFrame(() => {
-      // The numbers are the first thing in the sheet, so showing them means back to the top.
+      // The numbers are at or near the top of the sheet, so showing them means back to the top.
       caloriesPanelRef.current?.closest('.modal-body')?.scrollTo({ top: 0, behavior });
     });
   };
@@ -2935,18 +2989,11 @@ function EntryModal({
       caloriesInputRef.current?.select();
     });
   };
-  const setEntryEnergyUnit = (nextUnit: EnergyUnit) => {
-    const currentKcal = energyInputToKcal(draft.calories, draft.entryEnergyUnit);
-    update({ entryEnergyUnit: nextUnit, calories: energyInputFromKcal(currentKcal, nextUnit) });
-  };
-  const toggleEntryEnergyUnit = () => setEntryEnergyUnit(draft.entryEnergyUnit === 'kcal' ? 'kj' : 'kcal');
-  const toggleUnitMode = () => {
-    const nextUnitMode = draft.unitMode === 'serving' ? '100g' : 'serving';
-    update({
-      unitMode: nextUnitMode,
-      portion: nextUnitMode === '100g' && draft.portion === '1' ? '100' : nextUnitMode === 'serving' && draft.portion === '100' ? '1' : draft.portion
-    });
-  };
+  // Each option sets its own value, so tapping the one already chosen changes nothing.
+  const setEntryEnergyUnit = (nextUnit: EnergyUnit) => setDraft(current => current.entryEnergyUnit === nextUnit
+    ? current
+    : { ...current, entryEnergyUnit: nextUnit, calories: energyInputFromKcal(energyInputToKcal(current.calories, current.entryEnergyUnit), nextUnit) });
+  const setUnitMode = (nextUnitMode: EntryDraft['unitMode']) => setDraft(current => ({ ...current, ...switchDraftBasis(current, nextUnitMode) }));
   const chooseFood = (food: Food) => {
     const unit = draft.entryEnergyUnit;
     setDraft(current => ({
@@ -3000,33 +3047,79 @@ function EntryModal({
     }
   };
 
+  const per100g = draft.unitMode === '100g';
+  const basisText = per100g ? 'per 100 g' : 'per serving';
+  // What one serving is ("1 pouch (140g)", "1 tsp (5g)"), so the amount can be checked against it.
+  // A bare weight or "1 serve" would only repeat the amount.
+  const servingCaption = draft.servingLabel.trim();
+  const showServingCaption = !!servingCaption && !/^[\d.,]+\s*g$/i.test(servingCaption) && !/^1\s*serv(e|ing)$/i.test(servingCaption);
+  const displayUnit = state.settings.energyUnit;
+  const hasCalories = draft.calories.trim() !== '';
+  const loggedText = energyTextForUnit(total.calories, displayUnit);
+  const dayName = readable(day.date);
+  const dayWord = ['Today', 'Yesterday', 'Tomorrow'].includes(dayName) ? dayName.toLowerCase() : `on ${dayName}`;
+  const remaining = Math.round(day.target - day.eaten - (hasCalories ? total.calories : 0));
+  const dayLine = !(day.target > 0)
+    ? ''
+    : remaining < 0
+      ? `${energyTextForUnit(-remaining, displayUnit)} over${day.bulking ? ' target' : ''} ${dayWord}`
+      : `${energyTextForUnit(remaining, displayUnit)} ${day.bulking ? 'to go' : 'left'} ${dayWord}`;
+  const swipeLabel = draft.editingId
+    ? hasCalories ? `Swipe to save ${loggedText}` : 'Swipe to save entry'
+    : hasCalories ? `Swipe to log ${loggedText}` : 'Swipe to log food';
+  const nameField = <Field label="Food name" full><input value={draft.name} placeholder={`${draft.meal} entry`} onChange={event => update({ name: event.target.value })} /></Field>;
+
   return (
     <Modal open={open} title={draft.editingId ? 'Edit entry' : `Log ${draft.meal.toLowerCase()}`} onClose={onClose} wide bottomSheet>
       <form className="form entry-form" onSubmit={(event: FormEvent) => { event.preventDefault(); onSave(false); }}>
-        <div ref={caloriesPanelRef} className="calories-priority full">
-          <label>
-            <span>Calories & Macros</span>
-            <span className="unit-toggle-chip" role="group" aria-label="Energy input unit">
-              <button type="button" className={draft.entryEnergyUnit === 'kcal' ? 'active' : ''} onClick={toggleEntryEnergyUnit}>Cal</button>
-              <button type="button" className={draft.entryEnergyUnit === 'kj' ? 'active' : ''} onClick={toggleEntryEnergyUnit}>kJ</button>
+        {reviewing && nameField}
+        <div ref={caloriesPanelRef} className="calories-priority full" role="group" aria-label="Calories and macros">
+          <div className="entry-panel-head">
+            <span className="unit-toggle-chip" role="group" aria-label="Nutrition values are">
+              <button type="button" className={per100g ? '' : 'active'} aria-pressed={!per100g} onClick={() => setUnitMode('serving')}>Per serving</button>
+              <button type="button" className={per100g ? 'active' : ''} aria-pressed={per100g} onClick={() => setUnitMode('100g')}>Per 100g</button>
             </span>
-          </label>
-          <div className="calorie-input-row">
-            <input ref={caloriesInputRef} id="entryCalories" inputMode="decimal" value={draft.calories} placeholder="0" onChange={event => update({ calories: event.target.value })} />
-            <span>{energyUnitLabel(draft.entryEnergyUnit)}</span>
+            <span className="unit-toggle-chip" role="group" aria-label="Energy input unit">
+              <button type="button" className={draft.entryEnergyUnit === 'kcal' ? 'active' : ''} aria-pressed={draft.entryEnergyUnit === 'kcal'} onClick={() => setEntryEnergyUnit('kcal')}>Cal</button>
+              <button type="button" className={draft.entryEnergyUnit === 'kj' ? 'active' : ''} aria-pressed={draft.entryEnergyUnit === 'kj'} onClick={() => setEntryEnergyUnit('kj')}>kJ</button>
+            </span>
+          </div>
+          <div className="calorie-input-row entry-energy-row">
+            <input ref={caloriesInputRef} id="entryCalories" aria-label={`${energyUnitLabel(draft.entryEnergyUnit)} ${basisText}`} inputMode="decimal" value={draft.calories} placeholder="0" onChange={event => update({ calories: event.target.value })} />
+            <span className="energy-suffix" aria-hidden="true"><strong>{energyUnitLabel(draft.entryEnergyUnit)}</strong><small>{basisText}</small></span>
           </div>
           <div className="nutrition-grid">
             <Field label="Fat (g)"><input inputMode="decimal" value={draft.fat} onChange={event => update({ fat: event.target.value })} /></Field>
             <Field label="Carbs (g)"><input inputMode="decimal" value={draft.carbs} onChange={event => update({ carbs: event.target.value })} /></Field>
             <Field label="Protein (g)"><input inputMode="decimal" value={draft.protein} onChange={event => update({ protein: event.target.value })} /></Field>
           </div>
-          <div className="unit-basis-row">
-            <span>Nutrition values</span>
-            <span className="unit-toggle-chip" role="group" aria-label="Nutrition values basis">
-              <button type="button" className={draft.unitMode === 'serving' ? 'active' : ''} onClick={toggleUnitMode}>Per serving</button>
-              <button type="button" className={draft.unitMode === '100g' ? 'active' : ''} onClick={toggleUnitMode}>Per 100g</button>
-            </span>
+          <div className="amount-row">
+            <label className="amount-label" htmlFor="entryPortion">
+              <span>{per100g ? 'Amount eaten' : 'Servings eaten'}</span>
+              {showServingCaption && <small>{servingCaption}</small>}
+            </label>
+            <div className="calorie-input-row amount-input-row">
+              <input
+                id="entryPortion"
+                inputMode="decimal"
+                value={draft.portion}
+                onChange={event => update({ portion: event.target.value })}
+                onFocus={event => {
+                  const input = event.currentTarget;
+                  // Selected so a new amount replaces the old one. After focus, or iOS clears it.
+                  requestAnimationFrame(() => input.select());
+                }}
+              />
+              <span aria-hidden="true">{per100g ? 'g' : draftPortion(draft) === 1 ? 'serving' : 'servings'}</span>
+            </div>
           </div>
+          {multiplier !== 1 && (
+            <div className="meta-chips portion-preview" aria-live="polite">
+              <span className="portion-preview-label">Logged total</span>
+              <span className="meta-chip accent">{loggedText}</span>
+              <MacroChips fat={total.fat} carbs={total.carbs} protein={total.protein} />
+            </div>
+          )}
           {draft.estimateSource && (
             <div className="estimate-review">
               <div className="meta-chips estimate-source-row">
@@ -3034,11 +3127,12 @@ function EntryModal({
                 {draft.estimateDetails && <span className={`meta-chip confidence-chip confidence-${draft.estimateDetails.confidence}`}>{draft.estimateDetails.confidence[0].toUpperCase() + draft.estimateDetails.confidence.slice(1)} confidence</span>}
                 <button type="button" className="link-btn" onClick={() => update({ estimateSource: null, estimateDetails: null })}>Not an estimate</button>
               </div>
-              <p className="hint estimate-hint">{draft.estimateSource === 'label'
-                ? 'Read from the label photo. Check it matches the pack and the amount you ate.'
-                : draft.estimateSource === 'menu'
-                  ? 'Energy printed on the menu; macros are estimated.'
-                  : 'AI estimate. Adjust anything that looks off.'}</p>
+              {/* The Estimated chip already says it's a guess; labels and menus need the specific check. */}
+              {draft.estimateSource !== 'ai' && (
+                <p className="hint estimate-hint">{draft.estimateSource === 'label'
+                  ? 'Read from the label photo. Check it matches the pack and the amount you ate.'
+                  : 'Energy printed on the menu; macros are estimated.'}</p>
+              )}
               {!!draft.estimateDetails?.assumptions.length && (
                 <ul className="estimate-assumptions" aria-label="What Gemini assumed">
                   {draft.estimateDetails.assumptions.map(item => <li key={item}>{item}</li>)}
@@ -3068,18 +3162,11 @@ function EntryModal({
               {refineError && <p className="ai-quick-log-error">{refineError}</p>}
             </div>
           )}
-          {multiplier !== 1 && (
-            <div className="meta-chips portion-preview">
-              <span className="meta-chip neutral">Logged total</span>
-              <span className="meta-chip accent">{energyTextForUnit(total.calories, state.settings.energyUnit)}</span>
-              <MacroChips fat={total.fat} carbs={total.carbs} protein={total.protein} />
-            </div>
-          )}
         </div>
 
         <Field label="Meal" full><div className="meal-chip-row">{MEALS.map(meal => <button key={meal} type="button" className={`meal-chip ${draft.meal === meal ? 'active' : ''}`} onClick={() => update({ meal })}>{meal}</button>)}</div></Field>
-        <Field label="Food name" full><input value={draft.name} placeholder={`${draft.meal} entry`} onChange={event => update({ name: event.target.value })} /></Field>
-        {!draft.editingId && <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} onSaveDatabaseFood={onSaveDatabaseFood} compact />}
+        {!reviewing && nameField}
+        {!reviewing && !draft.editingId && <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} onSaveDatabaseFood={onSaveDatabaseFood} compact />}
         <div className="photo-picker full">
           <button type="button" className="photo-picker-label" onClick={onPickPhoto}>
             <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{draft.photo ? 'Meal photo attached' : 'Add meal photo'}</strong><small>{draft.photo ? 'Tap to replace the photo' : 'Optional journal photo, compressed before saving'}</small></span>
@@ -3088,16 +3175,15 @@ function EntryModal({
         </div>
 
         <div className="entry-form-extras">
-          <Field label={draft.unitMode === '100g' ? 'Amount eaten (g)' : 'Servings eaten'} full><input inputMode="decimal" value={draft.portion} onChange={event => update({ portion: event.target.value })} /></Field>
-          <div className="portion-help full">{draft.unitMode === '100g' ? 'Logged calories and macros = per 100g values x grams eaten / 100.' : 'Logged calories and macros = per-serving values x servings eaten.'}</div>
           <Field label="Notes" full><textarea value={draft.notes} onChange={event => update({ notes: event.target.value })} /></Field>
           <label className="check-pill full"><input type="checkbox" checked={draft.favourite} onChange={event => update({ favourite: event.target.checked })} /><span>Save to favourites</span></label>
         </div>
 
+        {/* What saving does, at the point of saving. ✕ and swipe down still close the sheet. */}
         <div className="actions full">
-          <SwipeConfirm label={draft.editingId ? 'Swipe to save entry' : 'Swipe to log food'} confirmLabel={draft.editingId ? 'Release to save' : 'Release to log'} className="entry-swipe" onConfirm={() => onSave(false)} />
-          {!draft.editingId && <button className="secondary" type="button" onClick={() => onSave(true)}>Save and add another</button>}
-          <button className="secondary" type="button" onClick={onClose}>Close</button>
+          {dayLine && <p className={`entry-day-impact ${remaining < 0 ? 'over' : ''}`}>{hasCalories && 'After this: '}<strong>{dayLine}</strong></p>}
+          <SwipeConfirm label={swipeLabel} confirmLabel={draft.editingId ? 'Release to save' : 'Release to log'} className="entry-swipe" onConfirm={() => onSave(false)} />
+          {!reviewing && !draft.editingId && <button className="secondary" type="button" onClick={() => onSave(true)}>Save and add another</button>}
         </div>
       </form>
     </Modal>
