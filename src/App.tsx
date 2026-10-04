@@ -1851,6 +1851,16 @@ function DayHeader({ value, onChange }: { value: string; onChange: (date: string
 
 const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
+type MacroView = 'left' | 'eaten';
+const MACRO_VIEW_KEY = 'dawni-macro-view';
+const storedMacroView = (): MacroView => {
+  try {
+    return localStorage.getItem(MACRO_VIEW_KEY) === 'eaten' ? 'eaten' : 'left';
+  } catch {
+    return 'left';
+  }
+};
+
 function TrackingView(props: {
   state: AppState;
   selectedDate: string;
@@ -1887,6 +1897,12 @@ function TrackingView(props: {
   const unit = energyLabel(state);
   const remainingText = fmt(energyValue(state, Math.abs(remaining)));
   const ringLabel = overTarget ? `${unit} over` : bulking ? `${unit} to go` : `${unit} left`;
+  const [macroView, setMacroView] = useState<MacroView>(storedMacroView);
+  const toggleMacroView = () => {
+    const next: MacroView = macroView === 'left' ? 'eaten' : 'left';
+    setMacroView(next);
+    try { localStorage.setItem(MACRO_VIEW_KEY, next); } catch { /* private mode */ }
+  };
   const isPast = props.selectedDate < todayKey();
   const day = bankDay(state, props.selectedDate);
   const week = weekBank(state, weekStartMonday(props.selectedDate));
@@ -1943,15 +1959,30 @@ function TrackingView(props: {
         {(note || overTarget) && (
           <p className="summary-note">{overTarget ? `Over ${bulking || isPast ? 'target' : 'today'} by ${energyText(state, Math.abs(remaining))}. The week can still balance.` : note}</p>
         )}
-        <div className="summary-macros">
-          {macros.map(([name, value, target, color]) => (
-            <div className="summary-macro" key={name}>
-              <span className="summary-macro-name">{name}</span>
-              <span className="summary-macro-bar"><i style={{ background: `var(${color})`, width: `${Math.min(100, value / (target || 1) * 100)}%` }} /></span>
-              <span className="summary-macro-num"><strong>{fmt(value)}</strong> / {fmt(target)}g</span>
-            </div>
-          ))}
-        </div>
+        {/* Grams left by default, like the ring; a tap swaps to eaten / target and is remembered. */}
+        <button
+          type="button"
+          className="summary-macros"
+          onClick={toggleMacroView}
+          aria-label={`${macros.map(([name, value, target]) => `${name} ${fmt(value)} of ${fmt(target)} grams`).join(', ')}. Tap to show ${macroView === 'left' ? 'eaten and target' : 'grams left'}.`}
+        >
+          {macros.map(([name, value, target, color]) => {
+            const left = Math.round(target - value);
+            // Past the protein target is the goal; past carbs or fat is worth a look.
+            const overTone = left < 0 ? (name === 'Protein' ? 'is-good' : 'is-over') : '';
+            return (
+              <span className="summary-macro" key={name} aria-hidden="true">
+                <span className="summary-macro-name">{name}</span>
+                <span className="summary-macro-bar"><i style={{ background: `var(${color})`, width: `${Math.min(100, value / (target || 1) * 100)}%` }} /></span>
+                {macroView === 'eaten'
+                  ? <span className="summary-macro-num"><strong>{fmt(value)}</strong> / {fmt(target)}g</span>
+                  : <span className={`summary-macro-num ${overTone}`}>
+                    {left === 0 ? <strong>On target</strong> : <><strong>{fmt(Math.abs(left))}g</strong> {left > 0 ? 'left' : 'over'}</>}
+                  </span>}
+              </span>
+            );
+          })}
+        </button>
       </section>
 
       {isPast && statusCard}

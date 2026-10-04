@@ -1466,7 +1466,8 @@ textarea { min-height: 78px; resize: vertical; }
 .summary-card.over-target .summary-ring { background: conic-gradient(var(--color-review) var(--deg), var(--color-border-soft) 0); }
 .summary-card.over-target .summary-ring strong { color: var(--color-review); }
 .summary-note { margin: 8px 4px 0; text-align: center; color: var(--color-text-soft); font-size: 13px; line-height: 1.4; }
-.summary-macros { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-border-soft); }
+.summary-macros { width: 100%; display: grid; gap: 10px; margin-top: 14px; padding: 14px 0 0; border: 0; border-top: 1px solid var(--color-border-soft); border-radius: 0; background: none; color: inherit; text-align: left; }
+.summary-macros:active { transform: none; opacity: .75; }
 .summary-macro { display: grid; grid-template-columns: 62px minmax(0, 1fr) 92px; align-items: center; gap: 10px; font-size: 14px; }
 .summary-macro-num { text-align: right; }
 .summary-macro-name { color: var(--color-text-soft); font-weight: 500; }
@@ -1474,6 +1475,8 @@ textarea { min-height: 78px; resize: vertical; }
 .summary-macro-bar i { display: block; height: 100%; border-radius: inherit; }
 .summary-macro-num { color: var(--muted); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .summary-macro-num strong { color: var(--ink); font-weight: 600; }
+.summary-macro-num.is-over strong { color: var(--color-review); }
+.summary-macro-num.is-good strong { color: var(--color-good); }
 
 /* Today: this week */
 .week-row { width: 100%; display: grid; gap: 12px; padding: 14px 16px; margin-bottom: 22px; color: inherit; text-align: left; }
