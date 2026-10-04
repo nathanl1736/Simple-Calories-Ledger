@@ -1,7 +1,7 @@
 [
+  "Fixed the backup reminder popping up even though you'd backed up recently, sometimes straight after exporting. It now counts from your last backup and only appears when one is due.",
   "Faster logging: the + button now goes straight to typing in calories, with the keyboard ready. Each meal's + does the same for that meal.",
   "Search is back on Today, right under your summary. Type, tap a food and swipe to log. The arrow beside it shows your favourites and recent foods.",
   "Gemini, menu picks and Copy prompt / Paste estimate are under the ✦ button next to search.",
-  "Log food now opens with the numbers at the top, so there's nothing to scroll past.",
-  "No more flicker when the app starts: it now opens straight in your chosen theme (light, dark or system) instead of flashing light first."
+  "Log food now opens with the numbers at the top, so there's nothing to scroll past."
 ]

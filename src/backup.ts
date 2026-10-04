@@ -16,6 +16,18 @@ export function backupCounts(state: AppState) {
   };
 }
 
+// Days since the last export. The oldest log stands in only until there is a
+// first backup: taking the earliest of both let months-old logs outweigh a
+// backup made yesterday, so the reminder came back every day.
+export function backupAgeDays(state: AppState, now = Date.now()) {
+  const lastBackup = Date.parse(state.settings.lastBackupAt || '');
+  if (Number.isFinite(lastBackup)) return Math.floor((now - lastBackup) / 86400000);
+  const logged = state.entries
+    .map(entry => Number(entry.createdAt) || Number(entry.updatedAt))
+    .filter(time => Number.isFinite(time) && time > 0);
+  return logged.length ? Math.floor((now - Math.min(...logged)) / 86400000) : 0;
+}
+
 export function backupFileName() {
   return `calorie-tracker-backup-${toKey(new Date())}.json`;
 }

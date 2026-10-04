@@ -5,7 +5,7 @@ import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, EntryEstimateSourc
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
 import { compressImage, downloadBlob, SHARP_PHOTO_OPTIONS } from './image';
-import { backupCounts, exportBackup, parseBackup } from './backup';
+import { backupAgeDays, backupCounts, exportBackup, parseBackup } from './backup';
 import { applyAppUpdate, checkForAppUpdate, clearUpdateReloadMarkers, dismissUpdatePrompt, registerServiceWorker, watchForUpdatesOnResume, type UpdateInfo } from './pwa';
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
@@ -857,14 +857,8 @@ export function App() {
     if (!loaded || modal) return;
     const hasData = state.entries.length || state.foods.length;
     if (!hasData) return;
-    const baseTimes = [
-      state.settings.lastBackupAt ? Date.parse(state.settings.lastBackupAt) : NaN,
-      ...state.entries.map(entry => n(entry.updatedAt || entry.createdAt))
-    ].filter(Number.isFinite);
-    const base = baseTimes.length ? Math.min(...baseTimes) : Date.now();
-    const age = Math.floor((Date.now() - base) / 86400000);
     const due = validBackupReminderDays(state.settings.backupReminderDays);
-    if (age >= due && normalizeDateKey(state.settings.lastBackupReminderShownAt) !== todayKey()) {
+    if (backupAgeDays(state) >= due && normalizeDateKey(state.settings.lastBackupReminderShownAt) !== todayKey()) {
       setModal('backupReminder');
       persist({ ...state, settings: { ...state.settings, lastBackupReminderShownAt: todayKey() } }).catch(console.warn);
     }
