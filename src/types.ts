@@ -66,6 +66,8 @@ export type Food = {
   protein: number;
   carbs: number;
   fat: number;
+  /** Set when the saved numbers came from an estimate, so logging it again still says so. */
+  estimateSource?: EntryEstimateSource | null;
   favourite: boolean;
   usageCount: number;
   lastUsedAt: number;

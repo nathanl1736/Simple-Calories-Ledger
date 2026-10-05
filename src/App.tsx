@@ -11,6 +11,7 @@ import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
+import { linkedFood, recordFoodUse, type FavouriteChange } from './favourites';
 import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import {
   buildEstimateRequest,
@@ -129,7 +130,8 @@ type EntryDraft = {
   fat: string;
   portion: string;
   notes: string;
-  favourite: boolean;
+  /** The heart as it was left: null until it is tapped, so the saved food decides. */
+  favourite: boolean | null;
   photo: string | null;
   entryEnergyUnit: EnergyUnit;
   estimateSource: EntryEstimateSource | null;
@@ -159,7 +161,7 @@ const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kc
   fat: '',
   portion: '1',
   notes: '',
-  favourite: false,
+  favourite: null,
   photo: null,
   entryEnergyUnit,
   estimateSource: null,
@@ -356,7 +358,7 @@ function useSettleAnimation(token: string) {
   return ref;
 }
 
-type IconName = 'today' | 'week' | 'journal' | 'foods' | 'settings' | 'plus' | 'search' | 'sparkle' | 'menu' | 'chevron' | 'copy' | 'paste' | 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'edit';
+type IconName = 'today' | 'week' | 'journal' | 'foods' | 'settings' | 'plus' | 'search' | 'sparkle' | 'menu' | 'chevron' | 'copy' | 'paste' | 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'edit' | 'heart';
 
 /** Line icons drawn on a 24px grid, stroked in the current text colour. */
 const ICON_PATHS: Record<IconName, ReactNode> = {
@@ -377,14 +379,35 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   dinner: <><path d="M6 3v7a2 2 0 0 0 4 0V3M8 10v11M17 21V3c-2 1-3 3.5-3 6.5V13h3" /></>,
   snack: <><path d="M12 7.5c-1.5-1.3-6.5-1.8-6.5 4 0 4.5 3 8.5 6.5 7 3.5 1.5 6.5-2.5 6.5-7 0-5.8-5-5.3-6.5-4z" /><path d="M12 7.5c0-2 1-3.5 3-4" /></>,
   drink: <><path d="M6 4h12l-1.5 15.2a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z" /><path d="M6.6 10h10.8" /></>,
-  edit: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></>
+  edit: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></>,
+  heart: <><path d="M12 19.5 5.5 13a4.6 4.6 0 0 1 6.5-6.5 4.6 4.6 0 0 1 6.5 6.5z" /></>
 };
 
-function Icon({ name, size = 22 }: { name: IconName; size?: number }) {
+function Icon({ name, size = 22, filled = false }: { name: IconName; size?: number; filled?: boolean }) {
   return (
-    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
       {ICON_PATHS[name]}
     </svg>
+  );
+}
+
+/** Heart for a saved food: outlined, or filled once it's a favourite. What a tap changes is up to the caller. */
+function FavouriteToggle({ on, onToggle, label = 'Favourite', size = 22 }: { on: boolean; onToggle: () => void; label?: string; size?: number }) {
+  const [pop, setPop] = useState(false);
+  return (
+    <button
+      type="button"
+      className={['fav-toggle', on ? 'on' : '', pop ? 'pop' : ''].filter(Boolean).join(' ')}
+      aria-label={label}
+      aria-pressed={on}
+      onClick={() => {
+        setPop(!on);
+        onToggle();
+      }}
+      onAnimationEnd={() => setPop(false)}
+    >
+      <Icon name="heart" size={size} filled={on} />
+    </button>
   );
 }
 
@@ -1008,7 +1031,7 @@ export function App() {
       fat: draftNumberText(macroBase(entry, 'fat')),
       portion: fmtPortion(entry.portion),
       notes: entry.notes || '',
-      favourite: !!(entry.sourceFoodId && state.foods.find(food => food.id === entry.sourceFoodId)?.favourite),
+      favourite: null,
       photo: entry.photo || null,
       estimateSource: estimateSourceValue(entry.estimateSource),
       estimateDetails: null
@@ -1046,44 +1069,42 @@ export function App() {
     });
   };
 
-  const touchFoodAfterLog = (draftState: AppState, entry: Entry) => {
-    if (entry.autoNamed) return;
+  const touchFoodAfterLog = (draftState: AppState, entry: Entry): FavouriteChange => {
+    if (entry.autoNamed) return null;
     const isDatabaseFood = entryDraft.source === 'foodEstimateDatabase' || entryDraft.source === 'customFoodDatabase';
-    const base = {
-      unitMode: entryUnitModeValue(entry.unitMode),
-      brand: entryDraft.brand.trim() || undefined,
-      servingLabel: entryDraft.servingLabel.trim() || undefined,
-      servingGrams: n(entryDraft.servingGrams) || undefined,
-      source: isDatabaseFood ? undefined : entryDraft.source.trim() || undefined,
-      sourceId: entryDraft.sourceId.trim() || undefined,
-      category: entryDraft.category.trim() || undefined,
-      tags: entryDraft.tags.length ? entryDraft.tags : undefined,
-      calories: macroBase(entry, 'calories'),
-      protein: macroBase(entry, 'protein'),
-      carbs: macroBase(entry, 'carbs'),
-      fat: macroBase(entry, 'fat')
-    };
-    const source = entry.sourceFoodId ? draftState.foods.find(food => food.id === entry.sourceFoodId) : null;
-    if (source) {
-      source.usageCount = (source.usageCount || 0) + 1;
-      source.lastUsedAt = Date.now();
-      if (entryDraft.favourite) Object.assign(source, { name: entry.name, ...base, favourite: true, updatedAt: Date.now() });
-      return;
-    }
-    if (isDatabaseFood && !entryDraft.favourite) return;
-    const existing = draftState.foods.find(food => food.name.toLowerCase().trim() === entry.name.toLowerCase().trim());
-    if (existing) {
-      existing.usageCount = (existing.usageCount || 0) + 1;
-      existing.lastUsedAt = Date.now();
-      if (entryDraft.favourite || !existing.favourite) Object.assign(existing, { name: entry.name, ...base, favourite: existing.favourite || entryDraft.favourite, updatedAt: Date.now() });
-    } else {
-      draftState.foods.push(normalizeFood({ id: uid(), name: entry.name, ...base, favourite: entryDraft.favourite, usageCount: 1, lastUsedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() }));
-    }
+    return recordFoodUse(draftState.foods, {
+      sourceFoodId: entry.sourceFoodId,
+      favourite: entryDraft.favourite,
+      fromDatabase: isDatabaseFood,
+      now: Date.now(),
+      newId: uid,
+      snapshot: {
+        name: entry.name,
+        unitMode: entryUnitModeValue(entry.unitMode),
+        brand: entryDraft.brand.trim() || undefined,
+        servingLabel: entryDraft.servingLabel.trim() || undefined,
+        servingGrams: n(entryDraft.servingGrams) || undefined,
+        source: isDatabaseFood ? undefined : entryDraft.source.trim() || undefined,
+        sourceId: entryDraft.sourceId.trim() || undefined,
+        category: entryDraft.category.trim() || undefined,
+        tags: entryDraft.tags.length ? entryDraft.tags : undefined,
+        calories: macroBase(entry, 'calories'),
+        protein: macroBase(entry, 'protein'),
+        carbs: macroBase(entry, 'carbs'),
+        fat: macroBase(entry, 'fat'),
+        estimateSource: entry.estimateSource || undefined
+      }
+    });
   };
 
   const saveEntry = async (keepOpen = false) => {
     if (!entryDraft.calories) return notify(`${energyUnitLabel(entryDraft.entryEnergyUnit)} required`);
+    if (entryDraft.favourite && !entryDraft.name.trim()) {
+      document.getElementById('entryName')?.focus();
+      return notify('Name this food to save it as a favourite');
+    }
     const entry = formEntry();
+    let favouriteChange = null as FavouriteChange;
     await updateState(draft => {
       const idx = draft.entries.findIndex(item => item.id === entry.id);
       if (idx >= 0) {
@@ -1092,9 +1113,10 @@ export function App() {
       } else {
         draft.entries.push(entry);
       }
-      touchFoodAfterLog(draft, entry);
+      favouriteChange = touchFoodAfterLog(draft, entry);
     });
-    notify(entryDraft.editingId ? 'Entry updated' : 'Entry saved');
+    const saved = entryDraft.editingId ? 'Entry updated' : 'Entry saved';
+    notify(favouriteChange ? `${saved} · ${favouriteChange === 'added' ? 'added to' : 'removed from'} favourites` : saved);
     if (keepOpen) setEntryDraft(blankEntryDraft(entryDraft.meal, energyUnitValue(state.settings.energyUnit)));
     else setModal(null);
   };
@@ -1166,7 +1188,7 @@ export function App() {
       carbs: draftNumberText(food.carbs),
       fat: draftNumberText(food.fat),
       portion: entryUnitModeValue(food.unitMode) === '100g' ? '100' : '1',
-      favourite: !!food.favourite
+      estimateSource: estimateSourceValue(food.estimateSource)
     });
     setEntryOpenMode('prefill');
     setModal('entry');
@@ -1322,6 +1344,14 @@ export function App() {
     prefillGeminiEstimate(parsed, true);
   };
 
+  const toggleFavourite = (food: Food) => {
+    const next = !food.favourite;
+    updateState(draft => {
+      const target = draft.foods.find(item => item.id === food.id);
+      if (target) Object.assign(target, { favourite: next, updatedAt: Date.now() });
+    }).then(() => notify(next ? 'Added to favourites' : 'Removed from favourites'));
+  };
+
   const saveDatabaseFood = async (item: FoodDatabaseItem) => {
     let added = false;
     await updateState(draft => {
@@ -1459,6 +1489,7 @@ export function App() {
           query={historySearch}
           setQuery={setHistorySearch}
           onPrefill={prefillFood}
+          onToggleFavourite={toggleFavourite}
           onManage={food => {
             setActiveFoodId(food.id);
             setModal('food');
@@ -2445,14 +2476,15 @@ function QuickFoodResultRow({ state, food, databaseSuggestion = false, sourceChi
   const meta = databaseSuggestion
     ? [food.brand || 'Generic', databaseServingText(food), food.category, sourceName].filter(Boolean).join(' · ')
     : [food.brand, food.servingLabel, foodUnitText(food), food.category].filter(Boolean).join(' · ');
+  const chip = sourceChip || (databaseSuggestion ? '' : estimateSourceLabel(food.estimateSource));
   return (
     <button className={`quick-food-result ${databaseSuggestion ? 'database' : 'user-food'}`} type="button" onClick={() => onChoose(food)}>
-      <span className={`quick-food-icon ${food.favourite ? 'fav' : ''}`}>{food.favourite ? <span className="star-icon" aria-hidden="true" /> : databaseSuggestion ? 'DB' : ''}</span>
+      <span className={`quick-food-icon ${food.favourite ? 'fav' : ''}`}>{food.favourite ? <><Icon name="heart" size={18} filled /><span className="sr-only">Favourite</span></> : databaseSuggestion ? 'DB' : ''}</span>
       <span className="quick-food-main">
         <strong>{food.name}</strong>
         <small>{meta || foodUnitText(food)}</small>
         <span className="quick-food-macros">
-          {sourceChip && <span className="meta-chip source-chip">{sourceChip}</span>}
+          {chip && <span className="meta-chip source-chip">{chip}</span>}
           <MacroChips fat={food.fat} carbs={food.carbs} protein={food.protein} />
         </span>
       </span>
@@ -3224,6 +3256,7 @@ function EntryModal({
   const [refineError, setRefineError] = useState('');
   const caloriesPanelRef = useRef<HTMLDivElement>(null);
   const caloriesInputRef = useRef<HTMLInputElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const update = (patch: Partial<EntryDraft>) => setDraft(current => ({ ...current, ...patch }));
   const baseCalories = energyInputToKcal(draft.calories, draft.entryEnergyUnit);
   const multiplier = draft.unitMode === '100g' ? draftPortion(draft) / 100 : draftPortion(draft);
@@ -3266,8 +3299,9 @@ function EntryModal({
       carbs: draftNumberText(food.carbs),
       fat: draftNumberText(food.fat),
       portion: entryUnitModeValue(food.unitMode) === '100g' ? '100' : '1',
-      favourite: !!food.favourite,
-      estimateSource: null
+      favourite: null,
+      estimateSource: estimateSourceValue(food.estimateSource),
+      estimateDetails: null
     }));
     scrollCaloriesPanel();
   };
@@ -3320,7 +3354,24 @@ function EntryModal({
   const swipeLabel = draft.editingId
     ? hasCalories ? `Swipe to save ${loggedText}` : 'Swipe to save entry'
     : hasCalories ? `Swipe to log ${loggedText}` : 'Swipe to log food';
-  const nameField = <Field label="Food name" full><input value={draft.name} placeholder={`${draft.meal} entry`} onChange={event => update({ name: event.target.value })} /></Field>;
+  // The heart shows the saved food this entry belongs to, and only changes it once tapped.
+  const savedFavourite = !!linkedFood(foods, draft.sourceFoodId, draft.name)?.favourite;
+  const isFavourite = draft.favourite ?? savedFavourite;
+  const favouriteNote = draft.favourite === null || draft.favourite === savedFavourite ? '' : draft.favourite ? 'Also saves it to favourites' : 'Also removes it from favourites';
+  const toggleFavourite = () => {
+    update({ favourite: !isFavourite });
+    // A favourite needs a name to be found again.
+    if (!isFavourite && !draft.name.trim()) nameInputRef.current?.focus();
+  };
+  const nameField = (
+    <div className="field full name-field">
+      <label className="field-caption" htmlFor="entryName">Food name</label>
+      <div className="name-row">
+        <input ref={nameInputRef} id="entryName" value={draft.name} placeholder={isFavourite && !draft.name.trim() ? 'Name your favourite' : `${draft.meal} entry`} onChange={event => update({ name: event.target.value })} />
+        <FavouriteToggle on={isFavourite} onToggle={toggleFavourite} />
+      </div>
+    </div>
+  );
 
   return (
     <Modal open={open} title={draft.editingId ? 'Edit entry' : `Log ${draft.meal.toLowerCase()}`} onClose={onClose} wide bottomSheet>
@@ -3431,12 +3482,12 @@ function EntryModal({
 
         <div className="entry-form-extras">
           <Field label="Notes" full><textarea value={draft.notes} onChange={event => update({ notes: event.target.value })} /></Field>
-          <label className="check-pill full"><input type="checkbox" checked={draft.favourite} onChange={event => update({ favourite: event.target.checked })} /><span>Save to favourites</span></label>
         </div>
 
         {/* What saving does, at the point of saving. ✕ and swipe down still close the sheet. */}
         <div className="actions full">
           {dayLine && <p className={`entry-day-impact ${remaining < 0 ? 'over' : ''}`}>{hasCalories && 'After this: '}<strong>{dayLine}</strong></p>}
+          {favouriteNote && <p className={`entry-fav-note ${draft.favourite ? 'on' : ''}`}><Icon name="heart" size={14} filled={!!draft.favourite} />{favouriteNote}</p>}
           <SwipeConfirm label={swipeLabel} confirmLabel={draft.editingId ? 'Release to save' : 'Release to log'} className="entry-swipe" onConfirm={() => onSave(false)} />
           {!reviewing && !draft.editingId && <button className="secondary" type="button" onClick={() => onSave(true)}>Save and add another</button>}
         </div>
@@ -3463,7 +3514,13 @@ function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }: { food
   return (
     <Modal open={open} title="Manage food" onClose={onClose} bottomSheet>
       <form className="form" onSubmit={event => { event.preventDefault(); onSave({ ...draft, calories: energyInputToKcal(calorieInput, foodEnergyUnit) }); }}>
-        <Field label="Name" full><input value={draft.name} onChange={event => patch({ name: event.target.value })} /></Field>
+        <div className="field full name-field">
+          <label className="field-caption" htmlFor="foodName">Name</label>
+          <div className="name-row">
+            <input id="foodName" value={draft.name} onChange={event => patch({ name: event.target.value })} />
+            <FavouriteToggle on={draft.favourite} onToggle={() => patch({ favourite: !draft.favourite })} />
+          </div>
+        </div>
         <Field label="Calories">
           <div className="calorie-input-row food-calorie-input">
             <input inputMode="decimal" value={calorieInput} onChange={event => setCalories(event.target.value)} />
@@ -3494,19 +3551,31 @@ function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }: { food
             <button type="button" className={entryUnitModeValue(draft.unitMode) === '100g' ? 'active' : ''} onClick={toggleFoodUnitMode}>Per 100g</button>
           </span>
         </Field>
-        <label className="check-pill full"><input type="checkbox" checked={draft.favourite} onChange={event => patch({ favourite: event.target.checked })} /><span>Favourite</span></label>
+        {draft.estimateSource && (
+          <div className="meta-chips estimate-source-row full">
+            <span className="meta-chip source-chip">{estimateSourceLabel(draft.estimateSource)}</span>
+            <button type="button" className="link-btn" onClick={() => patch({ estimateSource: null })}>Not an estimate</button>
+          </div>
+        )}
         <div className="actions full"><button className="primary" type="submit">Save food</button><button className="secondary danger" type="button" onClick={() => onDelete(draft)}>Delete</button></div>
       </form>
     </Modal>
   );
 }
 
-function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage }: { state: AppState; sub: string; setSub: (sub: string) => void; query: string; setQuery: (q: string) => void; onPrefill: (food: Food) => void; onManage: (food: Food) => void }) {
+function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onToggleFavourite, onManage }: { state: AppState; sub: string; setSub: (sub: string) => void; query: string; setQuery: (q: string) => void; onPrefill: (food: Food) => void; onToggleFavourite: (food: Food) => void; onManage: (food: Food) => void }) {
+  // Un-hearting on Favourites leaves the row in place until you switch lists, so a slip is one tap to undo.
+  const [unhearted, setUnhearted] = useState<string[]>([]);
+  useEffect(() => setUnhearted([]), [sub]);
   const foods = state.foods.filter(food => !query || food.name.toLowerCase().includes(query.toLowerCase())).sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0));
-  const shown = sub === 'favourites' ? foods.filter(food => food.favourite) : foods;
+  const shown = sub === 'favourites' ? foods.filter(food => food.favourite || unhearted.includes(food.id)) : foods;
+  const toggleFavourite = (food: Food) => {
+    if (sub === 'favourites' && food.favourite) setUnhearted(ids => [...ids, food.id]);
+    onToggleFavourite(food);
+  };
   const emptyCopy =
     sub === 'favourites'
-      ? { title: 'No favourites yet.', body: 'Favourite foods you use often to make logging faster.' }
+      ? { title: 'No favourites yet.', body: 'Tap the heart on a food you eat often. Favourites show here and first when you search on Today.' }
       : query.trim()
         ? { title: 'No matches yet.', body: 'Try a different food name.' }
         : { title: 'Nothing here yet.', body: 'Your usual foods will appear here as you reuse them.' };
@@ -3514,7 +3583,7 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
     <>
       <header className="page-header has-helper">
         <h1 className="page-title">Foods</h1>
-        <p className="hint page-subtitle library-hint">Tap + to log a food again. Star the ones you eat often.</p>
+        <p className="hint page-subtitle library-hint">Tap + to log a food again. Heart the ones you eat often.</p>
       </header>
       <div className="page-controls">
         <div className="seg" role="tablist" aria-label="Saved foods">
@@ -3529,7 +3598,7 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
       </div>
       <section className={shown.length ? 'list-card' : 'card'}>
         {shown.length ? (
-          shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onManage={onManage} />)
+          shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onToggleFavourite={toggleFavourite} onManage={onManage} />)
         ) : (
           <div className="empty">
             <strong>{emptyCopy.title}</strong>
@@ -3541,15 +3610,16 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onManage 
   );
 }
 
-function FoodRow({ state, food, showUsage, onPrefill, onManage }: { state: AppState; food: Food; showUsage: boolean; onPrefill: (food: Food) => void; onManage: (food: Food) => void }) {
+function FoodRow({ state, food, showUsage, onPrefill, onToggleFavourite, onManage }: { state: AppState; food: Food; showUsage: boolean; onPrefill: (food: Food) => void; onToggleFavourite: (food: Food) => void; onManage: (food: Food) => void }) {
   const sub = [foodUnitText(food), showUsage && food.usageCount ? `logged ${fmt(food.usageCount)}×` : '', `P ${fmt(food.protein)} · C ${fmt(food.carbs)} · F ${fmt(food.fat)}g`].filter(Boolean).join(' · ');
   return (
     <div className="food-row" data-swipe-lock>
+      <FavouriteToggle on={food.favourite} onToggle={() => onToggleFavourite(food)} label={`Favourite ${food.name}`} size={20} />
       <div className="body">
-        <strong>{food.favourite && <span className="food-fav" aria-label="Favourite">★</span>}{food.name}</strong>
+        <strong>{food.name}</strong>
         <div className="food-sub">{sub}</div>
       </div>
-      <div className="food-cal">{fmt(energyValue(state, food.calories))}<small>{energyLabel(state)}</small></div>
+      <div className="food-cal">{food.estimateSource && <><span aria-hidden="true">≈</span><span className="sr-only">About </span></>}{fmt(energyValue(state, food.calories))}<small>{energyLabel(state)}</small></div>
       <button className="food-log-btn" type="button" onClick={() => onPrefill(food)} aria-label={`Log ${food.name}`}><Icon name="plus" size={20} /></button>
       <button className="food-manage-btn" type="button" onClick={() => onManage(food)} aria-label={`Manage ${food.name}`}><span aria-hidden="true" /></button>
     </div>

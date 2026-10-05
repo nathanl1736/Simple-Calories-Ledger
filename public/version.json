@@ -1,6 +1,7 @@
 {
-  "version": "2.6.1.0",
+  "version": "2.6.2.0",
   "notes": [
+    "Favourites are now a heart, right next to the food name when you log and on every food in Foods, so saving one is a single tap. Filled means favourite; tap it again to remove it (that used to be quietly ignored). A favourite keeps its numbers when you tweak a single log, and one saved from an estimate still says Estimated next time.",
     "Protein, carbs and fat on Today now show what's left, like “90g left”, so you can see at a glance what to aim for. Going over shows “12g over” (green for protein, amber for carbs and fat). Tap the macros to switch back to eaten / target; Dawni remembers your pick.",
     "No more swipe to complete. Days now count toward your week bank on their own at midnight. Tap Done for today if you want today counted sooner, and past days stay editable without reopening them.",
     "Forgot to log, or ate out? A day logged under 60% of its target waits for a quick check instead of banking the missing meal as savings, and a day with nothing logged counts as on target. Add a rough meal by size (Light, Regular, Big, Feast), or give the whole day a rough guess.",

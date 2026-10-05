@@ -69,6 +69,7 @@ export function normalizeFood(input: Partial<Food>): Food {
     protein: n(input.protein),
     carbs: n(input.carbs),
     fat: n(input.fat),
+    estimateSource: estimateSourceValue(input.estimateSource) || undefined,
     favourite: !!input.favourite,
     usageCount: n(input.usageCount),
     lastUsedAt: n(input.lastUsedAt),
