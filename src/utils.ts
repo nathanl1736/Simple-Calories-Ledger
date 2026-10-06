@@ -221,6 +221,12 @@ export function bankDay(state: AppState, key: string): BankDay {
   return { date, status, goal, totals, intake, delta: intake == null ? 0 : goal.calories - intake };
 }
 
+/** Whether a day might be short a forgotten meal, so it's worth offering a rough one. A day at or over target isn't, whatever the goal. */
+export function mightBeMissingFood(day: BankDay): boolean {
+  if (day.status === 'light' || day.status === 'untracked') return true;
+  return day.status === 'counted' && day.delta > 0;
+}
+
 export type WeekBank = {
   days: BankDay[];
   /** Days the bank uses: counted logs and rough guesses. */

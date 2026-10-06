@@ -101,6 +101,29 @@ test('the light threshold is 60% of target', () => {
   assert.equal(bank(week([0, 0, 1080, 0, 0, 0, 0])).days[2].status, 'counted');
 });
 
+test('only a day under target is asked about a missing meal', () => {
+  setToday(SAT);
+  // Mon under, Tue over, Wed light, Thu nothing, Fri right on target, Sat today.
+  const days = bank(week([1500, 2100, 900, 0, TARGET, 2100])).days;
+  assert.deepEqual(days.map(u.mightBeMissingFood), [true, false, true, true, false, false, false]);
+
+  // Done for today: over target isn't short a meal either.
+  const done = bank(week([0, 0, 0, 0, 0, 2100, 0], { confirmed: [SAT] })).days[5];
+  assert.equal(done.status, 'counted');
+  assert.equal(u.mightBeMissingFood(done), false);
+  assert.equal(u.mightBeMissingFood(bank(week([0, 0, 0, 0, 0, 1500, 0], { confirmed: [SAT] })).days[5]), true);
+
+  // A rough guess replaces the log, so there's nothing to add to.
+  assert.equal(u.mightBeMissingFood(bank(week([1500, 0, 0, 0, 0, 0, 0], { estimates: { [MON]: 0 } })).days[0]), false);
+});
+
+test('over target is never asked about a missing meal, even when bulking', () => {
+  setToday(SAT);
+  const days = bank(week([1500, 2100, 0, 0, 0, 0, 0], { mode: 'Bulking' })).days;
+  assert.equal(u.mightBeMissingFood(days[0]), true);
+  assert.equal(u.mightBeMissingFood(days[1]), false);
+});
+
 test('a rough guess for the day replaces the log in the bank', () => {
   setToday(SAT);
   const ateOut = bank(week([1600, 1600, 900, 1600, 1600, 0, 0], { estimates: { [WED]: 500 } }));

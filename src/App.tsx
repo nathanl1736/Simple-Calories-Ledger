@@ -70,6 +70,7 @@ import {
   MEALS,
   mealGroupId,
   macroBase,
+  mightBeMissingFood,
   n,
   normalizeDateKey,
   readable,
@@ -2167,14 +2168,15 @@ function DayStatusCard({ state, day, onConfirmDay, onSetEstimate, onUseLog, onRo
       </>
     );
   } else if (day.status === 'counted') {
+    const short = mightBeMissingFood(day);
     tone = 'counted';
     title = isToday ? 'Done for today' : 'Counted';
     body = isToday
       ? `${result}, and it’s in your week bank.`
-      : `${result}. Missed something? Log it here, or add a rough meal.`;
+      : short ? `${result}. Missed something? Log it here, or add a rough meal.` : `${result}.`;
     actions = (
       <>
-        {roughMeal}
+        {short && roughMeal}
         {confirmed && (isToday || light)
           ? <button className="text-btn" type="button" onClick={() => onConfirmDay(false)}>Undo</button>
           : roughDay}
