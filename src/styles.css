@@ -184,6 +184,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .status-bar-scrim { background: var(--bg); }
 }
+/* Over a sky at rest the scrim's blur and saturation read as a band under the clock;
+   it only needs to appear once content scrolls beneath it. */
+.status-bar-scrim { transition: opacity var(--motion-fast) ease; }
+html[data-sky-at-rest] .status-bar-scrim { opacity: 0; }
 .view-transition {
   animation: pageSettle var(--motion-medium) var(--ease-ios);
 }
@@ -1743,8 +1747,11 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-screen { position: relative; isolation: isolate; }
 .tl-sky {
   position: relative;
-  margin: calc(-24px - env(safe-area-inset-top)) calc(-1 * var(--app-pad)) 0;
-  padding: calc(16px + env(safe-area-inset-top)) var(--app-pad) 0;
+  /* Bleeds to the screen edges, not just the app column: phones wider than the 430px shell
+     (e.g. 440px Pro Max) would otherwise show a strip of page down each side.
+     50vw - 50% is the distance from the column's content edge to the screen edge. */
+  margin: calc(-24px - env(safe-area-inset-top)) calc(50% - 50vw) 0;
+  padding: calc(16px + env(safe-area-inset-top)) calc(50vw - 50%) 0;
   background: var(--sky);
   color: var(--sky-ink);
 }

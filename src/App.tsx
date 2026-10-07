@@ -2004,6 +2004,17 @@ function useSky(): Sky {
     document.documentElement.style.setProperty('--status-scrim', sky.stops[0]);
     return () => { document.documentElement.style.removeProperty('--status-scrim'); };
   }, [sky.stops[0]]);
+  useEffect(() => {
+    // At the top of a sky screen the scrim is hidden, so the sky runs cleanly under the clock.
+    const root = document.documentElement;
+    const update = () => root.toggleAttribute('data-sky-at-rest', window.scrollY <= 4);
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', update);
+      root.removeAttribute('data-sky-at-rest');
+    };
+  }, []);
   return sky;
 }
 
