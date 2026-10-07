@@ -1379,6 +1379,7 @@ export function App() {
           name: estimate.name,
           unitMode: estimate.unitMode,
           servingLabel: estimate.servingLabel,
+          servingGrams: estimate.servingGrams ? String(estimate.servingGrams) : '',
           calories: draftEnergyText(estimate.base.calories, entryEnergyUnit),
           protein: draftNumberText(Math.round(estimate.base.protein * 10) / 10),
           carbs: draftNumberText(Math.round(estimate.base.carbs * 10) / 10),
@@ -3236,7 +3237,7 @@ function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onC
           <div className="extra-info-body">
             <ul className="menu-pick-how-list">
               <li>Packaged food: photograph the nutrition panel flat and close, plus the front of the pack. Say how much you ate (e.g. 150 g, half the tub).</li>
-              <li>Home cooking: list ingredients and amounts, including oil, butter and sauces.</li>
+              <li>Home cooking: list ingredients and amounts, including oil, butter and sauces, and how many serves it made.</li>
               <li>Meals out: a photo from above plus a short description works best.</li>
             </ul>
           </div>

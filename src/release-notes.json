@@ -7,5 +7,6 @@
   "On wider phones like the Pro Max, the sky on Today and Week now reaches the edges of the screen, with no pale strip down each side or band under the clock.",
   "Log with AI is back near the top of Today: one button opens Estimate with Gemini, Help me pick from a menu, and copy/paste for other chatbots. The + button is now just for typing a food in yourself.",
   "Swipe the row of days at the top of Today sideways to step back a week, or forward again. It keeps the same weekday, jumps to today when you're back on this week, and stops at the current week.",
-  "The log sheet, AI sheets, Journal, Foods and Settings now match Today's look: outline-free cards, fields on the page colour, a white lens on the chosen side of toggles, your accent as a soft tint for picked chips, and Delete in red text instead of a beige button."
+  "The log sheet, AI sheets, Journal, Foods and Settings now match Today's look: outline-free cards, fields on the page colour, a white lens on the chosen side of toggles, your accent as a soft tint for picked chips, and Delete in red text instead of a beige button.",
+  "Estimate with Gemini gives home cooking per serving again. List what you cooked and it comes back as one serve; say how many serves the recipe made and it splits it for you. Single foods like a yoghurt off its label still go per 100 g times the grams you ate, and switching Per serving / Per 100g keeps the weight when Gemini knows it."
 ]

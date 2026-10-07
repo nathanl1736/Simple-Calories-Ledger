@@ -1,5 +1,5 @@
 import type { EntryEstimateSource, Meal, Totals } from './types';
-import { amountPortionValue, numberValue, parseAiQuickLog, parseJsonObject, stringValue } from './aiQuickLog';
+import { amountPortionValue, numberValue, parseAiQuickLog, parseJsonObject, stringValue, unitModeValue } from './aiQuickLog';
 import { MEALS } from './utils';
 
 export const MAX_ESTIMATE_PHOTOS = 3;
@@ -17,6 +17,8 @@ export type GeminiEstimate = {
   /** Per serving, or per 100 g in 100g mode. kcal and grams. */
   base: Totals;
   servingLabel: string;
+  /** Grams in one serving, so Per serving / Per 100g can convert exactly. 0 when unknown. */
+  servingGrams: number;
   assumptions: string[];
   confidence: EstimateConfidence;
   notes: string;
@@ -33,15 +35,21 @@ const NUTRITION_SCHEMA = {
   required: ['calories', 'protein', 'carbs', 'fat']
 };
 
-/** Gemini structured output (OpenAPI subset). Values are checked again when parsed. */
+/**
+ * Gemini structured output (OpenAPI subset). Values are checked again when parsed.
+ * Gemini writes fields alphabetically unless told otherwise, so `propertyOrdering`
+ * keeps the prompt's order: what the food is and how it's measured before the numbers.
+ */
 export const ESTIMATE_SCHEMA = {
   type: 'OBJECT',
   properties: {
     source: { type: 'STRING', description: '"label" or "estimate"' },
     name: { type: 'STRING' },
     meal: { type: 'STRING', description: 'Breakfast, Lunch, Dinner, Snack or Drink' },
+    basis: { type: 'STRING', description: '"serving" or "100g"' },
     servingsEaten: { type: 'NUMBER' },
     servingDescription: { type: 'STRING' },
+    servingGrams: { type: 'NUMBER' },
     gramsEaten: { type: 'NUMBER' },
     total: NUTRITION_SCHEMA,
     per100g: NUTRITION_SCHEMA,
@@ -49,7 +57,8 @@ export const ESTIMATE_SCHEMA = {
     confidence: { type: 'STRING', description: '"high", "medium" or "low"' },
     notes: { type: 'STRING' }
   },
-  required: ['source', 'name', 'meal', 'servingsEaten', 'total', 'assumptions', 'confidence']
+  required: ['source', 'name', 'meal', 'basis', 'servingsEaten', 'total', 'assumptions', 'confidence'],
+  propertyOrdering: ['source', 'name', 'meal', 'basis', 'servingsEaten', 'servingDescription', 'servingGrams', 'gramsEaten', 'total', 'per100g', 'assumptions', 'confidence', 'notes']
 };
 
 export const GEMINI_ESTIMATE_PROMPT = `You estimate food for Dawni, a calm calorie tracker used in Australia. The user describes what they ate, attaches photos (a meal, a product, or a nutrition information panel), or both. Return one combined log entry for everything they ate.
@@ -58,11 +67,22 @@ Choose the source:
 - "label" when a nutrition information panel or printed nutrition values are readable in a photo. Read the numbers off the panel; do not estimate them.
 - "estimate" otherwise.
 
+Choose the basis, which is how the app shows the numbers for the user to check and adjust:
+- "serving" for a dish or meal: anything cooked or put together from several ingredients (including when the user lists the ingredients and amounts they cooked with), restaurant, cafe and takeaway food, sandwiches, bowls and plates, and countable things eaten without a weight (2 eggs, 1 banana, 1 large latte). The app shows one serving's numbers times servings eaten.
+- "100g" for one single food or packaged product when the grams (or mL) eaten are known: a label reading, or a plain food the user weighed (200 g Greek yoghurt, 40 g oats). The app shows the per-100 g numbers times grams eaten, so the user can change the grams.
+- If unsure, use "serving".
+
 Reading Australian labels:
 - Australian panels list energy in kJ, often with Cal or kcal alongside. If only kJ is shown, convert: kcal = kJ / 4.184. Never put a kJ number in a calorie field.
-- Panels have a "per serving" column and a "per 100 g" (or per 100 mL) column. Fill per100g from the per-100 column, and read the serving size.
-- If the user says how much they ate in grams or mL, set gramsEaten. If they say serves or packs, set servingsEaten to match. If they say nothing, assume one label serving (or the whole item when it is clearly single-serve, like a yoghurt tub) and say so in assumptions.
+- Panels have a "per serving" column and a "per 100 g" (or per 100 mL) column. Fill per100g from the per-100 column, and read the serving size into servingGrams.
+- If the user says how much they ate in grams or mL, set gramsEaten. If they say serves or packs, set servingsEaten to match and work out gramsEaten from the serving size. If they say nothing, assume one label serving (or the whole item when it is clearly single-serve, like a yoghurt tub) and say so in assumptions.
 - Use the product and brand name from the pack.
+
+Home cooking from a list of ingredients:
+- Count every ingredient listed, including oil, butter, sauces and toppings.
+- If the user says how many serves the recipe made, or how much of it they ate, total is only their share. For a recipe that made 4 serves when they ate one: total = whole recipe / 4, servingsEaten = 1, servingDescription "1 of 4 serves".
+- If they don't say, treat the amounts as what they ate (one serving), unless the amounts are clearly a batch for several people (like 500 g dry pasta or a whole chicken). Then assume a typical number of serves, count one, and say so in assumptions.
+- Ingredient weights are usually raw, so don't add them up into gramsEaten. Set gramsEaten only when the user weighed the finished portion.
 
 Estimating meals:
 - Use typical Australian portion sizes and recipes. Count cooking oil, butter, sauces, dressings and sides that are shown or mentioned; if unsure, include a typical amount and say so.
@@ -71,9 +91,11 @@ Estimating meals:
 
 Numbers:
 - total = calories and macros for everything eaten in this entry, all servings combined. Calories in kcal, macros in grams.
-- servingsEaten = how many identical servings the total covers (2 for two drinks, 1 for a single plate).
-- gramsEaten = grams or mL eaten when known, otherwise 0.
-- per100g = per-100 g values when you have them (always for labels), otherwise all zeros.
+- servingsEaten = how many identical servings the total covers (2 for two drinks, 1 for a single plate or one serve of a recipe).
+- servingDescription = what one serving is, like "1 bowl", "1 of 4 serves" or "1 tub (170 g)".
+- servingGrams = grams or mL in one serving when known (a label's serving size, or a weighed portion), otherwise 0.
+- gramsEaten = grams or mL eaten when known, otherwise 0. Always set it for basis "100g".
+- per100g = per-100 g values when you have them (always for labels and for basis "100g"), otherwise all zeros. For basis "100g", total = per100g x gramsEaten / 100.
 - Check that protein x 4 + carbs x 4 + fat x 9 is close to calories (alcohol and fibre aside), and fix inconsistent numbers before replying.
 
 Explain:
@@ -87,8 +109,10 @@ Reply with only one JSON object, no markdown, in exactly this shape:
   "source": "estimate",
   "name": "",
   "meal": "Lunch",
+  "basis": "serving",
   "servingsEaten": 1,
   "servingDescription": "1 bowl",
+  "servingGrams": 0,
   "gramsEaten": 0,
   "total": { "calories": 0, "protein": 0, "carbs": 0, "fat": 0 },
   "per100g": { "calories": 0, "protein": 0, "carbs": 0, "fat": 0 },
@@ -173,10 +197,19 @@ export function stringList(value: unknown, max = 6) {
   return (Array.isArray(value) ? value : []).map(stringValue).filter(Boolean).slice(0, max);
 }
 
+const positiveNumber = (value: unknown) => {
+  const parsed = numberValue(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const roundTo = (value: number, decimals: number) => Number(value.toFixed(decimals));
+
 /**
  * Reads Gemini's estimate. The model reports totals for what was eaten and the
  * app works out per-serving values, so a multi-serving order can't be counted
- * twice. Falls back to the older per-unit shape. Null when unreadable.
+ * twice. Dishes are logged per serving; a single food or product with known
+ * grams (a label, a weighed yoghurt) per 100 g. Falls back to the older
+ * per-unit shape. Null when unreadable.
  */
 export function parseGeminiEstimate(text: string, fallbackMeal: Meal): GeminiEstimate | null {
   let parsed: unknown;
@@ -198,6 +231,7 @@ export function parseGeminiEstimate(text: string, fallbackMeal: Meal): GeminiEst
       portion: Number(amountPortionValue(legacy.amount)) || 1,
       base: { calories: legacy.calories, protein: legacy.protein, carbs: legacy.carbs, fat: legacy.fat },
       servingLabel: legacy.amount,
+      servingGrams: 0,
       assumptions: [],
       confidence: 'medium',
       notes: legacy.notes
@@ -208,8 +242,10 @@ export function parseGeminiEstimate(text: string, fallbackMeal: Meal): GeminiEst
   const source = stringValue(raw.source).toLowerCase() === 'label' ? 'label' : 'estimate';
   const total = nutrition(raw.total);
   const per100g = nutrition(raw.per100g);
-  const servings = numberValue(raw.servingsEaten);
-  const grams = numberValue(raw.gramsEaten);
+  const servings = positiveNumber(raw.servingsEaten);
+  const grams = positiveNumber(raw.gramsEaten);
+  // A reply without a basis predates it; only a label reading was meant to go per 100 g.
+  const basis = stringValue(raw.basis) ? unitModeValue(raw.basis) : source === 'label' ? '100g' : 'serving';
   const shared = {
     source,
     name,
@@ -219,13 +255,18 @@ export function parseGeminiEstimate(text: string, fallbackMeal: Meal): GeminiEst
     confidence: confidenceValue(raw.confidence),
     notes: stringValue(raw.notes)
   } as const;
-  // A label with a known amount is logged per 100 g, so changing the grams later stays exact.
-  if (per100g && per100g.calories > 0 && Number.isFinite(grams) && grams > 0) {
-    return { ...shared, unitMode: '100g', portion: Math.round(grams * 10) / 10, base: per100g };
+  // A single food with known grams is logged per 100 g, so changing the grams later stays exact.
+  if (basis === '100g' && grams > 0) {
+    const base = per100g && per100g.calories > 0 ? per100g : total && total.calories > 0 ? divide(total, grams / 100) : null;
+    if (base) {
+      return { ...shared, unitMode: '100g', portion: roundTo(grams, 1), base, servingGrams: roundTo(positiveNumber(raw.servingGrams), 1) };
+    }
   }
   if (!total) return null;
-  const portion = Number.isFinite(servings) && servings > 0 ? Math.round(servings * 100) / 100 : 1;
-  return { ...shared, unitMode: 'serving', portion, base: divide(total, portion) };
+  const portion = servings > 0 ? roundTo(servings, 2) : 1;
+  // One serving's weight is what was eaten split across the servings, matching the total.
+  const servingGrams = grams > 0 ? grams / portion : positiveNumber(raw.servingGrams);
+  return { ...shared, unitMode: 'serving', portion, base: divide(total, portion), servingGrams: roundTo(servingGrams, 1) };
 }
 
 /** Energy implied by the macros (4/4/9 kcal per gram). */
