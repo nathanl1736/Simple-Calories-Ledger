@@ -9,7 +9,7 @@ export const DEFAULT: AppState = {
     protein: 150,
     carbs: 90,
     fat: 50,
-    accent: '#c9dc86',
+    accent: '#0E7C76',
     theme: 'light',
     trackingMode: 'Cutting',
     energyUnit: 'kcal',
@@ -87,7 +87,8 @@ export function normalizeStateShape(input: unknown): AppState {
   settings.aiPreferences = typeof settings.aiPreferences === 'string' ? settings.aiPreferences.slice(0, 500) : '';
   settings.spreadWeeklyBank = !!settings.spreadWeeklyBank;
   if (!['system', 'dark', 'light'].includes(settings.theme)) settings.theme = DEFAULT.settings.theme;
-  if (settings.accent === '#efad7c' || settings.accent === '#ccb7f6') settings.accent = '#c9dc86';
+  // Earlier default accents become Tidelight's teal (2.7); a colour picked by hand stays.
+  if (['#efad7c', '#ccb7f6', '#c9dc86'].includes(String(settings.accent).toLowerCase())) settings.accent = DEFAULT.settings.accent;
   if (settings.calories === 2000 && settings.protein === 150 && settings.carbs === 200 && settings.fat === 65) {
     settings.calories = 1800;
     settings.carbs = 90;
