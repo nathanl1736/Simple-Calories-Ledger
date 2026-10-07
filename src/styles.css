@@ -1682,7 +1682,7 @@ textarea { min-height: 78px; resize: vertical; }
   --macro-minor: #87A2A3;
   --over-mark: #B7893B;
   --over-fill: #90661F;
-  --room: rgba(19, 58, 59, .55);
+  --room: #133A3B;
   --water: linear-gradient(0deg, #1C605D 0px, #217670 150px);
   --level: #4CC8BB;
   --held-room: rgba(185, 205, 203, .07);
@@ -1715,7 +1715,7 @@ textarea { min-height: 78px; resize: vertical; }
   --macro-minor: #556D71;
   --over-mark: #9E7426;
   --over-fill: #E0AE5D;
-  --room: rgba(217, 237, 234, .55);
+  --room: #D9EDEA;
   --water: linear-gradient(0deg, #62B8B0 0px, #93CEC8 150px);
   --level: #0F6660;
   --held-room: rgba(49, 73, 77, .07);
@@ -1739,7 +1739,8 @@ textarea { min-height: 78px; resize: vertical; }
 .settings-head .tl-glass { color: var(--color-accent-text); }
 
 /* The sky: from the top of the screen to the horizon, then a fade into the page. */
-.tl-screen { position: relative; }
+/* Its own stacking context, so the sky's fade paints over the page background rather than under it. */
+.tl-screen { position: relative; isolation: isolate; }
 .tl-sky {
   position: relative;
   margin: calc(-24px - env(safe-area-inset-top)) calc(-1 * var(--app-pad)) 0;
@@ -1750,6 +1751,9 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-sky::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 56px; background: linear-gradient(180deg, var(--sky-end), var(--bg)); pointer-events: none; z-index: -1; }
 .tl-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; min-height: 44px; }
 .tl-head > div:first-child { min-width: 0; }
+@media (max-width: 400px) {
+  .tl-head:has(.tl-pill) .tl-title { font-size: 28px; line-height: 34px; }
+}
 .tl-title { margin: 0; font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: .4px; color: var(--sky-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-range { margin: 0; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--sky-ink-2); }
 .tl-tools { display: flex; align-items: center; gap: 8px; flex: none; padding-bottom: 1px; }
@@ -1796,7 +1800,7 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-feet button:disabled { opacity: 1; cursor: default; }
 
 /* This week, in one row. */
-.tl-week-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 16px; align-items: center; gap: 10px; width: 100%; min-height: 56px; margin-top: 2px; padding: 7px 12px 7px 16px; border-radius: 28px; background: var(--card); color: var(--ink); text-align: left; }
+.tl-week-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 10px; width: 100%; min-height: 56px; margin-top: 2px; padding: 7px 12px 7px 16px; border-radius: 28px; background: var(--card); color: var(--ink); text-align: left; }
 .tl-week-row:active { transform: scale(.985); }
 .tl-week-left, .tl-week-right { display: grid; min-width: 0; }
 .tl-week-left strong, .tl-week-right strong { font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -.43px; white-space: nowrap; }
@@ -1876,9 +1880,11 @@ textarea { min-height: 78px; resize: vertical; }
 
 /* Week: seven skies filled with water. */
 .tl-sky.week { padding-bottom: 4px; }
-.tl-bank { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 8px; margin-top: 14px; padding: 0; background: none; color: var(--sky-ink); text-align: left; }
+.tl-bank { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin-top: 14px; padding: 0; background: none; color: var(--sky-ink); text-align: left; }
 .tl-bank:active { transform: none; opacity: .8; }
 .tl-bank-number { font-family: var(--serif-num); font-size: 88px; line-height: 80px; font-weight: 500; letter-spacing: -.02em; font-variant-numeric: lining-nums tabular-nums; }
+.tl-bank-number.size-5 { font-size: 76px; line-height: 72px; }
+.tl-bank-number.size-6 { font-size: 64px; line-height: 62px; }
 .tl-bank-label { display: inline-flex; align-items: center; gap: 4px; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -.43px; color: var(--sky-ink-2); }
 .tl-answer { margin: 12px 0 0; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -.43px; color: var(--sky-ink); }
 .tl-story { margin: 8px 0 0; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--sky-ink-2); }
@@ -1893,7 +1899,7 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-tide-end { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--tide-line); box-shadow: 0 0 0 2px var(--bg); }
 .tl-tide-label { position: absolute; right: 0; top: 6px; font-size: 11px; line-height: 13px; font-weight: 600; letter-spacing: .06px; color: var(--sky-ink-2); }
 .tl-deltas { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 8px; font-size: 12px; line-height: 16px; font-weight: 600; text-align: center; white-space: nowrap; color: var(--sky-ink-2); font-variant-numeric: tabular-nums; }
-.tl-deltas span { min-width: 0; }
+.tl-deltas span { min-width: 0; line-height: 15px; }
 .tl-deltas .today { color: var(--color-accent-text); }
 .tl-deltas .over { color: var(--over-mark); }
 .tl-tiles { position: relative; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; height: 200px; margin-top: 8px; }
@@ -1901,8 +1907,7 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-tile:active { transform: scale(.97); }
 .tl-tile > span { position: absolute; left: 0; right: 0; bottom: 0; }
 .tl-tile-room { background: var(--room); }
-.tl-tile.held .tl-tile-room { background: var(--held-room); }
-.tl-tile.upcoming .tl-tile-room { background: transparent; }
+.tl-tile.held .tl-tile-room { background: linear-gradient(var(--held-room), var(--held-room)), var(--room); }
 .tl-tile-target { height: 1px; background: var(--target-line); }
 .tl-tile-water { box-sizing: border-box; border-top: 2px solid var(--level); border-radius: 4px 4px 0 0; background: var(--water); }
 .tl-tile.held .tl-tile-water { border-top-color: var(--held-line); background: var(--held-ghost); }

@@ -84,12 +84,12 @@ export async function renderMealCardCanvas(group: MealGroup, energyUnit: EnergyU
   canvas.height = H;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not create canvas');
-  const bg = cssVar('--bg', '#151713');
+  const bg = cssVar('--bg', '#0A1B1E');
   const card = cssVar('--card', '#1f211d');
   const card2 = cssVar('--card2', '#262922');
   const ink = cssVar('--ink', '#f7f2ed');
   const muted = cssVar('--muted', '#a19b90');
-  const accent = cssVar('--accent', '#c9dc86');
+  const accent = cssVar('--accent', '#0E7C76');
   // Pastel accents are unreadable as text on the light theme's cream, so darken
   // them towards the ink the same way the app's own light theme does.
   const accentText = document.documentElement.dataset.theme === 'light' ? mixHex(accent, ink, 0.14) || ink : accent;

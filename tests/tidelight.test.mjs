@@ -80,6 +80,9 @@ test('usuals rank by how often, then how recently, over the past four weeks', ()
     e('2026-10-09', 'Today counts later', 8)
   ];
   const usuals = t.usualsForMeal(entries, 'Dinner', '2026-10-09');
+  // A saved food id that no longer exists groups by name instead.
+  const linked = [...entries, e('2026-10-05', 'Salmon, rice & greens', 9, { sourceFoodId: 'gone' })];
+  assert.equal(t.usualsForMeal(linked, 'Dinner', '2026-10-09')[0].count, 3);
   assert.deepEqual(usuals.map(u => u.name), ['Salmon, rice & greens', 'Lamb souvlaki', 'Chicken stir-fry']);
   assert.equal(usuals[0].count, 2);
   assert.equal(usuals[0].latest.createdAt, 5);
@@ -132,6 +135,26 @@ test('the story is told only once a later day makes up the dip', () => {
 });
 
 test('the tide line follows finished days, holding flat on a light day', () => {
-  const points = t.tideBalance(WEEK, '2026-10-09');
-  assert.deepEqual(points.map(p => [p.balance, p.held]), [[160, false], [-320, false], [-320, true], [20, false]]);
+  const points = t.tideBalance(WEEK);
+  assert.deepEqual(points.map(p => [p.balance, p.held, p.counted]), [[160, false, true], [-320, false, true], [-320, true, false], [20, false, true]]);
+});
+
+test('a today counted early joins the tide line', () => {
+  const done = WEEK.map(d => (d.date === '2026-10-09' ? day('2026-10-09', 'counted', 1190) : d));
+  assert.equal(t.tideBalance(done).at(-1).balance, 630);
+});
+
+test('the plan uses the target Today shows: a custom target or a spread bank', () => {
+  // A custom 1,500 today leaves more for the weekend.
+  assert.equal(t.restOfWeekPlan(WEEK, 0, '2026-10-09', 1500).perDay, 1950);
+  // 600 behind, spread so today shows 1,600: finishing today at 1,600 leaves 1,600 each.
+  assert.equal(t.restOfWeekPlan(WEEK, -600, '2026-10-09', 1600).perDay, 1600);
+});
+
+test('entries added to a day afterwards sit at a typical time for their meal', () => {
+  // Local times, so this passes in any time zone.
+  const at = new Date(2026, 9, 7, 7, 40).getTime();
+  assert.deepEqual(t.eatenMinutes({ createdAt: at, date: '2026-10-07', meal: 'Breakfast' }), { minutes: 7 * 60 + 40, late: false });
+  const late = t.eatenMinutes({ createdAt: new Date(2026, 9, 9, 9, 5).getTime(), date: '2026-10-07', meal: 'Dinner' });
+  assert.deepEqual(late, { minutes: 19 * 60, late: true });
 });

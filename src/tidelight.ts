@@ -147,8 +147,12 @@ function shiftKey(key: string, days: number) {
 
 export type Usual = { key: string; name: string; count: number; latest: Entry };
 
-/** What you usually have for a meal: the entries logged most often for it over the past few weeks, most recent breaking ties. Rough guesses and unnamed entries don't count. */
-export function usualsForMeal(entries: Entry[], meal: Meal, today: string, days = 28, limit = 3): Usual[] {
+/**
+ * What you usually have for a meal: the entries logged most often for it over the past few weeks, most recent
+ * breaking ties. Rough guesses and unnamed entries don't count. Entries group by saved food when that food still
+ * exists, otherwise by name, so the same meal logged both ways is one usual.
+ */
+export function usualsForMeal(entries: Entry[], meal: Meal, today: string, savedFoodIds: Set<string> = new Set(), days = 28, limit = 3): Usual[] {
   const since = shiftKey(today, -days);
   const groups = new Map<string, Usual>();
   entries.forEach(entry => {
@@ -156,7 +160,7 @@ export function usualsForMeal(entries: Entry[], meal: Meal, today: string, days 
     if (!(entry.date >= since && entry.date < today)) return;
     const name = entry.name.trim();
     if (!name) return;
-    const key = entry.sourceFoodId || name.toLowerCase();
+    const key = entry.sourceFoodId && savedFoodIds.has(entry.sourceFoodId) ? entry.sourceFoodId : name.toLowerCase();
     const current = groups.get(key);
     if (!current) groups.set(key, { key, name, count: 1, latest: entry });
     else {
@@ -183,17 +187,19 @@ export type PlanDay = {
 export const PLAN_FLOOR_SHARE = 0.8;
 
 /**
- * How much each day after today can have, treating today as using at least its target until midnight.
- * That keeps Today's "left today" and Week's pace telling the same story. Null when today isn't in
- * progress or nothing comes after it, so callers fall back to the plain week answer.
+ * How much each day after today can have, treating today as using at least the target Today shows (its custom
+ * target, or its share of a spread bank) until midnight. That keeps Today's "left today" and Week's pace telling
+ * the same story. Null when today isn't in progress or nothing comes after it, so callers word the last day apart.
  */
-export function restOfWeekPlan(days: PlanDay[], banked: number, today: string) {
+export function restOfWeekPlan(days: PlanDay[], banked: number, today: string, todayTarget?: number) {
   const todayDay = days.find(day => day.date === today && day.status === 'today');
   const after = days.filter(day => day.date > today);
   if (!todayDay || !after.length) return null;
-  const todayExtra = Math.max(0, todayDay.totals.calories - todayDay.goal.calories);
+  const target = todayTarget ?? todayDay.goal.calories;
+  const eaten = todayDay.totals.calories;
+  const todayExtra = Math.max(0, eaten - target);
   const afterTarget = after.reduce((acc, day) => acc + day.goal.calories, 0);
-  const even = (afterTarget + banked - todayExtra) / after.length;
+  const even = (afterTarget + banked + todayDay.goal.calories - Math.max(eaten, target)) / after.length;
   const floor = afterTarget * PLAN_FLOOR_SHARE / after.length;
   const perDay = Math.max(even, floor);
   return { days: after, perDay, todayExtra, overAtFloor: (perDay - even) * after.length };
@@ -219,14 +225,24 @@ export function weekStory(days: PlanDay[]) {
   return lowDate && backDate && low <= -100 ? { lowDate, low, backDate } : null;
 }
 
-/** The running balance at the end of each finished day, for the tide line. Held (light) days keep the line flat and are drawn dotted. */
-export function tideBalance(days: PlanDay[], today: string) {
+/** The running balance at the end of each day that's finished or already counted, for the tide line. Held (light) days keep the line flat and are drawn dotted. */
+export function tideBalance(days: PlanDay[]) {
   let balance = 0;
-  const points: { date: string; balance: number; held: boolean }[] = [];
+  const points: { date: string; balance: number; held: boolean; counted: boolean }[] = [];
   for (const day of days) {
-    if (day.date >= today || day.status === 'upcoming' || day.status === 'today') break;
+    if (day.status === 'upcoming' || day.status === 'today') break;
     if (day.intake != null) balance += day.delta;
-    points.push({ date: day.date, balance, held: day.status === 'light' });
+    points.push({ date: day.date, balance, held: day.status === 'light', counted: day.intake != null });
   }
   return points;
+}
+
+/** When an entry was eaten, in minutes after midnight: the time it was logged, or for an entry added to its day afterwards, a typical time for its meal. */
+export function eatenMinutes(entry: Pick<Entry, 'createdAt' | 'date' | 'meal'>) {
+  const at = new Date(entry.createdAt || 0);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const loggedOn = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+  if (entry.createdAt && loggedOn === entry.date) return { minutes: at.getHours() * 60 + at.getMinutes(), late: false };
+  const anchor: Record<Meal, number> = { Breakfast: 8 * 60, Lunch: 12 * 60 + 30, Dinner: 19 * 60, Snack: 15 * 60, Drink: 10 * 60 };
+  return { minutes: anchor[entry.meal || 'Snack'], late: true };
 }

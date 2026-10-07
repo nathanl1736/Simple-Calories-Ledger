@@ -87,8 +87,10 @@ export function normalizeStateShape(input: unknown): AppState {
   settings.aiPreferences = typeof settings.aiPreferences === 'string' ? settings.aiPreferences.slice(0, 500) : '';
   settings.spreadWeeklyBank = !!settings.spreadWeeklyBank;
   if (!['system', 'dark', 'light'].includes(settings.theme)) settings.theme = DEFAULT.settings.theme;
-  // Earlier default accents become Tidelight's teal (2.7); a colour picked by hand stays.
-  if (['#efad7c', '#ccb7f6', '#c9dc86'].includes(String(settings.accent).toLowerCase())) settings.accent = DEFAULT.settings.accent;
+  // Earlier preset accents move to their Tidelight counterparts (2.7); a colour picked by hand stays.
+  const RETIRED_ACCENTS: Record<string, string> = { '#efad7c': '#A04E1E', '#ccb7f6': '#7A5AA6', '#c9dc86': '#0E7C76', '#a8c9d8': '#2B58B1', '#dec77f': '#A04E1E', '#dc9b8e': '#A04E1E', '#c6b3df': '#7A5AA6' };
+  const retired = RETIRED_ACCENTS[String(settings.accent).toLowerCase()];
+  if (retired) settings.accent = retired;
   if (settings.calories === 2000 && settings.protein === 150 && settings.carbs === 200 && settings.fat === 65) {
     settings.calories = 1800;
     settings.carbs = 90;

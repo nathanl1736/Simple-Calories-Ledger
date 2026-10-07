@@ -12,7 +12,7 @@ import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateData
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
 import { linkedFood, recordFoodUse, type FavouriteChange } from './favourites';
-import { arcSlice, miniArc, nextMealSlot, restOfWeekPlan, skyBackground, skyBand, skyFor, sunArc, tideBalance, usualsForMeal, weekStory, type Sky, type SkyBand } from './tidelight';
+import { arcSlice, eatenMinutes, miniArc, nextMealSlot, restOfWeekPlan, skyBackground, skyBand, skyFor, sunArc, tideBalance, usualsForMeal, weekStory, type Sky, type SkyBand } from './tidelight';
 import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import {
   buildEstimateRequest,
@@ -229,8 +229,8 @@ type GeminiCheck = {
 type MacroChipKey = 'fat' | 'carbs' | 'protein';
 type EffectiveTheme = 'dark' | 'light';
 const THEME_COLORS: Record<EffectiveTheme, string> = {
-  dark: '#151713',
-  light: '#f8f3e9'
+  dark: '#0A1B1E',
+  light: '#EEF4F3'
 };
 
 const MODAL_SCROLL_LOCK_RELEASED_EVENT = 'modal-scroll-lock-released';
@@ -361,6 +361,18 @@ function afterModalScrollLock(fn: () => void) {
     run();
   };
   window.addEventListener(MODAL_SCROLL_LOCK_RELEASED_EVENT, onReleased);
+}
+
+/** Text on an accent fill: white on a deep accent, ink on a pale one. */
+function accentInk(hex: string) {
+  const value = /^#?([0-9a-f]{6})$/i.exec(hex.trim())?.[1];
+  if (!value) return '#FFFFFF';
+  const channel = (offset: number) => {
+    const c = parseInt(value.slice(offset, offset + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  return luminance > 0.36 ? '#0F2A2E' : '#FFFFFF';
 }
 
 function resolvedTheme(theme: ThemePreference): EffectiveTheme {
@@ -813,7 +825,7 @@ function AppShell({ tab, setTab, onLog, children }: { tab: Tab; setTab: (tab: Ta
   const [navHidden, setNavHidden] = useState(false);
 
   useEffect(() => {
-    const inputTypesWithoutKeyboard = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
+    const inputTypesWithoutKeyboard = new Set(['button', 'checkbox', 'color', 'date', 'datetime-local', 'file', 'hidden', 'image', 'month', 'radio', 'range', 'reset', 'submit', 'time', 'week']);
     const isInsideAppModal = (el: EventTarget | null) => el instanceof HTMLElement && !!el.closest('.modal-backdrop');
     /** True while any modal backdrop is mounted (including during close animation). */
     const isModalLayerPresent = () => !!document.querySelector('.modal-backdrop');
@@ -935,6 +947,7 @@ export function App() {
     if (!loaded) return;
     const accent = state.settings.accent || DEFAULT.settings.accent;
     document.documentElement.style.setProperty('--accent', accent);
+    document.documentElement.style.setProperty('--color-accent-ink', accentInk(accent));
     try { localStorage.setItem('dawni-accent', accent); } catch { /* private mode */ }
   }, [state.settings.accent, loaded]);
 
@@ -1247,6 +1260,33 @@ export function App() {
     setModal('entry');
   };
 
+  /** A usual from the Now line: Log food filled in with exactly what was logged last time, for the meal the Now line is suggesting. */
+  const logUsual = (entry: Entry, meal: Meal) => {
+    const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
+    const sourceFood = entry.sourceFoodId ? state.foods.find(food => food.id === entry.sourceFoodId) : null;
+    setEntryDraft({
+      ...blankEntryDraft(meal, entryEnergyUnit),
+      sourceFoodId: sourceFood ? sourceFood.id : '',
+      name: entry.name,
+      unitMode: entryUnitModeValue(entry.unitMode),
+      brand: sourceFood?.brand || '',
+      servingLabel: sourceFood?.servingLabel || '',
+      servingGrams: sourceFood?.servingGrams ? String(sourceFood.servingGrams) : '',
+      source: sourceFood?.source || '',
+      sourceId: sourceFood?.sourceId || '',
+      category: sourceFood?.category || '',
+      tags: sourceFood?.tags || [],
+      calories: draftEnergyText(macroBase(entry, 'calories'), entryEnergyUnit),
+      protein: draftNumberText(macroBase(entry, 'protein')),
+      carbs: draftNumberText(macroBase(entry, 'carbs')),
+      fat: draftNumberText(macroBase(entry, 'fat')),
+      portion: fmtPortion(entry.portion),
+      estimateSource: estimateSourceValue(entry.estimateSource)
+    });
+    setEntryOpenMode('prefill');
+    setModal('entry');
+  };
+
   const prefillAiQuickLog = (entry: AiQuickLogEntry) => {
     setAiQuickLogSeedText('');
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
@@ -1497,7 +1537,7 @@ export function App() {
           onSetEstimate={kcal => updateState(draft => setDayEstimate(draft, selectedDate, kcal)).then(() => notify(kcal == null ? 'Rough guess cleared' : 'Rough guess saved'))}
           onUseLog={() => updateState(draft => setDayComplete(setDayEstimate(draft, selectedDate, null), selectedDate, true)).then(() => notify('Using your log'))}
           onRoughMeal={() => setModal('roughMeal')}
-          onPrefillFood={prefillFood}
+          onLogUsual={logUsual}
           onOpenTarget={() => setModal('dayTarget')}
           onOpenWeek={() => openWeek(selectedDate)}
           onOpenSettings={() => {
@@ -1680,13 +1720,26 @@ export function App() {
         foods={state.foods}
         draft={entryDraft}
         setDraft={setEntryDraft}
-        onClose={() => setModal(null)}
+        onClose={() => setModal(current => (current === 'entry' ? null : current))}
         onSave={saveEntry}
         onPickPhoto={() => photoInputRef.current?.click()}
         onSaveDatabaseFood={saveDatabaseFood}
         onRefine={estimateSession && entryDraft.estimateDetails && !entryDraft.editingId ? refineGeminiEstimate : undefined}
         onOpenAi={() => setModal('addFood')}
         onRoughMeal={() => setModal('roughMeal')}
+        onRepeat={id => {
+          const entry = state.entries.find(item => item.id === id);
+          if (!entry) return;
+          setModal(null);
+          repeatEntry(entry);
+        }}
+        onDelete={id => {
+          if (!confirm('Delete this entry?')) return;
+          setModal(null);
+          updateState(draft => {
+            draft.entries = draft.entries.filter(entry => entry.id !== id);
+          }).then(() => notify('Entry deleted'));
+        }}
         day={entryDay}
       />
       <FoodModal
@@ -1876,7 +1929,7 @@ export function App() {
 }`}</pre>
         </div>
       </Modal>
-      <Modal open={modal === 'weekDetails'} title="This week" onClose={() => setModal(null)} bottomSheet>
+      <Modal open={modal === 'weekDetails'} title={bankingWeekStart === weekStartMonday(todayKey()) ? 'This week' : weekRange(bankingWeekStart)} onClose={() => setModal(null)} bottomSheet>
         <WeekDetails state={state} week={weekBank(state, bankingWeekStart)} />
       </Modal>
       <Modal open={modal === 'version'} title="Update available" onClose={() => setModal(null)}>
@@ -1961,23 +2014,55 @@ function signedEnergyNumber(state: AppState, kcal: number) {
   return signedEnergyValue(state, kcal).replace('-', '−');
 }
 
-const WEEKDAY_SHORT = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' });
+const WEEKDAY_SHORT = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'short' });
 
-/** "Sat & Sun", "Sun", or "4 days": who the plan is for. */
-function planDaysLabel(days: BankDay[]) {
+/** "Sat & Sun", "Sun", or "Fri–Sun": who the plan is for. */
+function planDaysLabel(days: { date: string }[]) {
   if (days.length === 1) return WEEKDAY_SHORT(days[0].date);
   if (days.length === 2) return `${WEEKDAY_SHORT(days[0].date)} & ${WEEKDAY_SHORT(days[1].date)}`;
-  return `Next ${days.length} days`;
+  return `${WEEKDAY_SHORT(days[0].date)}–${WEEKDAY_SHORT(days[days.length - 1].date)}`;
 }
 
 /** The banked number and its label, worded for the goal (cutting banks; maintaining and bulking aim for the target). */
 function bankHeadline(state: AppState, week: WeekBank) {
   const firstMode = (week.counted[0] || week.days[0]).goal.trackingMode;
-  const cutting = !week.counted.every(day => day.goal.trackingMode === firstMode) || firstMode === 'Cutting';
+  const mixed = !week.counted.every(day => day.goal.trackingMode === firstMode);
+  const mode: TrackingMode = mixed ? 'Cutting' : firstMode;
   const unit = energyLabel(state);
-  if (cutting) return { value: signedEnergyNumber(state, week.banked), label: week.banked < 0 ? `${unit} over so far` : `${unit} banked`, cutting };
-  if (Math.abs(week.banked) < 1) return { value: '0', label: `${unit} from target`, cutting };
-  return { value: fmt(energyValue(state, Math.abs(week.banked))), label: `${unit} ${week.banked > 0 ? 'under' : 'over'}`, cutting };
+  const soFar = week.remaining.length ? ' so far' : '';
+  const amount = fmt(energyValue(state, Math.abs(week.banked)));
+  if (mode === 'Cutting') {
+    if (week.banked >= 0) return { value: signedEnergyNumber(state, week.banked), label: `${unit} banked`, short: 'banked', mode };
+    return { value: amount, label: `${unit} over${soFar}`, short: `over${soFar}`, mode };
+  }
+  if (Math.abs(week.banked) < 1) return { value: '0', label: `${unit} from target`, short: 'from target', mode };
+  const side = week.banked > 0 ? 'under' : 'over';
+  return { value: amount, label: `${unit} ${side}`, short: side, mode };
+}
+
+/** One line on what the rest of the week can have, the same plan Week puts into a sentence. */
+function weekPaceLine(state: AppState, week: WeekBank, today: string) {
+  const unit = energyLabel(state);
+  const about = (kcal: number) => aboutEnergyText(state, kcal).replace(` ${unit}`, '');
+  const plan = restOfWeekPlan(week.days, week.banked, today, resolveDayCalorieTarget(state, today).effective);
+  if (plan) return `${planDaysLabel(plan.days)} about ${about(plan.perDay)}${plan.days.length > 1 ? ' each' : ''}`;
+  if (!week.remaining.length) return 'Week finished';
+  if (week.remaining.length === 1 && week.remaining[0].date === today) return week.left >= 0 ? `About ${about(week.left)} left this week` : `About ${about(-week.left)} over this week`;
+  return `${planDaysLabel(week.remaining)} about ${about(week.perDay)}${week.remaining.length > 1 ? ' each' : ''}`;
+}
+
+/** Re-renders each minute and on return to the app, so time-of-day pieces (the Now line, the sky, "Today") keep up. */
+function useMinuteClock() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const tick = () => setTick(Date.now());
+    const timer = window.setInterval(tick, 60_000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, []);
 }
 
 function TrackingView(props: {
@@ -1995,12 +2080,13 @@ function TrackingView(props: {
   onSetEstimate: (kcal: number | null) => void;
   onUseLog: () => void;
   onRoughMeal: () => void;
-  onPrefillFood: (food: Food) => void;
+  onLogUsual: (entry: Entry, meal: Meal) => void;
   onOpenTarget: () => void;
   onOpenWeek: () => void;
   onOpenSettings: () => void;
 }) {
   const { state } = props;
+  useMinuteClock();
   const sky = useSky();
   const today = todayKey();
   const isToday = props.selectedDate === today;
@@ -2014,12 +2100,29 @@ function TrackingView(props: {
   const overTarget = remaining < 0;
   const bulking = baseDayGoal.trackingMode === 'Bulking';
   const unit = energyLabel(state);
-  const heroNumber = fmt(energyValue(state, Math.abs(remaining)));
+  const day = bankDay(state, props.selectedDate);
   const dayWord = isToday ? ' today' : '';
-  // A finished day isn't "left" any more: it ended under or over.
-  const heroUnit = overTarget ? `${unit} over${dayWord}` : isPast ? `${unit} under` : bulking ? `${unit} to go${dayWord}` : `${unit} left${dayWord}`;
+  let heroNumber = fmt(energyValue(state, Math.abs(remaining)));
+  let heroUnit = overTarget ? `${unit} over${dayWord}` : bulking ? `${unit} to go${dayWord}` : `${unit} left${dayWord}`;
+  // A finished day says how it ended, the way the week bank counts it.
+  if (isPast) {
+    if (day.status === 'untracked') {
+      heroNumber = '—';
+      heroUnit = 'Nothing logged';
+    } else if (day.status === 'light') {
+      heroNumber = fmt(energyValue(state, eaten));
+      heroUnit = `${unit} logged · held at target`;
+    } else {
+      heroNumber = `${day.status === 'estimated' ? '≈' : ''}${fmt(energyValue(state, Math.abs(day.delta)))}`;
+      heroUnit = `${unit} ${day.delta < 0 ? 'over' : 'under'}${day.status === 'estimated' ? ' · rough guess' : ''}`;
+    }
+  }
   const heroSize = heroNumber.length <= 3 ? 'size-3' : heroNumber.length <= 5 ? 'size-5' : 'size-6';
-  const arc = sunArc(props.entries.map(entry => entry.calories), goal);
+  // In the order eaten: an entry added to its day afterwards sits at a typical time for its meal.
+  const ordered = props.entries
+    .map(entry => ({ entry, ...eatenMinutes(entry) }))
+    .sort((a, b) => a.minutes - b.minutes || (a.entry.createdAt || 0) - (b.entry.createdAt || 0));
+  const arc = sunArc(ordered.map(item => item.entry.calories), goal);
   const glowId = useId();
   const coreId = useId();
   const afterglowId = useId();
@@ -2041,10 +2144,12 @@ function TrackingView(props: {
   const proteinLeft = Math.round(goalMacros.protein - props.totals.protein);
   // Suggesting protein that would cost more than the energy left reads as "eat more" after the day is spent.
   const proteinReachable = proteinLeft > 0 && proteinLeft * 4 <= Math.max(0, remaining);
-  const proteinBig = macroView === 'eaten' || proteinLeft <= 0 || !proteinReachable ? `${fmt(props.totals.protein)}g` : `${fmt(proteinLeft)}g`;
-  const proteinTail = proteinLeft <= 0 ? ' · goal met' : macroView === 'eaten' || !proteinReachable ? ' eaten' : ' to go';
+  // A finished day shows what was eaten, not what's "left".
+  const showEaten = macroView === 'eaten' || isPast;
+  const proteinBig = showEaten || proteinLeft <= 0 || !proteinReachable ? `${fmt(props.totals.protein)}g` : `${fmt(proteinLeft)}g`;
+  const proteinTail = proteinLeft <= 0 ? ' · goal met' : showEaten || !proteinReachable ? ' eaten' : ' to go';
   let proteinSoFar = 0;
-  const proteinSegments = props.entries.map((entry, index) => {
+  const proteinSegments = ordered.map(({ entry }, index) => {
     const start = proteinSoFar / Math.max(1, goalMacros.protein) * 100;
     proteinSoFar += entry.protein;
     const end = Math.min(100, proteinSoFar / Math.max(1, goalMacros.protein) * 100);
@@ -2053,42 +2158,39 @@ function TrackingView(props: {
   const minorMacros: [string, number, number][] = [['Carbs', props.totals.carbs, goalMacros.carbs], ['Fat', props.totals.fat, goalMacros.fat]];
 
   // What's left for the rest of the week, worded the same way Week words it.
-  const plan = restOfWeekPlan(week.days, week.banked, today);
   const headline = bankHeadline(state, week);
-  const weekFinished = !week.remaining.length;
-  const weekPace = plan
-    ? `${planDaysLabel(plan.days as BankDay[])} about ${aboutEnergyText(state, plan.perDay).replace(` ${unit}`, '')}${plan.days.length > 1 ? ' each' : ''}`
-    : weekFinished ? 'Week finished' : week.remaining.length ? `About ${aboutEnergyText(state, week.perDay)} a day` : '';
-  const checkNames = week.toCheck.map(day => WEEKDAY_SHORT(day.date));
-  const weekNote = checkNames.length ? `${checkNames.join(' & ')} to check` : `${week.counted.length} of 7 days counted`;
+  const weekPace = weekPaceLine(state, week, today);
+  const weekTitle = weekStart === weekStartMonday(today) ? 'This week' : `Week of ${shortDate(weekStart)}`;
+  const checkNames = week.toCheck.map(checkDay => WEEKDAY_SHORT(checkDay.date));
+  const weekNote = checkNames.length === 1 ? `${checkNames[0]} to check` : checkNames.length ? `${checkNames.length} days to check` : `${week.counted.length} of 7 counted`;
 
   // Usuals for the next meal still to log, while there's room for one.
   const nowMinutes = (() => { const now = new Date(); return now.getHours() * 60 + now.getMinutes(); })();
   const nextMeal = isToday && remaining >= 150 ? nextMealSlot(nowMinutes, props.entries.map(entry => entry.meal || 'Snack')) : null;
-  const usuals = nextMeal ? usualsForMeal(state.entries, nextMeal, today) : [];
+  const usuals = nextMeal ? usualsForMeal(state.entries, nextMeal, today, new Set(state.foods.map(food => food.id))) : [];
 
-  const halfOf = (entry: Entry) => new Date(entry.createdAt || 0).getHours() < 12 ? 'am' : 'pm';
   let calSoFar = 0;
-  const rows = props.entries.map((entry, index) => {
+  let lastHalf = '';
+  const rows = ordered.map(({ entry, minutes, late }) => {
     const before = calSoFar;
     calSoFar += entry.calories;
-    const half = halfOf(entry);
-    const showHalf = index === 0 || halfOf(props.entries[index - 1]) !== half;
-    return { entry, before, after: calSoFar, half: showHalf ? half : '' };
+    const half = minutes < 12 * 60 ? 'am' : 'pm';
+    const showHalf = !late && half !== lastHalf;
+    if (!late) lastHalf = half;
+    return { entry, minutes, late, before, after: calSoFar, half: showHalf ? half : '' };
   });
-  const day = bankDay(state, props.selectedDate);
 
   return (
     <div className="tl-screen today-screen view-transition" ref={settleRef}>
       <div className="tl-sky" style={skyStyle(sky)}>
         <header className="tl-head">
-          <h1 className="tl-title">{isToday ? 'Today' : readable(props.selectedDate)}</h1>
+          <h1 className="tl-title">{isToday ? 'Today' : weekStart === weekStartMonday(today) ? new Date(`${props.selectedDate}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'long' }) : readable(props.selectedDate)}</h1>
           <div className="tl-tools">
             {!isToday && <button className="tl-glass tl-pill" type="button" onClick={() => props.setSelectedDate(today)}>Today</button>}
             <div className="tl-glass tl-toolbar">
               <label className="tl-tool" aria-label="Choose a day">
                 <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="4" /><path d="M3.5 10h17M8 3v4M16 3v4" /></g></svg>
-                <input type="date" value={props.selectedDate} onChange={event => event.target.value && props.setSelectedDate(event.target.value)} />
+                <input type="date" value={props.selectedDate} onChange={event => { const value = event.target.value; if (value) props.setSelectedDate(value); event.currentTarget.blur(); }} />
               </label>
               <button className="tl-tool" type="button" aria-label="Settings" onClick={props.onOpenSettings}><Icon name="settings" size={22} /></button>
             </div>
@@ -2155,13 +2257,13 @@ function TrackingView(props: {
         </button>
       </div>
 
-      <button type="button" className="tl-week-row" onClick={props.onOpenWeek} aria-label={`This week: ${headline.value} ${headline.label}. ${weekNote}. ${weekPace}. Opens Week.`}>
+      <button type="button" className="tl-week-row" onClick={props.onOpenWeek} aria-label={`${weekTitle}: ${headline.value} ${headline.label}. ${weekNote}. ${weekPace}. Opens Week.`}>
         <span className="tl-week-left">
-          <strong>This week</strong>
+          <strong>{weekTitle}</strong>
           <span className={checkNames.length ? 'has-check' : ''}>{checkNames.length > 0 && <i aria-hidden="true" />}{weekNote}</span>
         </span>
         <span className="tl-week-right">
-          <strong>{headline.cutting ? `${headline.value} banked` : `${headline.value} ${headline.label.replace(`${unit} `, '')}`}</strong>
+          <strong>{headline.value} {headline.short}</strong>
           <span>{weekPace}</span>
         </span>
         <Icon name="chevron" size={16} />
@@ -2171,7 +2273,7 @@ function TrackingView(props: {
         type="button"
         className="tl-macros"
         onClick={toggleMacroView}
-        aria-label={`Protein ${fmt(props.totals.protein)} of ${fmt(goalMacros.protein)} grams. Carbs ${fmt(props.totals.carbs)} of ${fmt(goalMacros.carbs)}. Fat ${fmt(props.totals.fat)} of ${fmt(goalMacros.fat)}. Tap to show ${macroView === 'left' ? 'eaten' : 'grams left'}.`}
+        aria-label={`Protein ${fmt(props.totals.protein)} of ${fmt(goalMacros.protein)} grams. Carbs ${fmt(props.totals.carbs)} of ${fmt(goalMacros.carbs)}. Fat ${fmt(props.totals.fat)} of ${fmt(goalMacros.fat)}.${isPast ? '' : ` Tap to show ${macroView === 'left' ? 'eaten' : 'grams left'}.`}`}
       >
         <span className="tl-macro protein" aria-hidden="true">
           <span className="tl-macro-label"><b>Protein</b> of {fmt(goalMacros.protein)}g</span>
@@ -2184,7 +2286,7 @@ function TrackingView(props: {
             <span className="tl-macro" key={name} aria-hidden="true">
               <span className="tl-macro-label"><b>{name}</b> of {fmt(target)}g</span>
               <span className="tl-macro-value">
-                {macroView === 'eaten' ? <><strong>{fmt(value)}g</strong><span>eaten</span></> : <><strong>{fmt(Math.abs(left))}g</strong><span>{left >= 0 ? 'left' : 'over'}</span></>}
+                {showEaten ? <><strong>{fmt(value)}g</strong><span>eaten</span></> : <><strong>{fmt(Math.abs(left))}g</strong><span>{left >= 0 ? 'left' : 'over'}</span></>}
               </span>
               <span className={`tl-macro-bar minor ${left < 0 ? 'over' : ''}`}><i style={{ width: `${Math.min(100, value / Math.max(1, target) * 100)}%` }} /></span>
             </span>
@@ -2201,6 +2303,8 @@ function TrackingView(props: {
             before={row.before}
             after={row.after}
             target={goal}
+            minutes={row.minutes}
+            late={row.late}
             half={row.half}
             dark={sky.dark}
             toEnd={index === rows.length - 1 && !usuals.length}
@@ -2218,14 +2322,11 @@ function TrackingView(props: {
             <button type="button" className="tl-time now" onClick={() => props.onOpenEntry(nextMeal)}>Now</button>
             <span className="tl-node now" aria-hidden="true" />
             <div className="tl-chips" role="group" aria-label={`${nextMeal} usuals`}>
-              {usuals.map(usual => {
-                const food = usualFood(state, usual.latest);
-                return (
-                  <button key={usual.key} type="button" className="tl-chip" onClick={() => props.onPrefillFood(food)} aria-label={`Log ${usual.name}, ${energyText(state, food.calories)}`}>
-                    <Icon name="plus" size={14} /><b>{usual.name}</b><span>{fmt(energyValue(state, food.calories))}</span>
-                  </button>
-                );
-              })}
+              {usuals.map(usual => (
+                <button key={usual.key} type="button" className="tl-chip" onClick={() => props.onLogUsual(usual.latest, nextMeal)} aria-label={`Log ${usual.name} for ${nextMeal.toLowerCase()}, ${energyText(state, usual.latest.calories)}`}>
+                  <Icon name="plus" size={14} /><b>{usual.name}</b><span>{fmt(energyValue(state, usual.latest.calories))}</span>
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -2247,26 +2348,20 @@ function TrackingView(props: {
   );
 }
 
-/** A usual as something Log food can be prefilled with: the saved food when it was logged as one serving of it, otherwise exactly what was logged. */
-function usualFood(state: AppState, entry: Entry): Food {
-  const saved = entry.sourceFoodId ? state.foods.find(food => food.id === entry.sourceFoodId) : null;
-  if (saved && entryUnitModeValue(entry.unitMode) === entryUnitModeValue(saved.unitMode) && (entry.portion ?? 1) === (entryUnitModeValue(saved.unitMode) === '100g' ? 100 : 1)) return saved;
-  const now = Date.now();
-  return normalizeFood({ id: '', name: entry.name, unitMode: 'serving', calories: entry.calories, protein: entry.protein, carbs: entry.carbs, fat: entry.fat, estimateSource: entry.estimateSource || undefined, favourite: false, usageCount: 0, lastUsedAt: now, createdAt: now, updatedAt: now });
+function clockText(minutes: number) {
+  return `${Math.floor(minutes / 60) % 12 || 12}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
-function entryTime(entry: Entry) {
-  const at = new Date(entry.createdAt || 0);
-  return `${at.getHours() % 12 || 12}:${String(at.getMinutes()).padStart(2, '0')}`;
-}
-
-/** One entry on the day line: time, its own slice of the day's arc, what it was and its protein. Tap to edit; touch and hold for more. */
-function DayLineRow({ state, entry, before, after, target, half, dark, toEnd, onEdit, onRepeat, onDelete, onPhoto }: {
+/** One entry on the day line: time, its own slice of the day's arc, what it was and its protein. Tap to edit; touch and hold (or right-click) for more. */
+function DayLineRow({ state, entry, before, after, target, minutes, late, half, dark, toEnd, onEdit, onRepeat, onDelete, onPhoto }: {
   state: AppState;
   entry: Entry;
   before: number;
   after: number;
   target: number;
+  minutes: number;
+  /** Added to its day afterwards, so there's no real time to show. */
+  late: boolean;
   half: string;
   dark: boolean;
   toEnd: boolean;
@@ -2276,66 +2371,110 @@ function DayLineRow({ state, entry, before, after, target, half, dark, toEnd, on
   onPhoto: (entry: Entry) => void;
 }) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
+  // A menu opened by a press can't be tapped until that press ends, so lifting the finger never picks an item.
+  const [armed, setArmed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLButtonElement>(null);
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
-  const loggedAt = new Date(entry.createdAt || 0);
   const slice = arcSlice(before, after, target);
-  const arcColour = skyFor(skyBand(loggedAt.getHours() + loggedAt.getMinutes() / 60), dark).arc;
+  const arcColour = skyFor(skyBand(minutes / 60), dark).arc;
   const rough = entry.estimateSource === 'rough';
   const portion = entryUnitModeValue(entry.unitMode) === '100g'
     ? `${fmtGram(entry.portion)}g`
     : entry.portion && entry.portion !== 1 ? `${fmtPortion(entry.portion)} servings` : '';
   const estimate = entry.estimateSource && !rough ? estimateSourceLabel(entry.estimateSource) : '';
-  const openMenu = (x: number, y: number) => {
+  const time = late ? '' : clockText(minutes);
+  const openMenu = (x: number, y: number, fromPress: boolean) => {
     const width = 196;
     const height = 200;
-    setMenu({ left: Math.min(window.innerWidth - width - 10, Math.max(10, x - width / 2)), top: Math.min(window.innerHeight - height - 100, Math.max(10, y + 8)) });
+    const below = y + 16;
+    // Never over the finger: below the press point if it fits above the tab bar, otherwise above it.
+    const top = below + height <= window.innerHeight - 100 ? below : Math.max(10, y - height - 16);
+    setArmed(!fromPress);
+    setMenu({ left: Math.min(window.innerWidth - width - 10, Math.max(10, x - width / 2)), top });
+  };
+  const closeMenu = (refocus: boolean) => {
+    setMenu(null);
+    if (refocus) rowRef.current?.focus();
   };
   useEffect(() => {
     if (!menu) return;
+    const first = menuRef.current?.querySelector<HTMLButtonElement>('button');
+    first?.focus({ preventScroll: true });
     const close = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) setMenu(null);
     };
-    const closeOnKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(null); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { closeMenu(true); return; }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button') || [])];
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length];
+      next?.focus();
+      event.preventDefault();
+    };
     const closeOnScroll = () => setMenu(null);
     document.addEventListener('pointerdown', close);
-    document.addEventListener('keydown', closeOnKey);
+    document.addEventListener('keydown', onKey);
     window.addEventListener('scroll', closeOnScroll, true);
     return () => {
       document.removeEventListener('pointerdown', close);
-      document.removeEventListener('keydown', closeOnKey);
+      document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', closeOnScroll, true);
     };
   }, [menu]);
   const cancelPress = () => {
     if (press.current) window.clearTimeout(press.current.timer);
   };
-  const act = (fn: () => void) => { setMenu(null); fn(); };
+  const endPress = () => {
+    cancelPress();
+    if (press.current?.fired) window.setTimeout(() => setArmed(true), 0);
+  };
+  const act = (fn: () => void) => {
+    if (!armed) return;
+    setMenu(null);
+    fn();
+  };
   return (
     <>
       <button
+        ref={rowRef}
         type="button"
         className={`tl-row ${toEnd ? 'to-end' : ''}`}
-        aria-label={`${entryTime(entry)} ${half}, ${entry.name}, ${entry.meal || 'Snack'}, ${rough ? 'about ' : ''}${energyText(state, entry.calories)}, ${fmt(entry.protein)} grams protein. Touch and hold for more.`}
+        aria-haspopup="menu"
+        aria-expanded={!!menu}
+        aria-label={`${time ? `${time} ${half || (minutes < 720 ? 'am' : 'pm')}, ` : ''}${entry.name}, ${entry.meal || 'Snack'}, ${rough ? 'about ' : ''}${energyText(state, entry.calories)}, ${fmt(entry.protein)} grams protein. Touch and hold for more.`}
         onPointerDown={event => {
           const x = event.clientX;
           const y = event.clientY;
           cancelPress();
-          press.current = { x, y, fired: false, timer: window.setTimeout(() => { if (press.current) press.current.fired = true; openMenu(x, y); }, 450) };
+          press.current = { x, y, fired: false, timer: window.setTimeout(() => { if (press.current) press.current.fired = true; openMenu(x, y, true); }, 450) };
         }}
         onPointerMove={event => {
           if (press.current && Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > 10) cancelPress();
         }}
-        onPointerUp={cancelPress}
-        onPointerCancel={cancelPress}
+        onPointerUp={endPress}
+        onPointerCancel={endPress}
         onPointerLeave={cancelPress}
-        onContextMenu={event => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
+        onContextMenu={event => {
+          event.preventDefault();
+          const box = event.currentTarget.getBoundingClientRect();
+          // A keyboard's menu key reports 0, 0: open from the row instead.
+          openMenu(event.clientX || box.left + box.width / 2, event.clientY || box.bottom - 8, false);
+        }}
+        onKeyDown={event => {
+          if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
+            event.preventDefault();
+            const box = event.currentTarget.getBoundingClientRect();
+            openMenu(box.left + box.width / 2, box.bottom - 8, false);
+          }
+        }}
         onClick={() => {
           if (press.current?.fired) { press.current = null; return; }
           onEdit(entry);
         }}
       >
-        <span className="tl-time">{entryTime(entry)}{half && <small>{half}</small>}</span>
+        <span className="tl-time">{time}{time && half && <small>{half}</small>}</span>
         <span className="tl-glyph" aria-hidden="true">
           {entry.photo
             ? <img src={entry.photo} alt="" />
@@ -2357,9 +2496,9 @@ function DayLineRow({ state, entry, before, after, target, half, dark, toEnd, on
         <span className="tl-row-cal">{rough ? '≈' : ''}{fmt(energyValue(state, entry.calories))}</span>
       </button>
       {menu && createPortal(
-        <div ref={menuRef} className="entry-menu tl-menu" role="menu" style={menu}>
+        <div ref={menuRef} className="entry-menu tl-menu" role="menu" aria-label={entry.name} style={{ ...menu, pointerEvents: armed ? 'auto' : 'none' }}>
           <button type="button" role="menuitem" onClick={() => act(() => onEdit(entry))}>Edit</button>
-          <button type="button" role="menuitem" onClick={() => act(() => onRepeat(entry))}>Repeat today</button>
+          <button type="button" role="menuitem" onClick={() => act(() => onRepeat(entry))}>Log again today</button>
           <button type="button" role="menuitem" onClick={() => act(() => onPhoto(entry))}>{entry.photo ? 'View photo' : 'Add photo'}</button>
           <button type="button" role="menuitem" className="danger-text" onClick={() => act(() => onDelete(entry.id))}>Delete</button>
         </div>,
@@ -3436,6 +3575,8 @@ function EntryModal({
   onRefine,
   onOpenAi,
   onRoughMeal,
+  onRepeat,
+  onDelete,
   day
 }: {
   open: boolean;
@@ -3454,6 +3595,9 @@ function EntryModal({
   onOpenAi: () => void;
   /** Opens Add a rough meal, for a meal that was hard to track. */
   onRoughMeal: () => void;
+  /** While editing: log the entry again today, or delete it. */
+  onRepeat: (id: string) => void;
+  onDelete: (id: string) => void;
   /** The day being logged to, without this entry. Energy in kcal. */
   day: { eaten: number; target: number; bulking: boolean; date: string };
 }) {
@@ -3722,6 +3866,12 @@ function EntryModal({
           {favouriteNote && <p className={`entry-fav-note ${draft.favourite ? 'on' : ''}`}><Icon name="heart" size={14} filled={!!draft.favourite} />{favouriteNote}</p>}
           <SwipeConfirm label={swipeLabel} confirmLabel={draft.editingId ? 'Release to save' : 'Release to log'} className="entry-swipe" onConfirm={() => onSave(false)} />
           {!reviewing && !draft.editingId && <button className="secondary" type="button" onClick={() => { focusCaloriesForNext(); onSave(true); }}>Save and add another</button>}
+          {draft.editingId && (
+            <div className="entry-alt-links">
+              <button type="button" className="text-btn" onClick={() => onRepeat(draft.editingId)}>Log again today</button>
+              <button type="button" className="text-btn danger-text" onClick={() => onDelete(draft.editingId)}>Delete entry</button>
+            </div>
+          )}
         </div>
       </form>
     </Modal>
@@ -4233,7 +4383,7 @@ function bankAnswer(state: AppState, week: WeekBank) {
   const amount = aboutEnergyText(state, perDay);
   const includesToday = remaining[0].date === todayKey();
   const single = remaining.length === 1;
-  if (overAtFloor > 0) {
+  if (overAtFloor > 0 && showsRounded(state, overAtFloor)) {
     const when = single ? (includesToday ? 'today' : `on ${weekdayName(remaining[0].date)}`) : 'a day';
     return `Aim for about ${amount} ${when}. The week will still finish about ${aboutEnergyText(state, overAtFloor)} over, and the bank resets Monday.`;
   }
@@ -4250,7 +4400,7 @@ const BANK_STATUS_TEXT: Record<DayBankStatus, string> = {
   upcoming: 'coming up'
 };
 
-const WEEKDAY_LONG = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long' });
+const WEEKDAY_LONG = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'long' });
 
 /** "Saturday and Sunday", "Sunday", or "The 4 days after today". */
 function planDaysPhrase(days: { date: string }[]) {
@@ -4259,18 +4409,45 @@ function planDaysPhrase(days: { date: string }[]) {
   return `The ${days.length} days after today`;
 }
 
-/** The plain answer to "how much can I eat for the rest of the week?". Today is treated as using at least its target, so this agrees with Today's "left today". */
+/** How the week is going, in a word or two, for the goal: banking under target is ahead when cutting but behind when bulking. */
+function paceLead(mode: TrackingMode, banked: number) {
+  if (mode === 'Bulking') return banked >= 100 ? 'A little behind.' : banked <= -100 ? 'A little ahead.' : 'Right on pace.';
+  if (mode === 'Maintaining') return Math.abs(banked) >= 100 ? 'Easy to even out.' : 'Right on pace.';
+  return banked >= 100 ? 'A little ahead.' : banked <= -100 ? 'Easy to even out.' : 'Right on pace.';
+}
+
+/** True when a planning amount would still show once rounded, so nothing says "about 0 Cal over". */
+function showsRounded(state: AppState, kcal: number) {
+  return Math.round(energyValue(state, kcal) / (state.settings.energyUnit === 'kj' ? 50 : 10)) >= 1;
+}
+
+/** The plain answer to "how much can I eat for the rest of the week?". Today is treated as using at least the target Today shows, so this agrees with Today's "left today". */
 function weekAnswer(state: AppState, week: WeekBank) {
   const today = todayKey();
-  const plan = restOfWeekPlan(week.days, week.banked, today);
+  if (week.remaining.length === 1 && week.remaining[0].date === today) {
+    return week.left >= 0
+      ? `Last day of the week: about ${aboutEnergyText(state, week.left)} left after what’s logged.`
+      : `Last day of the week. It will finish about ${aboutEnergyText(state, -week.left)} over, and the bank resets Monday.`;
+  }
+  const plan = restOfWeekPlan(week.days, week.banked, today, resolveDayCalorieTarget(state, today).effective);
   if (!plan) return bankAnswer(state, week);
   const amount = aboutEnergyText(state, plan.perDay);
   const who = planDaysPhrase(plan.days);
   const each = plan.days.length > 1 ? ' each' : '';
-  if (plan.overAtFloor > 0) return `Aim for about ${amount} a day. The week will still finish about ${aboutEnergyText(state, plan.overAtFloor)} over, and the bank resets Monday.`;
-  if (plan.todayExtra > 0) return `Still on track. Today’s extra ${energyText(state, plan.todayExtra)} comes off ${plan.days.length > 1 ? 'the days after' : who}: about ${amount}${each}.`;
-  const lead = week.banked >= 100 ? 'A little ahead.' : week.banked <= -100 ? 'Easy to even out.' : 'Right on pace.';
-  return `${lead} ${who} can${plan.days.length > 1 ? ' each' : ''} be about ${amount}.`;
+  if (plan.overAtFloor > 0 && showsRounded(state, plan.overAtFloor)) return `Aim for about ${amount} a day. The week will still finish about ${aboutEnergyText(state, plan.overAtFloor)} over, and the bank resets Monday.`;
+  if (plan.todayExtra > 0 && showsRounded(state, plan.todayExtra)) return `Still on track. Today’s extra ${energyText(state, plan.todayExtra)} comes off ${plan.days.length > 1 ? 'the days after' : who}: about ${amount}${each}.`;
+  return `${paceLead(bankHeadline(state, week).mode, week.banked)} ${who} can${each} be about ${amount}.`;
+}
+
+/** "5–11 October", or "28 September – 4 October" across months, in the reader's locale. */
+function weekRange(start: string) {
+  const from = new Date(`${start}T00:00:00`);
+  const to = new Date(`${addDays(start, 6)}T00:00:00`);
+  try {
+    return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long' }).formatRange(from, to);
+  } catch {
+    return `${shortDate(start)} – ${shortDate(addDays(start, 6))}`;
+  }
 }
 
 /** Week: First Light's seven skies filled with Tide's water, under the same clock-following sky as Today. */
@@ -4302,17 +4479,17 @@ function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, onDetails
   const finished = !week.remaining.length;
   const unit = energyLabel(state);
   const headline = bankHeadline(state, week);
-  const range = `${new Date(`${days[0].date}T00:00:00`).getDate()}–${new Date(`${days[6].date}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}`;
-  const nothing = started && finished && !counted.length;
+  const range = weekRange(bankingWeekStart);
+  const nothing = started && finished && !counted.length && !toCheck.length;
   const answer = !started
     ? `This week hasn’t started yet. Its budget is ${energyText(state, week.budget)}.`
     : nothing ? 'Nothing was logged this week.' : weekAnswer(state, week);
   const story = started ? weekStory(days) : null;
   const storyText = story ? `${WEEKDAY_LONG(story.lowDate)} took the week to ${signedEnergyNumber(state, story.low)}. ${WEEKDAY_LONG(story.backDate)} brought it back.` : '';
 
-  // The running balance behind the bank, finished days only.
-  const tide = tideBalance(days, today);
-  const showTide = tide.filter(point => !point.held).length >= 2;
+  // The running balance behind the bank, finished (or already counted) days only.
+  const tide = tideBalance(days);
+  const showTide = tide.filter(point => point.counted).length >= 2;
   const extreme = Math.max(400, ...tide.map(point => Math.ceil(Math.abs(point.balance) / 200) * 200));
   const tideY = (balance: number) => 24 - balance * 20 / extreme;
   const tideX = (index: number) => (index + 1) * 52 - 4;
@@ -4320,14 +4497,15 @@ function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, onDetails
   const tideArea = `${tidePath} L${tide.length ? tideX(tide.length - 1) : 0} 24 Z`;
   const lastTide = tide[tide.length - 1];
 
-  const maxGoal = Math.max(...days.map(day => day.goal.calories), 1);
+  // Today shows the target Today shows (custom, or with a spread bank).
+  const shown = days.map(day => (day.status === 'today' ? { ...day, goal: { ...day.goal, calories: resolveDayCalorieTarget(state, day.date).effective } } : day));
+  const maxGoal = Math.max(...shown.map(day => day.goal.calories), 1);
   const domain = maxGoal * 4 / 3;
   const px = (kcal: number) => Math.max(0, Math.min(200, kcal / domain * 200));
 
+  const bankNumber = started ? headline.value : fmt(energyValue(state, maxGoal));
   const firstCheck = toCheck[0];
-  const checkTitle = toCheck.length === 1
-    ? `${WEEKDAY_LONG(firstCheck.date)} looks light`
-    : toCheck.length ? `${toCheck.map(day => WEEKDAY_SHORT(day.date)).join(' and ')} look light` : '';
+  const checkTitle = toCheck.length === 1 ? `${WEEKDAY_LONG(firstCheck.date)} looks light` : toCheck.length ? `${toCheck.length} days look light` : '';
 
   return (
     <div className="tl-screen week-screen view-transition" ref={settleRef}>
@@ -4347,7 +4525,7 @@ function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, onDetails
         </header>
 
         <button type="button" className="tl-bank" onClick={onDetails} aria-label={`${started ? `${headline.value} ${headline.label}` : `${energyText(state, maxGoal)} a day`}. ${answer} Opens week details.`}>
-          <span className="tl-bank-number">{started ? headline.value : fmt(energyValue(state, maxGoal))}</span>
+          <span className={`tl-bank-number ${bankNumber.length <= 3 ? '' : bankNumber.length <= 5 ? 'size-5' : 'size-6'}`}>{bankNumber}</span>
           <span className="tl-bank-label">{started ? headline.label : `${unit} a day`}<Icon name="chevron" size={14} /></span>
         </button>
         <p className="tl-answer">{answer}</p>
@@ -4375,7 +4553,7 @@ function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, onDetails
         )}
 
         <div className="tl-deltas" aria-hidden="true">
-          {days.map(day => {
+          {shown.map(day => {
             let text = '';
             let tone = '';
             if (day.status === 'counted') text = signedEnergyNumber(state, day.delta);
@@ -4385,8 +4563,10 @@ function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, onDetails
             else if (day.status === 'today') {
               const left = day.goal.calories - day.totals.calories;
               const amount = fmt(energyValue(state, Math.abs(left)));
-              text = amount.length >= 5 ? amount : `${amount} ${left >= 0 ? 'left' : 'over'}`;
+              const word = left >= 0 ? (day.goal.trackingMode === 'Bulking' ? 'to go' : 'left') : 'over';
               tone = left >= 0 ? 'today' : 'over';
+              // Long amounts (kJ, early mornings) put the word on a second line rather than dropping it.
+              return <span key={day.date} className={tone}>{amount}{amount.length >= 5 ? <br /> : ' '}{word}</span>;
             }
             return <span key={day.date} className={tone}>{text}</span>;
           })}
@@ -4394,7 +4574,7 @@ function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, onDetails
       </div>
 
       <div className="tl-tiles">
-        {days.map(day => {
+        {shown.map(day => {
           const goal = Math.max(1, day.goal.calories);
           const room = px(goal);
           const logged = day.status === 'today' || day.status === 'light' ? day.totals.calories : day.intake;
@@ -4419,7 +4599,7 @@ function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, onDetails
               <span className="tl-tile-target" style={{ bottom: room }} />
               {water > 0 && <span className="tl-tile-water" style={{ height: over > 0 ? water - 1 : water }} />}
               {over > 0 && <span className="tl-tile-cap" style={{ bottom: room + 1, height: Math.max(3, capTop - room - 1) }} />}
-              {isTodayTile && <span className="tl-tile-sun" style={{ bottom: Math.min(px(logged || 0), 192) - 8 }} />}
+              {isTodayTile && (logged || 0) > 0 && <span className="tl-tile-sun" style={{ bottom: Math.max(14, Math.min(px(logged || 0), 192)) - 8 }} />}
             </button>
           );
         })}
@@ -4443,14 +4623,14 @@ function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, onDetails
           <i aria-hidden="true" />
           <span>
             <strong>{checkTitle}</strong>
-            <small>{toCheck.length === 1 ? `${fmt(energyValue(state, firstCheck.totals.calories))} logged · held at ${fmt(energyValue(state, firstCheck.goal.calories))}` : 'Held at target until you check them'}</small>
+            <small>{toCheck.length === 1 ? `${fmt(energyValue(state, firstCheck.totals.calories))} logged · held at ${fmt(energyValue(state, firstCheck.goal.calories))}` : 'Held at target until checked'}</small>
           </span>
           <button type="button" className="tl-text-btn" onClick={() => onOpenDay(firstCheck.date)}>Check</button>
         </div>
       ) : started && !nothing ? (
         <button type="button" className="tl-platter" onClick={onDetails}>
           <span>
-            <strong>{finished ? `${energyText(state, week.budget)} budget` : `${energyText(state, week.left)} left this week`}</strong>
+            <strong>{finished ? `${energyText(state, week.budget)} budget` : week.left < 0 ? `${energyText(state, -week.left)} over this week` : `${energyText(state, week.left)} left this week`}</strong>
             <small>{counted.length} of 7 days counted{counted.length ? ` · average ${energyText(state, counted.reduce((acc, day) => acc + (day.intake || 0), 0) / counted.length)}` : ''}</small>
           </span>
           <Icon name="chevron" size={16} />
@@ -4491,7 +4671,7 @@ function WeekDetails({ state, week }: { state: AppState; week: WeekBank }) {
         </tbody>
       </table>
       <div className="stat"><span>Weekly budget</span><strong>{energyText(state, week.budget)}</strong></div>
-      {week.remaining.length > 0 && <div className="stat"><span>Left this week</span><strong>{energyText(state, week.left)}</strong></div>}
+      {week.remaining.length > 0 && <div className="stat"><span>{week.left < 0 ? 'Over this week' : 'Left this week'}</span><strong>{energyText(state, Math.abs(week.left))}</strong></div>}
       <div className="stat"><span>Counted days</span><strong>{counted.length} of 7{week.toCheck.length ? ` (${week.toCheck.length} held)` : ''}</strong></div>
       {counted.length > 0 && <div className="stat"><span>Average on counted days</span><strong>{energyText(state, eaten / counted.length)}</strong></div>}
       {counted.length > 0 && <div className="stat"><span>At or within target</span><strong>{onTrack} of {counted.length} counted days</strong></div>}
