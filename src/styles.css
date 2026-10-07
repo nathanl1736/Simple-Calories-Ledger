@@ -1863,7 +1863,8 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-row-name { font-size: 17px; line-height: 22px; letter-spacing: -.43px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-row-sub { font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-row-sub b { font-weight: 600; color: var(--color-text-soft); }
-.tl-row-cal { grid-column: 4; padding-left: 12px; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -.43px; font-variant-numeric: tabular-nums; }
+.tl-row-cal { grid-column: 4; display: grid; justify-items: end; padding-left: 12px; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -.43px; font-variant-numeric: tabular-nums; }
+.tl-row-cal small { font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: -.23px; color: var(--muted); }
 .tl-menu { width: 196px; min-width: 0; }
 .tl-empty { margin: 4px 0 10px 88px; font-size: 15px; line-height: 20px; color: var(--muted); }
 .tl-now { position: relative; display: grid; grid-template-columns: 44px 36px minmax(0, 1fr); align-items: center; min-height: 52px; padding: 0 0 12px; }

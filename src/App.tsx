@@ -2050,12 +2050,12 @@ function bankHeadline(state: AppState, week: WeekBank) {
   const soFar = week.remaining.length ? ' so far' : '';
   const amount = fmt(energyValue(state, Math.abs(week.banked)));
   if (mode === 'Cutting') {
-    if (week.banked >= 0) return { value: signedEnergyNumber(state, week.banked), label: `${unit} banked`, short: 'banked', mode };
-    return { value: amount, label: `${unit} over${soFar}`, short: `over${soFar}`, mode };
+    if (week.banked >= 0) return { value: signedEnergyNumber(state, week.banked), label: `${unit} banked`, mode };
+    return { value: amount, label: `${unit} over${soFar}`, mode };
   }
-  if (Math.abs(week.banked) < 1) return { value: '0', label: `${unit} from target`, short: 'from target', mode };
+  if (Math.abs(week.banked) < 1) return { value: '0', label: `${unit} from target`, mode };
   const side = week.banked > 0 ? 'under' : 'over';
-  return { value: amount, label: `${unit} ${side}`, short: side, mode };
+  return { value: amount, label: `${unit} ${side}`, mode };
 }
 
 /** One line on what the rest of the week can have, the same plan Week puts into a sentence. */
@@ -2384,7 +2384,7 @@ function TrackingView(props: {
           <span className={checkNames.length ? 'has-check' : ''}>{checkNames.length > 0 && <i aria-hidden="true" />}{weekNote}</span>
         </span>
         <span className="tl-week-right">
-          <strong>{headline.value} {headline.short}</strong>
+          <strong>{headline.value} {headline.label}</strong>
           <span>{weekPace}</span>
         </span>
         <Icon name="chevron" size={16} />
@@ -2614,7 +2614,11 @@ function DayLineRow({ state, entry, before, after, target, minutes, late, half, 
             {!rough && <> · <b>{fmt(entry.protein)}g</b> protein</>}
           </span>
         </span>
-        <span className="tl-row-cal">{rough ? '≈' : ''}{fmt(energyValue(state, entry.calories))}</span>
+        <span className="tl-row-cal">
+          <span>{rough ? '≈' : ''}{fmt(energyValue(state, entry.calories))}</span>
+          {/* The unit sits on the detail line under its number, so names keep their width. */}
+          <small>{energyLabel(state)}</small>
+        </span>
       </button>
       {menu && createPortal(
         <div ref={menuRef} className="entry-menu tl-menu" role="menu" aria-label={entry.name} style={{ ...menu, pointerEvents: armed ? 'auto' : 'none' }}>
