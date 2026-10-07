@@ -2076,6 +2076,97 @@ function useMinuteClock() {
   }, []);
 }
 
+/**
+ * Swipe the Today date strip sideways to move a week back or forward. The strip follows the finger,
+ * then slides out and the new week slides in. Forward stops at the current week, like Week's arrows.
+ */
+function useWeekSwipe(selectedDate: string, setSelectedDate: (date: string) => void) {
+  const ref = useRef<HTMLElement>(null);
+  const drag = useRef<{ id: number; x: number; y: number; t: number; dx: number; active: boolean; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  const latest = useRef({ selectedDate, setSelectedDate });
+  latest.current = { selectedDate, setSelectedDate };
+  const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const canGoForward = () => weekStartMonday(latest.current.selectedDate) < weekStartMonday(todayKey());
+  const settle = (el: HTMLElement, from: number) => {
+    el.style.transform = '';
+    el.style.opacity = '';
+    if (from && !reduceMotion()) el.animate([{ transform: `translateX(${from}px)` }, { transform: 'translateX(0)' }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  };
+  const shift = (el: HTMLElement, dir: 1 | -1, fromX: number) => {
+    const { selectedDate: current, setSelectedDate: set } = latest.current;
+    const today = todayKey();
+    // Landing on the current week picks today; any other week keeps the same weekday.
+    const target = addDays(current, dir * 7);
+    const next = weekStartMonday(target) === weekStartMonday(today) ? today : target;
+    const width = el.offsetWidth || 1;
+    const apply = () => {
+      flushSync(() => set(next));
+      el.style.transform = '';
+      el.style.opacity = '';
+      if (!reduceMotion()) el.animate([{ transform: `translateX(${dir * width * 0.5}px)`, opacity: 0 }, { transform: 'translateX(0)', opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    };
+    if (reduceMotion()) return apply();
+    const out = el.animate([{ transform: `translateX(${fromX}px)`, opacity: Number(el.style.opacity || 1) }, { transform: `translateX(${-dir * width * 0.5}px)`, opacity: 0 }], { duration: 130, easing: 'ease-in', fill: 'forwards' });
+    out.finished.then(() => { apply(); out.cancel(); }).catch(() => apply());
+  };
+  const onPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, t: event.timeStamp, dx: 0, active: false, moved: false };
+  };
+  const onPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const d = drag.current;
+    const el = ref.current;
+    if (!d || !el || d.id !== event.pointerId) return;
+    const dx = event.clientX - d.x;
+    const dy = event.clientY - d.y;
+    if (!d.active) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { drag.current = null; return; }
+      if (Math.abs(dx) < 10) return;
+      d.active = true;
+      d.moved = true;
+      el.setPointerCapture(event.pointerId);
+    }
+    // Past the current week the strip only gives a little, so it reads as the end.
+    const blocked = dx < 0 && !canGoForward();
+    d.dx = blocked ? dx / 4 : dx;
+    el.style.transform = `translateX(${d.dx}px)`;
+    el.style.opacity = blocked ? '' : String(1 - Math.min(Math.abs(dx) / (el.offsetWidth || 1), 1) * 0.5);
+  };
+  const end = (event: React.PointerEvent<HTMLElement>, cancelled = false) => {
+    const d = drag.current;
+    const el = ref.current;
+    drag.current = null;
+    if (!d || !el || d.id !== event.pointerId) return;
+    if (d.moved) {
+      suppressClick.current = true;
+      window.setTimeout(() => { suppressClick.current = false; }, 0);
+    }
+    if (!d.active) return;
+    const dx = event.clientX - d.x;
+    const speed = Math.abs(dx) / Math.max(1, event.timeStamp - d.t);
+    const dir: 1 | -1 = dx < 0 ? 1 : -1;
+    const far = Math.abs(dx) > Math.min(80, (el.offsetWidth || 300) * 0.2) || (speed > 0.45 && Math.abs(dx) > 24);
+    if (!cancelled && far && (dir === -1 || canGoForward())) shift(el, dir, d.dx);
+    else settle(el, d.dx);
+  };
+  return {
+    ref,
+    handlers: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: (event: React.PointerEvent<HTMLElement>) => end(event),
+      onPointerCancel: (event: React.PointerEvent<HTMLElement>) => end(event, true),
+      // A swipe that ends over a day shouldn't also pick that day.
+      onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
+        if (!suppressClick.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+  };
+}
+
 function TrackingView(props: {
   state: AppState;
   selectedDate: string;
@@ -2141,6 +2232,7 @@ function TrackingView(props: {
   const afterglowId = useId();
   const targetNote = calorieTarget.hasOverride ? ' · custom' : bankAdjustment !== 0 ? ' · with bank' : '';
   const settleRef = useSettleAnimation(props.selectedDate);
+  const weekSwipe = useWeekSwipe(props.selectedDate, props.setSelectedDate);
 
   const weekStart = weekStartMonday(props.selectedDate);
   const week = weekBank(state, weekStart);
@@ -2210,7 +2302,7 @@ function TrackingView(props: {
           </div>
         </header>
 
-        <nav className="tl-strip" aria-label="Days this week">
+        <nav ref={weekSwipe.ref} className="tl-strip" aria-label="Days this week. Swipe sideways for another week." style={{ touchAction: 'pan-y' }} {...weekSwipe.handlers}>
           {stripDays.map(stripDay => {
             const selected = stripDay.date === props.selectedDate;
             const dayGoal = Math.max(1, stripDay.goal.calories);
