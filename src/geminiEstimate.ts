@@ -20,9 +20,20 @@ export const GEMINI_FALLBACK_MODEL_IDS = [
 ];
 
 const GEMINI_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
-const MODEL_CHOICE_CACHE_KEY = 'geminiModelChoice';
+const KEY_PROFILE_CACHE_KEY = 'geminiKeyProfile';
+/** How long the last model that answered is trusted before `models.list` is asked again. */
 const MODEL_CHOICE_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long "this key's plan can't use these models" is remembered. Long enough
+ * that a free key doesn't knock on Pro every day; short enough that adding
+ * billing is picked up within a week even without tapping Test key.
+ */
+const PLAN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Real attempts per request. Plan rejections are instant and free, so they don't count. */
 const MAX_MODEL_ATTEMPTS = 8;
+const MAX_TOTAL_ATTEMPTS = 16;
+/** Caps the Test key call so a paid model costs a fraction of a cent. */
+const PING_MAX_OUTPUT_TOKENS = 16;
 
 type GeminiTextPart = { text: string };
 type GeminiInlinePart = { inlineData: { mimeType: string; data: string } };
@@ -49,6 +60,12 @@ type GeminiResponse = {
   };
 };
 
+type GenerateBody = {
+  systemInstruction?: { parts: GeminiTextPart[] };
+  contents: Array<{ role: 'user'; parts: GeminiPart[] }>;
+  generationConfig?: Record<string, unknown>;
+};
+
 type ListModelsResponse = {
   models?: Array<{
     name?: string;
@@ -58,11 +75,39 @@ type ListModelsResponse = {
   error?: { message?: string };
 };
 
-type ModelChoiceCache = {
-  version: 1;
+/**
+ * What Dawni has learned about one key. Stored per key fingerprint, so a new
+ * key starts fresh. `paidOnly` is why a free key goes straight to Flash.
+ */
+type KeyProfile = {
+  version: 2;
   keyHash: string;
+  /** Last model that answered, and when. Empty until one has. */
   modelId: string;
   resolvedAt: string;
+  /** Google tied a rejection on this key to the free tier. */
+  freeTier: boolean;
+  /** Models this key's plan rejected outright (a zero quota), not just busy. */
+  paidOnly: string[];
+  planCheckedAt: string;
+};
+
+/** What Settings shows about a key without calling Google. */
+export type GeminiKeyStatus = {
+  modelId: string;
+  freeTier: boolean;
+  checkedAt: string;
+};
+
+/** Result of Test key: the model Dawni verified and what it learned about the plan. */
+export type GeminiKeyCheck = {
+  modelId: string;
+  modelCount: number;
+  freeTier: boolean;
+  /** Higher models the key lists but its plan doesn't include. */
+  paidOnly: string[];
+  /** The verified model is the top of the key's list after plan limits. */
+  best: boolean;
 };
 
 export type GeminiError = Error & { status?: number; detail?: string };
@@ -74,11 +119,40 @@ function geminiError(message: string, status = 0, detail = ''): GeminiError {
   return err;
 }
 
+function isQuotaFailure(status: number, message: string) {
+  const m = message.toLowerCase();
+  return status === 429
+    || m.includes('resource_exhausted')
+    || m.includes('exceeded your current quota')
+    || m.includes('quota exceeded');
+}
+
+/**
+ * The key's plan doesn't include this model at all, as opposed to a model that
+ * is busy or rate limited for a minute. Since April 2026 a free-tier key gets a
+ * 429 with `limit: 0` for Pro models; the text also says "check your plan and
+ * billing details", which must not be read as "this key needs billing".
+ */
+export function isPlanLimited(status: number, message: string) {
+  const m = message.toLowerCase();
+  if (isQuotaFailure(status, m)) return /limit:\s*0(?!\d)/.test(m);
+  if (status === 401 || m.includes('api key not valid') || m.includes('api_key_invalid')) return false;
+  return /free[ _-]?tier|paid[ _-]?tier|upgrade your plan|not available (?:on|in|for) (?:the |your )?(?:free|current)/.test(m);
+}
+
+/** Google named the free tier in a rejection, so this key is on it. */
+function mentionsFreeTier(message: string) {
+  return /free[ _-]?tier/i.test(message);
+}
+
 /**
  * A key-level failure means every model would fail the same way (bad key, API
- * not enabled, billing). Cascading through models would only hide the real fix.
+ * not enabled, billing broken). Cascading through models would only hide the
+ * real fix. Quota errors never count: they're per model, and their text
+ * mentions billing even on a healthy free key.
  */
-function isKeyLevelFailure(status: number, message: string) {
+export function isKeyLevelFailure(status: number, message: string) {
+  if (isQuotaFailure(status, message) || isPlanLimited(status, message)) return false;
   if (status === 401 || status === 403) return true;
   const m = message.toLowerCase();
   return m.includes('api key not valid')
@@ -88,6 +162,7 @@ function isKeyLevelFailure(status: number, message: string) {
     || m.includes('has not been used in project')
     || m.includes('it is disabled')
     || m.includes('serviceusage')
+    || m.includes('location is not supported')
     || m.includes('billing');
 }
 
@@ -125,14 +200,27 @@ export function friendlyGeminiMessage(status: number, message: string, fallback 
   if (m.includes('has not been used in project') || m.includes('it is disabled') || m.includes('serviceusage')) {
     return 'Gemini isn’t enabled for that Google project yet. Enable the Generative Language API, then try again.';
   }
+  if (m.includes('location is not supported')) {
+    return 'Google doesn’t offer the Gemini API where you are right now.';
+  }
+  // Before billing: a free-tier quota error says "check your plan and billing details".
+  if (isPlanLimited(status, message)) {
+    return 'Your key’s plan doesn’t include the Gemini models Dawni tried. Free keys can use Gemini Flash; Pro models need a paid plan.';
+  }
+  if (isQuotaFailure(status, message)) {
+    if (/prepa(?:id|y)|credits? (?:are |is |have |has )?(?:run out|depleted|exhausted)/.test(m)) {
+      return 'Your Gemini prepaid credit has run out. Top it up in Google AI Studio.';
+    }
+    if (mentionsFreeTier(m)) {
+      return 'You’ve hit Gemini’s free-tier limit for now. Wait a minute and try again. Daily limits reset at midnight US Pacific time.';
+    }
+    return 'Your Gemini key has hit its rate limit. Wait a minute and try again.';
+  }
   if (m.includes('billing')) {
-    return 'That Google project needs billing set up before Gemini will respond.';
+    return 'Google says billing on that key’s project isn’t working. Fix it in Google AI Studio, or create a key in a project without billing to use the free tier.';
   }
   if (status === 403 || m.includes('permission_denied')) {
     return 'That key isn’t allowed to call Gemini. Check the key’s restrictions in Google Cloud.';
-  }
-  if (status === 429 || m.includes('quota') || m.includes('resource_exhausted') || m.includes('rate limit')) {
-    return 'Your Gemini key has hit its quota. Wait a little, or check quota and billing in Google Cloud.';
   }
   if (status === 503 || m.includes('overloaded')) {
     return 'Gemini is busy right now. Try again in a moment.';
@@ -173,7 +261,7 @@ function tierScore(id: string) {
 function isUsableModelId(id: string) {
   const low = id.toLowerCase();
   if (!low.startsWith('gemini')) return false;
-  return !/embedding|embed|aqa|tts|audio|imagen|image|veo|live|vision-only/.test(low);
+  return !/embedding|embed|aqa|tts|audio|imagen|image|veo|live|vision-only|computer-use|robotics/.test(low);
 }
 
 function isAliasId(id: string) {
@@ -207,7 +295,7 @@ function stabilityPenalty(id: string) {
  * current model, so `gemini-pro-latest` beats a previous family but loses to a
  * stable id in the newest one.
  */
-function rankModelIds(ids: string[]) {
+export function rankModelIds(ids: string[]) {
   const usable = [...new Set(ids.filter(Boolean))].filter(isUsableModelId);
   const newestVersion = usable.reduce((max, id) => Math.max(max, familyVersion(id)), 0);
   const score = (id: string) => {
@@ -215,6 +303,41 @@ function rankModelIds(ids: string[]) {
     return version * 1000 + tierScore(id) * 10 - stabilityPenalty(id);
   };
   return usable.sort((a, b) => score(b) - score(a) || a.length - b.length || a.localeCompare(b));
+}
+
+/**
+ * Drops models the key's plan rejected and moves everything at or above their
+ * tier to the back, so a free key reaches Flash in one hop instead of walking
+ * through every Pro variant first. Demoted models are still tried last, in
+ * case Google's free tier includes some of them.
+ */
+export function orderCandidates(ids: string[], paidOnly: Iterable<string>) {
+  const blocked = new Set(paidOnly);
+  const unique = [...new Set(ids.filter(Boolean))].filter(id => !blocked.has(id));
+  if (!blocked.size) return unique;
+  const blockedTier = Math.min(...[...blocked].map(tierScore));
+  return [
+    ...unique.filter(id => tierScore(id) < blockedTier),
+    ...unique.filter(id => tierScore(id) >= blockedTier)
+  ];
+}
+
+/** `gemini-3.1-flash-lite-preview` -> `Gemini 3.1 Flash-Lite (preview)`, for people. */
+export function geminiModelLabel(modelId: string) {
+  const parts = modelId.replace(/^models\//, '').split('-').filter(Boolean);
+  if (parts[0]?.toLowerCase() !== 'gemini') return modelId;
+  const words: string[] = [];
+  const notes: string[] = [];
+  for (const part of parts.slice(1)) {
+    const low = part.toLowerCase();
+    if (low === 'preview' || low === 'latest' || low === 'exp') notes.push(low);
+    else if (low === 'lite' && words.length) words[words.length - 1] += '-Lite';
+    else if (/^\d+(?:\.\d+)?$/.test(part) && words.length && !/^\d/.test(words[words.length - 1])) notes.push(part);
+    else words.push(/^\d/.test(part) ? part : part[0].toUpperCase() + part.slice(1));
+  }
+  // Dated or numbered builds (…-05-20, …-001) read as noise; the id is shown alongside.
+  const shownNotes = notes.filter(note => !/^\d/.test(note));
+  return `Gemini ${words.join(' ')}${shownNotes.length ? ` (${shownNotes.join(', ')})` : ''}`.trim();
 }
 
 async function listGenerateContentModelIds(apiKey: string, signal?: AbortSignal) {
@@ -251,26 +374,88 @@ function keyFingerprint(apiKey: string) {
   return `${(hash >>> 0).toString(36)}:${apiKey.length}`;
 }
 
-async function readCachedModelId(apiKey: string) {
-  const cached = await readValue<ModelChoiceCache>(MODEL_CHOICE_CACHE_KEY);
-  if (!cached || cached.version !== 1 || cached.keyHash !== keyFingerprint(apiKey)) return '';
-  if (!cached.modelId || !isUsableModelId(cached.modelId)) return '';
-  const age = Date.now() - Date.parse(cached.resolvedAt);
-  if (!Number.isFinite(age) || age < 0 || age > MODEL_CHOICE_TTL_MS) return '';
-  return cached.modelId;
+async function readKeyProfile(apiKey: string): Promise<KeyProfile | null> {
+  const cached = await readValue<KeyProfile>(KEY_PROFILE_CACHE_KEY);
+  if (!cached || cached.version !== 2 || cached.keyHash !== keyFingerprint(apiKey)) return null;
+  const fresh = (iso: string, ttl: number) => {
+    const age = Date.now() - Date.parse(iso);
+    return Number.isFinite(age) && age >= 0 && age <= ttl;
+  };
+  const planFresh = fresh(cached.planCheckedAt, PLAN_TTL_MS);
+  const modelId = typeof cached.modelId === 'string' && isUsableModelId(cached.modelId) ? cached.modelId : '';
+  return {
+    ...cached,
+    modelId,
+    freeTier: planFresh && cached.freeTier === true,
+    paidOnly: planFresh && Array.isArray(cached.paidOnly) ? cached.paidOnly.filter(id => typeof id === 'string') : [],
+    planCheckedAt: planFresh ? cached.planCheckedAt : ''
+  };
 }
 
-async function saveCachedModelId(apiKey: string, modelId: string) {
+/** The last model that answered for this key, if recent enough to skip `models.list`. */
+function cachedModelId(profile: KeyProfile | null) {
+  // A stale plan means re-walking from the top, so a key that gained billing finds Pro again.
+  if (!profile?.modelId || !profile.planCheckedAt || profile.paidOnly.includes(profile.modelId)) return '';
+  const age = Date.now() - Date.parse(profile.resolvedAt);
+  return Number.isFinite(age) && age >= 0 && age <= MODEL_CHOICE_TTL_MS ? profile.modelId : '';
+}
+
+async function saveKeyProfile(apiKey: string, profile: Omit<KeyProfile, 'version' | 'keyHash'>) {
   try {
-    await saveValue<ModelChoiceCache>(MODEL_CHOICE_CACHE_KEY, {
-      version: 1,
-      keyHash: keyFingerprint(apiKey),
-      modelId,
-      resolvedAt: new Date().toISOString()
-    });
+    await saveValue<KeyProfile>(KEY_PROFILE_CACHE_KEY, { version: 2, keyHash: keyFingerprint(apiKey), ...profile });
   } catch {
-    // A missing cache only costs one extra models.list call next time.
+    // A missing profile only costs one extra models.list call next time.
   }
+}
+
+/** What Dawni last learned about this key, for Settings. Never calls Google. */
+export async function readGeminiKeyStatus(apiKey: string): Promise<GeminiKeyStatus | null> {
+  const key = apiKey.trim();
+  if (!key) return null;
+  const profile = await readKeyProfile(key);
+  if (!profile?.modelId) return null;
+  return { modelId: profile.modelId, freeTier: profile.freeTier, checkedAt: profile.resolvedAt };
+}
+
+/**
+ * Tracks what one request learns about a key's plan as it walks the models,
+ * and writes it back so the next request starts on a model that works.
+ */
+function planTracker(apiKey: string, profile: KeyProfile | null) {
+  const paidOnly = new Set(profile?.paidOnly || []);
+  let freeTier = profile?.freeTier || false;
+  let learned = false;
+  return {
+    paidOnly,
+    get freeTier() {
+      return freeTier;
+    },
+    /** Returns true when the model is out of this key's plan and shouldn't count as an attempt. */
+    note(modelId: string, error: GeminiError) {
+      const status = error.status ?? 0;
+      const raw = error.detail || error.message || '';
+      if (mentionsFreeTier(raw) && !freeTier) {
+        freeTier = true;
+        learned = true;
+      }
+      if (!isPlanLimited(status, raw)) return false;
+      if (!paidOnly.has(modelId)) {
+        paidOnly.add(modelId);
+        learned = true;
+      }
+      return true;
+    },
+    async save(modelId: string) {
+      if (!modelId && !learned) return;
+      await saveKeyProfile(apiKey, {
+        modelId: modelId || profile?.modelId || '',
+        resolvedAt: modelId ? new Date().toISOString() : profile?.resolvedAt || '',
+        freeTier,
+        paidOnly: [...paidOnly],
+        planCheckedAt: learned || !profile?.planCheckedAt ? new Date().toISOString() : profile.planCheckedAt
+      });
+    }
+  };
 }
 
 function inlineImagePart(imageDataUrl: string): GeminiInlinePart {
@@ -326,35 +511,55 @@ function throwIfAborted(signal?: AbortSignal) {
   }
 }
 
+async function postGenerate(apiKey: string, modelId: string, body: GenerateBody, signal: AbortSignal | undefined, fallbackError: string) {
+  const response = await fetch(`${GEMINI_API_ROOT}/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify(body)
+  });
+  const data = (await response.json().catch(() => null)) as GeminiResponse | null;
+  const message = data?.error?.message || '';
+  if (!response.ok) {
+    throw geminiError(friendlyGeminiMessage(response.status, message, fallbackError), response.status, message);
+  }
+  if (!data) throw geminiError('Gemini returned an unreadable response.', response.status);
+  return data;
+}
+
 async function generateOnce(apiKey: string, modelId: string, call: GeminiCall, compat: CompatFlags) {
   const parts: GeminiPart[] = [
     { text: compat.systemInstruction ? call.userText : `${call.systemPrompt}\n\n${call.userText}` },
     ...call.imageParts
   ];
-
-  const response = await fetch(`${GEMINI_API_ROOT}/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: call.signal,
-    body: JSON.stringify({
-      ...(compat.systemInstruction ? { systemInstruction: { parts: [{ text: call.systemPrompt }] } } : {}),
-      contents: [{ role: 'user', parts }],
-      generationConfig: {
-        ...temperatureFor(modelId),
-        ...(compat.jsonMimeType ? { responseMimeType: 'application/json' } : {}),
-        // A schema needs the JSON mime type, so it goes when that goes.
-        ...(compat.jsonMimeType && compat.responseSchema && call.responseSchema ? { responseSchema: call.responseSchema } : {})
-      }
-    })
-  });
-
-  const data = (await response.json().catch(() => null)) as GeminiResponse | null;
-  const message = data?.error?.message || '';
-  if (!response.ok) {
-    throw geminiError(friendlyGeminiMessage(response.status, message, call.fallbackError), response.status, message);
-  }
-  if (!data) throw geminiError('Gemini returned an unreadable response.', response.status);
+  const data = await postGenerate(apiKey, modelId, {
+    ...(compat.systemInstruction ? { systemInstruction: { parts: [{ text: call.systemPrompt }] } } : {}),
+    contents: [{ role: 'user', parts }],
+    generationConfig: {
+      ...temperatureFor(modelId),
+      ...(compat.jsonMimeType ? { responseMimeType: 'application/json' } : {}),
+      // A schema needs the JSON mime type, so it goes when that goes.
+      ...(compat.jsonMimeType && compat.responseSchema && call.responseSchema ? { responseSchema: call.responseSchema } : {})
+    }
+  }, call.signal, call.fallbackError);
   return responseText(data);
+}
+
+/**
+ * The smallest real call: proves this key's plan can run the model, which
+ * `models.list` can't (a free key lists Pro models it isn't allowed to use).
+ * Any 200 counts, even an empty reply from a model that spent its few tokens thinking.
+ */
+async function pingModel(apiKey: string, modelId: string, signal?: AbortSignal) {
+  const contents: GenerateBody['contents'] = [{ role: 'user', parts: [{ text: 'Reply with the word OK.' }] }];
+  const fallback = 'Could not reach Gemini.';
+  try {
+    await postGenerate(apiKey, modelId, { contents, generationConfig: { maxOutputTokens: PING_MAX_OUTPUT_TOKENS } }, signal, fallback);
+  } catch (err) {
+    // A model that dislikes the token cap shouldn't be written off for it.
+    if ((err as GeminiError).status !== 400) throw err;
+    await postGenerate(apiKey, modelId, { contents }, signal, fallback);
+  }
 }
 
 /**
@@ -383,7 +588,7 @@ async function tryModel(
         compat[capability] = false;
         continue;
       }
-      if (isModelLevelFailure(status, raw)) {
+      if (isModelLevelFailure(status, raw) || isPlanLimited(status, raw)) {
         console.warn(`Gemini model "${modelId}" could not be used.`, raw || error.message);
         onModelError(error);
         return null;
@@ -394,46 +599,109 @@ async function tryModel(
   return null;
 }
 
-/** 404 tells us least, so keep a more specific error when one turns up. */
+/**
+ * Which failure to show when nothing worked. A 404 says least; "not in your
+ * plan" is expected on a free key and would hide the real reason the models
+ * it can use failed (a used-up daily limit, say).
+ */
+function informativeness(err: GeminiError) {
+  if (err.status === 404) return 0;
+  if (isPlanLimited(err.status ?? 0, err.detail || err.message || '')) return 1;
+  return 2;
+}
+
 function moreInformative(current: GeminiError | null, next: GeminiError) {
   if (!current) return next;
-  if (current.status === 404 && next.status !== 404) return next;
-  return current;
+  return informativeness(next) > informativeness(current) ? next : current;
 }
 
 /**
- * Checks a key without spending a generate call: `models.list` is free.
- * Returns the model Dawni would use and how many candidates the key exposes.
+ * Walks candidates best-first, re-ordering as the key's plan turns models
+ * down. `run` returns a value, or null to move on to the next model.
  */
-export async function probeGeminiKey(apiKey: string) {
+async function walkModels<T>(
+  candidates: string[],
+  plan: ReturnType<typeof planTracker>,
+  run: (modelId: string) => Promise<T | null>,
+  signal?: AbortSignal
+) {
+  const attempted = new Set<string>();
+  let queue = orderCandidates(candidates, plan.paidOnly);
+  let counted = 0;
+  while (queue.length && counted < MAX_MODEL_ATTEMPTS && attempted.size < MAX_TOTAL_ATTEMPTS) {
+    throwIfAborted(signal);
+    const modelId = queue.shift()!;
+    if (attempted.has(modelId)) continue;
+    attempted.add(modelId);
+    const blockedBefore = plan.paidOnly.size;
+    const value = await run(modelId);
+    if (value !== null) return { modelId, value };
+    if (plan.paidOnly.size > blockedBefore) queue = orderCandidates(queue, plan.paidOnly);
+    else counted += 1;
+  }
+  return null;
+}
+
+/**
+ * Test key: finds the best model this key's plan can actually run. Lists the
+ * models (free), then makes one tiny call per model from the top until one
+ * answers. On a free key the Pro rejections cost nothing and the Flash call
+ * uses one free request; on a paid key it's one capped call to the best model.
+ */
+export async function probeGeminiKey(apiKey: string, signal?: AbortSignal): Promise<GeminiKeyCheck> {
   const key = apiKey.trim();
   if (!key) throw geminiError('Add a Gemini API key first.');
-  const ranked = rankModelIds(await listGenerateContentModelIds(key));
+  const ranked = rankModelIds(await listGenerateContentModelIds(key, signal));
   if (!ranked.length) {
     throw geminiError('That key works, but it has no Gemini models that can run estimates.');
   }
-  await saveCachedModelId(key, ranked[0]);
-  return { modelId: ranked[0], modelCount: ranked.length };
+
+  // Start from nothing: Test key is how a key that just gained billing finds Pro again.
+  const plan = planTracker(key, null);
+  let lastError: GeminiError | null = null;
+  const found = await walkModels(ranked, plan, async modelId => {
+    try {
+      await pingModel(key, modelId, signal);
+      return modelId;
+    } catch (err) {
+      if (isAbortError(err, signal)) throw err;
+      const error = err as GeminiError;
+      if (isKeyLevelFailure(error.status ?? 0, error.detail || error.message || '')) throw error;
+      plan.note(modelId, error);
+      lastError = moreInformative(lastError, error);
+      return null;
+    }
+  }, signal);
+
+  await plan.save(found?.modelId || '');
+  if (!found) throw lastError || geminiError('Could not reach Gemini.');
+  return {
+    modelId: found.modelId,
+    modelCount: ranked.length,
+    freeTier: plan.freeTier,
+    paidOnly: ranked.filter(id => plan.paidOnly.has(id)),
+    best: found.modelId === orderCandidates(ranked, plan.paidOnly)[0]
+  };
 }
 
 /**
- * Runs a JSON request against the best model the key can use: the cached
- * choice first, then every candidate from `models.list`, then known ids.
+ * Runs a JSON request against the best model the key can use: the last model
+ * that worked first, then every candidate from `models.list` minus the ones
+ * the key's plan turned down, then known ids.
  */
 async function requestGeminiJson(apiKey: string, call: GeminiCall) {
   const key = apiKey.trim();
   if (!key) throw geminiError('Add a Gemini API key in Settings first.');
 
+  const profile = await readKeyProfile(key);
+  const plan = planTracker(key, profile);
   let lastError: GeminiError | null = null;
-  const onModelError = (err: GeminiError) => {
-    lastError = moreInformative(lastError, err);
-  };
-  const attempted = new Set<string>();
   let retried = false;
-  const attempt = async (modelId: string) => {
-    throwIfAborted(call.signal);
-    if (!modelId || attempted.has(modelId) || attempted.size >= MAX_MODEL_ATTEMPTS) return null;
-    attempted.add(modelId);
+  const run = async (modelId: string) => {
+    const onModelError = (err: GeminiError) => {
+      plan.note(modelId, err);
+      lastError = moreInformative(lastError, err);
+    };
     let text = await tryModel(key, modelId, call, onModelError);
     // One second chance when the reply can't be read, on the same model.
     if (text && call.accept && !call.accept(text) && !retried) {
@@ -442,14 +710,17 @@ async function requestGeminiJson(apiKey: string, call: GeminiCall) {
       const again = await tryModel(key, modelId, { ...call, userText: `${call.userText}\n\n${JSON_RETRY_NOTE}` }, onModelError);
       if (again) text = again;
     }
-    if (text) await saveCachedModelId(key, modelId);
     return text;
   };
+  const finish = async (found: { modelId: string; value: string } | null) => {
+    if (found) await plan.save(found.modelId);
+    return found?.value ?? null;
+  };
 
-  // A warm cache skips the models.list round-trip entirely on the happy path.
-  const cachedModelId = await readCachedModelId(key);
-  if (cachedModelId) {
-    const text = await attempt(cachedModelId);
+  // A warm profile skips the models.list round-trip entirely on the happy path.
+  const cached = cachedModelId(profile);
+  if (cached) {
+    const text = await finish(await walkModels([cached], plan, run, call.signal));
     if (text) return text;
   }
 
@@ -465,12 +736,10 @@ async function requestGeminiJson(apiKey: string, call: GeminiCall) {
     lastError = moreInformative(lastError, error);
   }
 
-  for (const modelId of [...ranked, ...GEMINI_FALLBACK_MODEL_IDS]) {
-    const text = await attempt(modelId);
-    if (text) return text;
-    if (attempted.size >= MAX_MODEL_ATTEMPTS) break;
-  }
-
+  const candidates = [...ranked, ...GEMINI_FALLBACK_MODEL_IDS].filter(id => id !== cached);
+  const text = await finish(await walkModels(candidates, plan, run, call.signal));
+  if (text) return text;
+  await plan.save('');
   throw lastError || geminiError(call.fallbackError);
 }
 
