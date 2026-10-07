@@ -1970,3 +1970,54 @@ textarea { min-height: 78px; resize: vertical; }
   .tl-hero-number { font-size: 76px; line-height: 72px; }
   .tl-macros { column-gap: 14px; }
 }
+
+/* ================================================================
+   Tidelight everywhere (2.7.3): sheets, Journal, Foods and Settings
+   take Today's palette. Cards and sheets lose their outlines, inset
+   fills use the page colour, selections use the accent tint or a
+   white lens (like the selected day), never accent mixed into grey.
+   ================================================================ */
+:root { --tl-inset: #18343A; --tl-lens-shadow: 0 1px 3px rgba(0, 0, 0, .35); }
+:root[data-theme="light"] { --tl-inset: #EEF4F3; --tl-lens-shadow: 0 1px 3px rgba(15, 42, 46, .12), 0 0 0 .5px rgba(15, 42, 46, .06); }
+
+/* Surfaces: white (or deep teal) cards with no outline, like Today's rows. */
+.card, .list-card, .entry, .food-row, .modal-panel { border-color: transparent; }
+.modal-panel { box-shadow: 0 -8px 30px rgba(15, 42, 46, .14); }
+
+/* Fields and inset panels sit on the page colour. */
+input, select, textarea { background: var(--tl-inset); border-color: transparent; }
+/* A field straight on the page (Foods search) is a card, like Today's rows. */
+input.search { background: var(--card); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+.calories-priority { background: var(--tl-inset); border-color: transparent; }
+.calories-priority input { background: var(--card); }
+.swipe-confirm { border-color: transparent; background: var(--tl-inset); }
+
+/* Segmented toggles: a quiet track with a lens on the chosen side. */
+.seg, .smooth-toggle, .unit-toggle-chip { background: var(--track-faint); border-color: transparent; }
+.seg button.active, .smooth-toggle button.active, .unit-toggle-chip button.active { background: var(--card); color: var(--ink); box-shadow: var(--tl-lens-shadow); }
+
+/* Selectable chips and option tiles: neutral at rest, accent tint when picked. */
+.meal-chip, .check-pill span, .rough-option, .chip { background: var(--tl-inset); border-color: transparent; }
+.meal-chip.active, .check-pill input:checked + span, .rough-option.active, .rough-meal-meals .chip.active { background: var(--accent-tint); border-color: transparent; color: var(--color-accent-text); box-shadow: none; }
+.meta-chip.accent, .chip.star { background: var(--accent-tint); }
+
+/* Accent icon buttons: the tint, like Week's today tile. */
+.add-icon, .food-row .food-log-btn, .quick-ai-btn, .day-today-btn { background: var(--accent-tint); color: var(--color-accent-text); border-color: transparent; }
+
+/* Buttons: neutral secondary, destructive as red text rather than a beige fill. */
+.secondary, .small-btn, .help-btn, .close, .entry-menu-btn { background: var(--tl-inset); border-color: transparent; box-shadow: none; }
+.danger { background: var(--tl-inset); color: var(--danger); }
+
+/* Journal: the month sits on a card; days are quiet fills, today is ringed in accent. */
+.calendar.journal-month-surface { background: var(--card); border-color: transparent; }
+.daybox-quiet { background: var(--tl-inset); border-color: transparent; }
+.daybox-photo { border-color: transparent; background: var(--tl-inset); }
+.daybox.today.daybox-quiet, .daybox.today.daybox-photo { border-color: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+.journal-date-title, .date-pill.can-reset, .month-title.can-reset, .week-title.can-reset { background: var(--card); border-color: transparent; }
+
+/* AI and menu cards: plain inset panels, no accent wash. */
+.share-card, .menu-pick-card, .menu-pick-loading, .consistency-pill.today { background: var(--tl-inset); border-color: transparent; }
+.date-pill, .month-title, .week-title { background: var(--card); border-color: transparent; }
+.extra-info, .quick-picker, .photo-picker { background: var(--tl-inset); border-color: transparent; }
+.quick-picker input, .extra-info input, .extra-info textarea, .extra-info select { background: var(--card); }
