@@ -1105,8 +1105,11 @@ textarea { min-height: 78px; resize: vertical; }
 .calories-priority .estimate-refine input { min-height: 48px; padding: 10px 12px; font-size: 16px; font-weight: 500; letter-spacing: 0; text-align: left; }
 .menu-pick-card .estimate-assumptions, .menu-pick-card .estimate-warning { margin: 0; }
 .gemini-status { margin: 10px 0 0; }
-.gemini-status.is-ready { color: var(--color-good); }
-.gemini-status.is-ready strong { font-weight: var(--weight-strong); overflow-wrap: anywhere; }
+.gemini-status.is-ok { display: grid; gap: 4px; }
+.gemini-status > .hint { margin: 0; }
+.gemini-status .is-ready { color: var(--color-good); }
+.gemini-status strong { font-weight: var(--weight-strong); overflow-wrap: anywhere; }
+.gemini-status .gemini-model-id { font-size: 0.85em; opacity: 0.75; overflow-wrap: anywhere; }
 .gemini-status.is-error { display: grid; gap: 8px; margin-top: 10px; }
 .gemini-status.is-error > .hint { margin: 0; color: var(--danger); font-weight: var(--weight-label); }
 .gemini-status .extra-info-body { grid-template-columns: 1fr; }

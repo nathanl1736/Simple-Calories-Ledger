@@ -26,7 +26,7 @@ import {
   type EstimateConfidence,
   type GeminiEstimate
 } from './aiEstimate';
-import { probeGeminiKey, requestMealEstimate, requestMenuPick, type GeminiError } from './geminiEstimate';
+import { geminiModelLabel, probeGeminiKey, readGeminiKeyStatus, requestMealEstimate, requestMenuPick, type GeminiError, type GeminiKeyStatus as SavedGeminiKeyStatus } from './geminiEstimate';
 import {
   budgetReason,
   buildMenuPickContext,
@@ -221,8 +221,12 @@ function switchDraftBasis(draft: EntryDraft, next: EntryDraft['unitMode']): Part
 type Toast = { id: number; text: string } | null;
 type GeminiCheck = {
   state: 'idle' | 'testing' | 'ok' | 'error';
+  /** The key this check was for; a result for any other key is ignored. */
+  key?: string;
   modelId?: string;
   modelCount?: number;
+  freeTier?: boolean;
+  best?: boolean;
   message?: string;
   detail?: string;
 };
@@ -1866,9 +1870,10 @@ export function App() {
           <li>
             Create a key in Google AI Studio at{' '}
             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/app/apikey</a>.
+            The free tier is enough, and no card is needed.
           </li>
           <li>Paste it into Settings → Gemini and tap Save.</li>
-          <li>Tap Test key to check Dawni can reach Gemini.</li>
+          <li>Dawni checks the key and shows which Gemini model it will use.</li>
         </ol>
         <div className="help-callout">No key? Tap Log with AI on Today, then Copy prompt and Paste estimate. That works with any AI chatbot.</div>
         <div className="actions vertical">
@@ -1893,13 +1898,14 @@ export function App() {
             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">https://aistudio.google.com/app/apikey</a>
             .
           </li>
-          <li>Create or copy an API key for a Google project where the Generative Language API is enabled.</li>
-          <li>Paste the key into Dawni&apos;s Gemini API key field in Settings, then tap Save.</li>
-          <li>Tap Test key. This is free — it only asks Google which models the key can use, and shows which one Dawni will pick.</li>
-          <li>Manage billing, budgets, and quota limits in Google Cloud. Dawni only uses the key when you tap Estimate with Gemini or Help me pick from a menu.</li>
-          <li>The key is stored locally in this browser and is included in exported backups.</li>
+          <li>Tap Create API key. A new key starts on Google&apos;s free tier, with no card needed.</li>
+          <li>Paste the key into Dawni&apos;s Gemini API key field in Settings, then tap Save. Dawni checks which models the key can actually use and shows the one it picked. Test key runs the check again.</li>
+          <li>Free tier: Gemini Flash models with daily limits, which is plenty for logging meals. Pro models need a paid plan, where Google asks you to prepay credit (at least US$5).</li>
+          <li>Once billing is linked to a key&apos;s Google project, every request on it is charged, even ones the free tier would have covered. To keep a free key, create it in a project without billing.</li>
+          <li>The check is free on a free key. On a paid key it&apos;s one tiny request to the best model, a fraction of a cent.</li>
+          <li>Dawni only uses the key when you tap Estimate with Gemini or Help me pick from a menu. The key is stored locally in this browser and is included in exported backups.</li>
         </ol>
-        <div className="help-callout">Dawni asks your key which models it can use and picks the best available one, so it keeps working as Google releases new models. If one model is busy or unavailable, it tries the next.</div>
+        <div className="help-callout">Dawni picks the best model your key&apos;s plan allows, so it keeps working as Google releases new models. If one model is busy or not in your plan, it moves to the next. Upgraded to a paid plan? Tap Test key and Dawni switches to the better model straight away.</div>
       </Modal>
       <Modal open={modal === 'customDbHelp'} title="Custom Food Database Help" onClose={() => setModal(null)}>
         <div className="custom-db-help">
@@ -4799,15 +4805,19 @@ function WeekDetails({ state, week }: { state: AppState; week: WeekBank }) {
   );
 }
 
-/** Setup feedback for the Gemini card: model choice is dynamic, so show the pick. */
-function GeminiKeyStatus({ hasKey, check }: { hasKey: boolean; check: GeminiCheck }) {
-  if (check.state === 'testing') return <p className="hint gemini-status">Checking the key with Google...</p>;
-  if (check.state === 'ok') {
+/** Setup feedback for the Gemini card: model choice is dynamic, so show the pick and the plan. */
+function GeminiKeyStatus({ hasKey, check, saved }: { hasKey: boolean; check: GeminiCheck; saved: SavedGeminiKeyStatus | null }) {
+  if (check.state === 'testing') return <p className="hint gemini-status">Checking which Gemini models this key can use...</p>;
+  if (check.state === 'ok' && check.modelId) {
     return (
-      <p className="hint gemini-status is-ready">
-        Ready — Dawni will use <strong>{check.modelId}</strong>.
-        {check.modelCount ? ` ${fmt(check.modelCount)} model${check.modelCount === 1 ? '' : 's'} available to this key.` : ''}
-      </p>
+      <div className="gemini-status is-ok">
+        <p className="hint is-ready">
+          Ready. Dawni will use <strong>{geminiModelLabel(check.modelId)}</strong>
+          {check.best && !check.freeTier ? ', the best model this key can use.' : '.'}
+        </p>
+        {check.freeTier && <p className="hint">This key is on Google’s free tier. Pro models need a paid plan; if you upgrade, tap Test key and Dawni moves up to the best model.</p>}
+        <p className="hint gemini-model-id">{check.modelId}{check.modelCount ? ` · ${fmt(check.modelCount)} model${check.modelCount === 1 ? '' : 's'} listed for this key` : ''}</p>
+      </div>
     );
   }
   if (check.state === 'error') {
@@ -4819,7 +4829,14 @@ function GeminiKeyStatus({ hasKey, check }: { hasKey: boolean; check: GeminiChec
     );
   }
   if (!hasKey) return <p className="hint gemini-status">Not set up. Add a key to use Estimate with Gemini and Help me pick from a menu.</p>;
-  return <p className="hint gemini-status">Key saved. Tap Test key to confirm Gemini can reach it and see which model Dawni will use.</p>;
+  if (saved) {
+    return (
+      <p className="hint gemini-status">
+        Dawni uses <strong>{geminiModelLabel(saved.modelId)}</strong>{saved.freeTier ? ' on Google’s free tier' : ''}. Tap Test key to check again.
+      </p>
+    );
+  }
+  return <p className="hint gemini-status">Key saved. Tap Test key to see which Gemini model Dawni will use.</p>;
 }
 
 function SettingsView(props: {
@@ -4856,6 +4873,8 @@ function SettingsView(props: {
   const [geminiEditing, setGeminiEditing] = useState(false);
   const [geminiDraft, setGeminiDraft] = useState(() => props.state.settings.geminiApiKey);
   const [geminiCheck, setGeminiCheck] = useState<GeminiCheck>({ state: 'idle' });
+  const [savedGeminiStatus, setSavedGeminiStatus] = useState<(SavedGeminiKeyStatus & { key: string }) | null>(null);
+  const geminiCheckSeq = useRef(0);
   const [preferencesDraft, setPreferencesDraft] = useState(() => props.state.settings.aiPreferences);
   const preferencesChanged = preferencesDraft.trim() !== props.state.settings.aiPreferences.trim();
   const counts = backupCounts(props.state);
@@ -4877,30 +4896,50 @@ function SettingsView(props: {
     props.onFocusHandled();
   }, [props.focus]);
 
-  // A changed key invalidates whatever the last check told us.
+  // What the last check or estimate learned about the saved key, without calling Google.
   useEffect(() => {
-    setGeminiCheck({ state: 'idle' });
+    let cancelled = false;
+    const key = props.state.settings.geminiApiKey.trim();
+    readGeminiKeyStatus(key)
+      .then(status => {
+        if (!cancelled) setSavedGeminiStatus(status ? { ...status, key } : null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [props.state.settings.geminiApiKey]);
 
-  const toggleGeminiEdit = () => {
-    if (geminiEditing) {
-      void Promise.resolve(props.onGeminiApiKey(geminiDraft)).then(() => setGeminiEditing(false));
-    } else {
-      setGeminiDraft(props.state.settings.geminiApiKey);
-      setGeminiEditing(true);
+  const geminiKey = (geminiEditing ? geminiDraft : props.state.settings.geminiApiKey).trim();
+  // A check only describes the key it ran on, so editing the key hides it.
+  const visibleGeminiCheck: GeminiCheck = geminiCheck.key === geminiKey ? geminiCheck : { state: 'idle' };
+
+  const testGeminiKey = async (keyToTest = geminiKey) => {
+    const key = keyToTest.trim();
+    const seq = ++geminiCheckSeq.current;
+    if (!key) return setGeminiCheck({ state: 'error', key, message: 'Add a key first.' });
+    setGeminiCheck({ state: 'testing', key });
+    try {
+      const result = await probeGeminiKey(key);
+      if (seq === geminiCheckSeq.current) setGeminiCheck({ state: 'ok', key, ...result });
+    } catch (err) {
+      const error = err as GeminiError;
+      if (seq === geminiCheckSeq.current) setGeminiCheck({ state: 'error', key, message: error.message || 'Could not reach Gemini.', detail: error.detail });
     }
   };
 
-  const testGeminiKey = async () => {
-    const key = (geminiEditing ? geminiDraft : props.state.settings.geminiApiKey).trim();
-    if (!key) return setGeminiCheck({ state: 'error', message: 'Add a key first.' });
-    setGeminiCheck({ state: 'testing' });
-    try {
-      const result = await probeGeminiKey(key);
-      setGeminiCheck({ state: 'ok', modelId: result.modelId, modelCount: result.modelCount });
-    } catch (err) {
-      const error = err as GeminiError;
-      setGeminiCheck({ state: 'error', message: error.message || 'Could not reach Gemini.', detail: error.detail });
+  const toggleGeminiEdit = () => {
+    if (geminiEditing) {
+      const next = geminiDraft.trim();
+      const changed = next !== props.state.settings.geminiApiKey.trim();
+      // Saving a new key runs the check, so setup is paste, Save, done.
+      void Promise.resolve(props.onGeminiApiKey(geminiDraft)).then(() => {
+        setGeminiEditing(false);
+        if (next && changed) void testGeminiKey(next);
+      });
+    } else {
+      setGeminiDraft(props.state.settings.geminiApiKey);
+      setGeminiEditing(true);
     }
   };
 
@@ -4930,7 +4969,7 @@ function SettingsView(props: {
             <button className="help-btn" type="button" onClick={props.onGeminiApiKeyHelp}>?</button>
           </div>
         </div>
-        <p className="hint">Use your own Gemini API key for Estimate with Gemini and Help me pick from a menu. The key stays on this device and is included in backups.</p>
+        <p className="hint">Use your own Gemini API key for Estimate with Gemini and Help me pick from a menu. A free key from Google AI Studio works. The key stays on this device and is included in backups.</p>
         <Field label="Gemini API key" full>
           <input
             type="password"
@@ -4942,12 +4981,13 @@ function SettingsView(props: {
           />
         </Field>
         <GeminiKeyStatus
-          hasKey={!!(geminiEditing ? geminiDraft : props.state.settings.geminiApiKey).trim()}
-          check={geminiCheck}
+          hasKey={!!geminiKey}
+          check={visibleGeminiCheck}
+          saved={savedGeminiStatus?.key === geminiKey ? savedGeminiStatus : null}
         />
         <div className="actions">
-          <button className="secondary" type="button" disabled={geminiCheck.state === 'testing'} onClick={testGeminiKey}>
-            {geminiCheck.state === 'testing' ? 'Checking key...' : 'Test key'}
+          <button className="secondary" type="button" disabled={visibleGeminiCheck.state === 'testing'} onClick={() => void testGeminiKey()}>
+            {visibleGeminiCheck.state === 'testing' ? 'Checking key...' : 'Test key'}
           </button>
         </div>
       </section>
