@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#151713" />
-    <meta name="app-version" content="2.6.2.2" />
+    <meta name="theme-color" content="#0A1B1E" />
+    <meta name="app-version" content="2.7.0.0" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Dawni" />
     <meta name="application-name" content="Dawni" />
@@ -24,14 +24,14 @@
         root.dataset.theme = theme;
         root.dataset.themePreference = pref;
         var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.content = theme === 'light' ? '#f8f3e9' : '#151713';
-        try { var accent = localStorage.getItem('dawni-accent'); if (accent) root.style.setProperty('--accent', accent); } catch (e) {}
+        if (meta) meta.content = theme === 'light' ? '#EEF4F3' : '#0A1B1E';
+        try { var accent = localStorage.getItem('dawni-accent'); if (accent && accent.toLowerCase() !== '#c9dc86') root.style.setProperty('--accent', accent); } catch (e) {}
       })();
     </script>
     <style>
       /* Paints the right background before the stylesheet and app load, so a cold start never flashes. */
-      html { background: #151713; color-scheme: dark; }
-      html[data-theme="light"] { background: #f8f3e9; color-scheme: light; }
+      html { background: #0A1B1E; color-scheme: dark; }
+      html[data-theme="light"] { background: #EEF4F3; color-scheme: light; }
     </style>
   </head>
   <body>

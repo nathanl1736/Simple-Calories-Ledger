@@ -1,9 +1,7 @@
 [
-  "Tapping + now puts the cursor straight in the calories box with the keyboard up, so you can start typing at once. Save and add another does the same for the next one.",
-  "A finished day that's over target no longer asks if you missed something or offers a rough meal. That check is only for days under target, where a forgotten meal could bank as savings.",
-  "Favourites are now a heart, right next to the food name when you log and on every food in Foods, so saving one is a single tap. Filled means favourite; tap it again to remove it (that used to be quietly ignored). A favourite keeps its numbers when you tweak a single log, and one saved from an estimate still says Estimated next time.",
-  "Protein, carbs and fat on Today now show what's left, like “90g left”, so you can see at a glance what to aim for. Going over shows “12g over” (green for protein, amber for carbs and fat). Tap the macros to switch back to eaten / target; Dawni remembers your pick.",
-  "No more swipe to complete. Days now count toward your week bank on their own at midnight. Tap Done for today if you want today counted sooner, and past days stay editable without reopening them.",
-  "Forgot to log, or ate out? A day logged under 60% of its target waits for a quick check instead of banking the missing meal as savings, and a day with nothing logged counts as on target. Add a rough meal by size (Light, Regular, Big, Feast), or give the whole day a rough guess.",
-  "The Week page leads with the answer: what you've banked and roughly how much the days left can eat, like “Sunday can be about 2,100 Cal”. Left this week now takes off what you've already eaten today and no longer counts days that have been and gone."
+  "A new look, Tidelight. Today opens under a sky that follows the clock: misty at dawn, clear through the day, golden at dusk and deep teal at night. Light and dark still follow your setting.",
+  "The sun on Today's arc moves as you log food and sets at your target. Each meal lights its own piece of the arc, and the big number is what's left. Going over sets the sun with a soft glow, never red.",
+  "Your day reads as a timeline: what you ate, when, and its protein, each with its own slice of the arc. Tap an entry to edit it; touch and hold to repeat, add a photo or delete. When there's room, your usual next meal sits on the Now line, one tap from logging.",
+  "The week strip at the top of Today shows how each day went, and the This week row says what's banked and what the rest of the week can have. Protein leads the macros, and once your calories are spent it stops telling you to eat more.",
+  "Week is seven skies, filled to each day's target, with a running balance line and a plain answer for the days left. Details, averages and how the bank works are one tap away. The tab bar now floats; + logs food from any tab, and Settings is the sliders button on Today."
 ]
