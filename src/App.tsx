@@ -309,6 +309,40 @@ function acquireModalScrollLock() {
   };
 }
 
+const KEYBOARD_STAND_IN = 'keyboard-stand-in';
+
+/**
+ * iOS only opens the keyboard for a field focused during the tap itself, but a sheet's
+ * fields render a moment after the tap and it then slides in. This invisible field takes
+ * focus during the tap so the keyboard comes up at once, and the real field takes it over
+ * once the sheet is in place (takeKeyboardFromStandIn).
+ */
+function holdKeyboardForEntry() {
+  document.querySelector(`.${KEYBOARD_STAND_IN}`)?.remove();
+  const standIn = document.createElement('input');
+  standIn.className = KEYBOARD_STAND_IN;
+  standIn.inputMode = 'decimal';
+  standIn.tabIndex = -1;
+  standIn.setAttribute('aria-hidden', 'true');
+  // On screen, as iOS scrolls to a focused field that is off it; 16px stops iOS zooming in.
+  standIn.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;min-height:0;padding:0;border:0;opacity:0;font-size:16px;pointer-events:none;';
+  document.body.appendChild(standIn);
+  standIn.focus({ preventScroll: true });
+  // Only if no sheet takes over; it normally does within half a second.
+  window.setTimeout(() => standIn.remove(), 2000);
+}
+
+/** Moves the keyboard from the stand-in to `input`, returning anything typed into the stand-in meanwhile. */
+function takeKeyboardFromStandIn(input: HTMLInputElement) {
+  const standIn = document.querySelector<HTMLInputElement>(`.${KEYBOARD_STAND_IN}`);
+  const typed = standIn?.value.trim() || '';
+  // Straight into the field as well as state, so a key pressed before React re-renders adds to it.
+  if (typed) input.value = typed;
+  input.focus({ preventScroll: true });
+  standIn?.remove();
+  return typed;
+}
+
 /**
  * Runs `fn` once no modal holds the scroll lock. Releasing the lock can restore
  * the old scroll offset, so scrolling to a section any earlier could be undone.
@@ -1000,14 +1034,11 @@ export function App() {
   }), [entries, entryDraft.editingId, state, selectedDate]);
 
   const openEntry = (meal: Meal = defaultMealForCurrentTime()) => {
-    flushSync(() => {
-      setEntryDraft(blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)));
-      setEntryOpenMode('manual');
-      setModal('entry');
-    });
-    const caloriesInput = document.getElementById('entryCalories') as HTMLInputElement | null;
-    caloriesInput?.focus({ preventScroll: true });
-    caloriesInput?.select();
+    // Now, in the tap: Log food's calories box doesn't exist yet and iOS only opens the keyboard for focus during a tap.
+    holdKeyboardForEntry();
+    setEntryDraft(blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)));
+    setEntryOpenMode('manual');
+    setModal('entry');
   };
 
   const editEntry = (entry: Entry) => {
@@ -3271,11 +3302,10 @@ function EntryModal({
       caloriesPanelRef.current?.closest('.modal-body')?.scrollTo({ top: 0, behavior });
     });
   };
-  const focusCaloriesInput = () => {
-    requestAnimationFrame(() => {
-      caloriesInputRef.current?.focus({ preventScroll: true });
-      caloriesInputRef.current?.select();
-    });
+  // In the tap itself, so iOS keeps the keyboard up (or brings it back) for the next entry.
+  const focusCaloriesForNext = () => {
+    caloriesPanelRef.current?.closest('.modal-body')?.scrollTo({ top: 0 });
+    caloriesInputRef.current?.focus({ preventScroll: true });
   };
   // Each option sets its own value, so tapping the one already chosen changes nothing.
   const setEntryEnergyUnit = (nextUnit: EnergyUnit) => setDraft(current => current.entryEnergyUnit === nextUnit
@@ -3311,13 +3341,34 @@ function EntryModal({
   useEffect(() => {
     if (!open) return;
     scrollCaloriesPanel('auto');
-    if (openMode === 'manual') focusCaloriesInput();
+    if (openMode !== 'manual') return;
+    // The + tap left the keyboard on a stand-in; the calories box takes it once the sheet
+    // stops sliding, as focusing a field that is still off screen can make iOS scroll to it.
+    const startedAt = performance.now();
+    let frame = requestAnimationFrame(function handOver() {
+      const input = caloriesInputRef.current;
+      const panel = input?.closest('.modal-panel');
+      const waited = performance.now() - startedAt;
+      // In place once the slide-in has no offset left (its first frames still sit at the start).
+      const inPlace = !!panel?.closest('.modal-backdrop.entered') && Math.abs(new DOMMatrixReadOnly(getComputedStyle(panel).transform).m42) < 1;
+      if (input && (inPlace || waited > 800)) {
+        const typed = takeKeyboardFromStandIn(input);
+        if (typed) update({ calories: typed });
+        else input.select();
+        return;
+      }
+      if (waited > 2000) return;
+      frame = requestAnimationFrame(handOver);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [open, openMode]);
 
   useEffect(() => {
     if (open) return;
     setRefineText('');
     setRefineError('');
+    // Closed before the calories box took the keyboard over.
+    document.querySelector(`.${KEYBOARD_STAND_IN}`)?.remove();
   }, [open]);
 
   const perUnit = { calories: baseCalories, protein: n(draft.protein), carbs: n(draft.carbs), fat: n(draft.fat) };
@@ -3491,7 +3542,7 @@ function EntryModal({
           {dayLine && <p className={`entry-day-impact ${remaining < 0 ? 'over' : ''}`}>{hasCalories && 'After this: '}<strong>{dayLine}</strong></p>}
           {favouriteNote && <p className={`entry-fav-note ${draft.favourite ? 'on' : ''}`}><Icon name="heart" size={14} filled={!!draft.favourite} />{favouriteNote}</p>}
           <SwipeConfirm label={swipeLabel} confirmLabel={draft.editingId ? 'Release to save' : 'Release to log'} className="entry-swipe" onConfirm={() => onSave(false)} />
-          {!reviewing && !draft.editingId && <button className="secondary" type="button" onClick={() => onSave(true)}>Save and add another</button>}
+          {!reviewing && !draft.editingId && <button className="secondary" type="button" onClick={() => { focusCaloriesForNext(); onSave(true); }}>Save and add another</button>}
         </div>
       </form>
     </Modal>
