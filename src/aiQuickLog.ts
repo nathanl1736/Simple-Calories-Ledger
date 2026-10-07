@@ -44,6 +44,11 @@ Use this exact JSON shape:
   "notes": "brief ingredient and estimate notes"
 }
 
+Choosing unitMode:
+- "serving" for a dish or meal: anything cooked or put together from several ingredients (including a recipe I list the ingredients for), restaurant and takeaway food, and countable things like eggs or drinks. If I say a recipe made several serves, give the numbers for one serve.
+- "100g" for one single food or packaged product when the grams eaten are known, like a yoghurt read from its label or 200 g of rice I weighed.
+- If unsure, use "serving".
+
 For unitMode "serving":
 - Pick ONE clear reference serving (one piece, one large drink, one bowl as you define it, one label serving, etc.).
 - calories, protein, carbs, fat MUST be for exactly ONE of those servings — not for the whole order, not for "both", not summed.
@@ -149,7 +154,7 @@ function mealValue(value: unknown, fallbackMeal: Meal): Meal {
   return meal && mealValues.has(meal) ? meal : fallbackMeal;
 }
 
-function unitModeValue(value: unknown): AiQuickLogUnitMode {
+export function unitModeValue(value: unknown): AiQuickLogUnitMode {
   const raw = stringValue(value).toLowerCase().replace(/\s+/g, '');
   if (raw === '100g' || raw === 'per100g') return '100g';
   if (raw === 'serving' || raw === 'perserving') return 'serving';
