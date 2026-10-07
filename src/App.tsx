@@ -1537,6 +1537,7 @@ export function App() {
           onSetEstimate={kcal => updateState(draft => setDayEstimate(draft, selectedDate, kcal)).then(() => notify(kcal == null ? 'Rough guess cleared' : 'Rough guess saved'))}
           onUseLog={() => updateState(draft => setDayComplete(setDayEstimate(draft, selectedDate, null), selectedDate, true)).then(() => notify('Using your log'))}
           onRoughMeal={() => setModal('roughMeal')}
+          onOpenAi={() => setModal('addFood')}
           onLogUsual={logUsual}
           onOpenTarget={() => setModal('dayTarget')}
           onOpenWeek={() => openWeek(selectedDate)}
@@ -1725,7 +1726,6 @@ export function App() {
         onPickPhoto={() => photoInputRef.current?.click()}
         onSaveDatabaseFood={saveDatabaseFood}
         onRefine={estimateSession && entryDraft.estimateDetails && !entryDraft.editingId ? refineGeminiEstimate : undefined}
-        onOpenAi={() => setModal('addFood')}
         onRoughMeal={() => setModal('roughMeal')}
         onRepeat={id => {
           const entry = state.entries.find(item => item.id === id);
@@ -1869,7 +1869,7 @@ export function App() {
           <li>Paste it into Settings → Gemini and tap Save.</li>
           <li>Tap Test key to check Dawni can reach Gemini.</li>
         </ol>
-        <div className="help-callout">No key? Tap + to log food, then Estimate with AI, Copy prompt and Paste estimate. That works with any AI chatbot.</div>
+        <div className="help-callout">No key? Tap Log with AI on Today, then Copy prompt and Paste estimate. That works with any AI chatbot.</div>
         <div className="actions vertical">
           <button className="primary" type="button" onClick={() => openSettingsSection('geminiSection')}>Open Gemini settings</button>
           <button className="secondary" type="button" onClick={() => setModal(null)}>Not now</button>
@@ -1881,7 +1881,7 @@ export function App() {
           <li>Paste it into your AI chatbot.</li>
           <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
           <li>Copy the returned JSON (it must include unitMode: per serving or per 100g, with calories matching that choice so nothing double-counts).</li>
-          <li>Tap + to log food, then Estimate with AI, then Paste estimate.</li>
+          <li>Tap Log with AI on Today, then Paste estimate.</li>
           <li>Review the Log Food form, then save normally.</li>
         </ol>
       </Modal>
@@ -2091,6 +2091,8 @@ function TrackingView(props: {
   onSetEstimate: (kcal: number | null) => void;
   onUseLog: () => void;
   onRoughMeal: () => void;
+  /** Opens Log with AI: Estimate with Gemini, Help me pick from a menu, or another chatbot. */
+  onOpenAi: () => void;
   onLogUsual: (entry: Entry, meal: Meal) => void;
   onOpenTarget: () => void;
   onOpenWeek: () => void;
@@ -2267,6 +2269,15 @@ function TrackingView(props: {
           Target {fmt(energyValue(state, goal))}{targetNote}
         </button>
       </div>
+
+      <button type="button" className="tl-ai-row" onClick={props.onOpenAi}>
+        <span className="tl-ai-icon" aria-hidden="true"><Icon name="sparkle" size={22} /></span>
+        <span className="tl-ai-text">
+          <strong>Log with AI</strong>
+          <span>Describe, snap, or pick from a menu</span>
+        </span>
+        <Icon name="chevron" size={16} />
+      </button>
 
       <button type="button" className="tl-week-row" onClick={props.onOpenWeek} aria-label={`${weekTitle}: ${headline.value} ${headline.label}. ${weekNote}. ${weekPace}. Opens Week.`}>
         <span className="tl-week-left">
@@ -3584,7 +3595,6 @@ function EntryModal({
   onPickPhoto,
   onSaveDatabaseFood,
   onRefine,
-  onOpenAi,
   onRoughMeal,
   onRepeat,
   onDelete,
@@ -3602,8 +3612,6 @@ function EntryModal({
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   /** Present while the draft is the latest Gemini estimate. */
   onRefine?: (correction: string) => Promise<void>;
-  /** Opens Estimate with AI and Help me pick from a menu. */
-  onOpenAi: () => void;
   /** Opens Add a rough meal, for a meal that was hard to track. */
   onRoughMeal: () => void;
   /** While editing: log the entry again today, or delete it. */
@@ -3856,7 +3864,6 @@ function EntryModal({
         {!reviewing && !draft.editingId && <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} onSaveDatabaseFood={onSaveDatabaseFood} compact />}
         {!reviewing && !draft.editingId && (
           <div className="entry-alt-links full">
-            <button type="button" className="text-btn" onClick={onOpenAi}>Estimate with AI</button>
             <button type="button" className="text-btn" onClick={onRoughMeal}>Add a rough meal</button>
           </div>
         )}
