@@ -70,6 +70,12 @@ function allTokensIn(tokens: string[], value: string) {
   return tokens.length > 0 && tokens.every(token => value.includes(token));
 }
 
+/** Whether a word in `name` starts with `letter`: what a one-letter search finds, as one letter is too short to rank on. */
+export function nameHasWordStarting(name: string, letter: string) {
+  const start = normaliseSearchText(letter);
+  return !!start && normaliseSearchText(name).split(' ').some(word => word.startsWith(start));
+}
+
 export function foodMatchesQuery(item: SearchableFood, query: string) {
   const { tokens } = searchFields(query);
   if (!tokens.length) return false;
