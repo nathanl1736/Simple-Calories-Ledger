@@ -10,7 +10,7 @@ import { applyAppUpdate, checkForAppUpdate, clearUpdateReloadMarkers, dismissUpd
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
-import { normaliseSearchText, scoreFoodSearch } from './foodSearch';
+import { nameHasWordStarting, normaliseSearchText, scoreFoodSearch, tokeniseQuery } from './foodSearch';
 import { linkedFood, recordFoodUse, type FavouriteChange } from './favourites';
 import { arcSlice, eatenMinutes, miniArc, nextMealSlot, restOfWeekPlan, skyBackground, skyBand, skyFor, sunArc, tideBalance, usualsForMeal, weekStory, type Sky, type SkyBand } from './tidelight';
 import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
@@ -93,7 +93,7 @@ import {
 } from './utils';
 
 type Tab = 'tracking' | 'journal' | 'library' | 'stats' | 'settings';
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'geminiSetup' | 'menuPick' | 'customDbHelp' | 'addFood' | 'dayTarget' | 'roughMeal' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'geminiSetup' | 'menuPick' | 'customDbHelp' | 'addFood' | 'dayTarget' | 'roughMeal' | 'foodSearch' | null;
 type SetTabOptions = { date?: string; resetScroll?: boolean };
 
 const TABS: [Tab, string][] = [
@@ -322,13 +322,20 @@ const KEYBOARD_STAND_IN = 'keyboard-stand-in';
  * iOS only opens the keyboard for a field focused during the tap itself, but a sheet's
  * fields render a moment after the tap and it then slides in. This invisible field takes
  * focus during the tap so the keyboard comes up at once, and the real field takes it over
- * once the sheet is in place (takeKeyboardFromStandIn).
+ * once the sheet is in place (takeKeyboardFromStandIn). `kind` is the keyboard it brings
+ * up: numbers for Log food's calories, letters for search.
  */
-function holdKeyboardForEntry() {
+function holdKeyboard(kind: 'decimal' | 'search') {
   document.querySelector(`.${KEYBOARD_STAND_IN}`)?.remove();
   const standIn = document.createElement('input');
   standIn.className = KEYBOARD_STAND_IN;
-  standIn.inputMode = 'decimal';
+  standIn.inputMode = kind;
+  if (kind === 'search') {
+    standIn.type = 'search';
+    standIn.enterKeyHint = 'search';
+    standIn.autocapitalize = 'none';
+    standIn.setAttribute('autocorrect', 'off');
+  }
   standIn.tabIndex = -1;
   standIn.setAttribute('aria-hidden', 'true');
   // On screen, as iOS scrolls to a focused field that is off it; 16px stops iOS zooming in.
@@ -412,7 +419,7 @@ function useSettleAnimation(token: string) {
   return ref;
 }
 
-type IconName = 'today' | 'week' | 'journal' | 'foods' | 'settings' | 'plus' | 'search' | 'sparkle' | 'menu' | 'chevron' | 'copy' | 'paste' | 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'edit' | 'heart';
+type IconName = 'today' | 'week' | 'journal' | 'foods' | 'settings' | 'plus' | 'search' | 'sparkle' | 'menu' | 'chevron' | 'copy' | 'paste' | 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'edit' | 'heart' | 'recent' | 'database';
 
 /** Line icons drawn on a 24px grid, stroked in the current text colour. */
 const ICON_PATHS: Record<IconName, ReactNode> = {
@@ -434,7 +441,9 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   snack: <><path d="M12 7.5c-1.5-1.3-6.5-1.8-6.5 4 0 4.5 3 8.5 6.5 7 3.5 1.5 6.5-2.5 6.5-7 0-5.8-5-5.3-6.5-4z" /><path d="M12 7.5c0-2 1-3.5 3-4" /></>,
   drink: <><path d="M6 4h12l-1.5 15.2a2 2 0 0 1-2 1.8h-5a2 2 0 0 1-2-1.8z" /><path d="M6.6 10h10.8" /></>,
   edit: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></>,
-  heart: <><path d="M12 19.5 5.5 13a4.6 4.6 0 0 1 6.5-6.5 4.6 4.6 0 0 1 6.5 6.5z" /></>
+  heart: <><path d="M12 19.5 5.5 13a4.6 4.6 0 0 1 6.5-6.5 4.6 4.6 0 0 1 6.5 6.5z" /></>,
+  recent: <><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9" /><path d="M4.5 5.5V9H8" /><path d="M12 8.5V12l2.5 1.5" /></>,
+  database: <><ellipse cx="12" cy="6" rx="7" ry="2.5" /><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6" /><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5" /></>
 };
 
 function Icon({ name, size = 22, filled = false }: { name: IconName; size?: number; filled?: boolean }) {
@@ -923,6 +932,7 @@ export function App() {
   const customDatabaseImportRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const entryPhotoInputRef = useRef<HTMLInputElement>(null);
+  const searchFieldRef = useRef<HTMLButtonElement>(null);
 
   const notify = (text: string, durationMs: number = 1800) => {
     const id = Date.now();
@@ -1071,12 +1081,19 @@ export function App() {
     openEntry();
   };
 
-  const openEntry = (meal: Meal = defaultMealForCurrentTime()) => {
+  /** Log food for typing a food in. `name` comes from a search that found nothing. */
+  const openEntry = (meal: Meal = defaultMealForCurrentTime(), name = '') => {
     // Now, in the tap: Log food's calories box doesn't exist yet and iOS only opens the keyboard for focus during a tap.
-    holdKeyboardForEntry();
-    setEntryDraft(blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)));
+    holdKeyboard('decimal');
+    setEntryDraft({ ...blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)), name });
     setEntryOpenMode('manual');
     setModal('entry');
+  };
+
+  const openFoodSearch = () => {
+    // In the tap, as with +: the search box doesn't exist yet.
+    holdKeyboard('search');
+    setModal('foodSearch');
   };
 
   const editEntry = (entry: Entry) => {
@@ -1542,6 +1559,8 @@ export function App() {
           onSetEstimate={kcal => updateState(draft => setDayEstimate(draft, selectedDate, kcal)).then(() => notify(kcal == null ? 'Rough guess cleared' : 'Rough guess saved'))}
           onUseLog={() => updateState(draft => setDayComplete(setDayEstimate(draft, selectedDate, null), selectedDate, true)).then(() => notify('Using your log'))}
           onRoughMeal={() => setModal('roughMeal')}
+          searchFieldRef={searchFieldRef}
+          onOpenSearch={openFoodSearch}
           onOpenAi={() => setModal('addFood')}
           onLogUsual={logUsual}
           onOpenTarget={() => setModal('dayTarget')}
@@ -1746,6 +1765,15 @@ export function App() {
           }).then(() => notify('Entry deleted'));
         }}
         day={entryDay}
+      />
+      <FoodSearch
+        open={modal === 'foodSearch'}
+        state={state}
+        anchorRef={searchFieldRef}
+        onClose={() => setModal(current => (current === 'foodSearch' ? null : current))}
+        onChoose={prefillFood}
+        onSaveDatabaseFood={saveDatabaseFood}
+        onLogNew={name => openEntry(defaultMealForCurrentTime(), name)}
       />
       <FoodModal
         food={activeFood}
@@ -2189,6 +2217,10 @@ function TrackingView(props: {
   onSetEstimate: (kcal: number | null) => void;
   onUseLog: () => void;
   onRoughMeal: () => void;
+  /** The search field, which the open search rises from. */
+  searchFieldRef: React.Ref<HTMLButtonElement>;
+  /** Opens search over Today: favourites, recent foods and the food database. */
+  onOpenSearch: () => void;
   /** Opens Log with AI: Estimate with Gemini, Help me pick from a menu, or another chatbot. */
   onOpenAi: () => void;
   onLogUsual: (entry: Entry, meal: Meal) => void;
@@ -2368,6 +2400,11 @@ function TrackingView(props: {
           Target {fmt(energyValue(state, goal))}{targetNote}
         </button>
       </div>
+
+      <button ref={props.searchFieldRef} type="button" className="tl-search" aria-haspopup="dialog" onClick={props.onOpenSearch}>
+        <Icon name="search" size={20} />
+        <span>Search foods</span>
+      </button>
 
       <button type="button" className="tl-ai-row" onClick={props.onOpenAi}>
         <span className="tl-ai-icon" aria-hidden="true"><Icon name="sparkle" size={22} /></span>
@@ -2961,35 +2998,26 @@ function QuickResultSection({ title, children }: { title: string; children: Reac
   return <div className="quick-result-section"><div className="quick-section-label">{title}</div><div className="quick-result-list">{children}</div></div>;
 }
 
-/** Moves the Today search bar up under the sticky header once the keyboard opens, so results show below it. */
-function liftSearchAboveKeyboard(input: HTMLInputElement) {
-  window.setTimeout(() => {
-    const row = input.closest('.quick-log') || input;
-    const header = document.querySelector('.sticky-screen-top');
-    const offset = (header?.getBoundingClientRect().height || 0) + 8;
-    const top = row.getBoundingClientRect().top + window.scrollY - offset;
-    if (Math.abs(top - window.scrollY) > 4) window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-  }, 280);
-}
-
-function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact = false, browseToggle = false, collapseSignal, trailing }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void; compact?: boolean; browseToggle?: boolean; collapseSignal?: number; trailing?: React.ReactNode }) {
-  const [query, setQuery] = useState('');
+/**
+ * Saved foods and food database matches for a search. Log food's picker and Today's search
+ * both use it, so they find the same foods in the same order.
+ */
+function useFoodSearch(state: AppState, foods: Food[], query: string) {
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [browseOpen, setBrowseOpen] = useState(false);
-  const [favouritesOpen, setFavouritesOpen] = useState(false);
-  const [recentOpen, setRecentOpen] = useState(false);
-  const prevCollapseSignal = useRef<number | null>(null);
   const [databaseMatches, setDatabaseMatches] = useState<FoodDatabaseItem[]>([]);
-  const [databaseOpen, setDatabaseOpen] = useState(false);
-  const [databasePreview, setDatabasePreview] = useState<FoodDatabaseItem | null>(null);
   const [databaseMessage, setDatabaseMessage] = useState('');
-  const recentFoods = [...foods].sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0));
-  const favourites = recentFoods.filter(food => food.favourite).slice(0, 12);
-  const recent = recentFoods.slice(0, 14);
+  /** The search the database matches belong to, so a result list can tell "none" from "not back yet". */
+  const [databaseQuery, setDatabaseQuery] = useState('');
+  const recentFoods = useMemo(() => [...foods].sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0)), [foods]);
   const trimmedQuery = query.trim();
   const trimmedDatabaseQuery = debouncedQuery.trim();
-  const userResults = useMemo(() => trimmedQuery ? rankUserFoods(recentFoods, trimmedQuery).slice(0, 5) : [], [recentFoods, trimmedQuery]);
-  const shownDatabase = databaseMatches.slice(0, 3);
+  const userResults = useMemo(() => {
+    if (!trimmedQuery) return [];
+    const ranked = rankUserFoods(recentFoods, trimmedQuery);
+    if (tokeniseQuery(trimmedQuery).length) return ranked;
+    // One letter is too short to rank on, so it used to match every food.
+    return ranked.filter(food => nameHasWordStarting(food.name, trimmedQuery));
+  }, [recentFoods, trimmedQuery]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 120);
@@ -2997,20 +3025,12 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
   }, [query]);
 
   useEffect(() => {
-    if (!browseToggle || collapseSignal === undefined) return;
-    if (prevCollapseSignal.current !== null && collapseSignal !== prevCollapseSignal.current) {
-      setBrowseOpen(false);
-      setFavouritesOpen(false);
-      setRecentOpen(false);
-    }
-    prevCollapseSignal.current = collapseSignal;
-  }, [browseToggle, collapseSignal]);
-
-  useEffect(() => {
     let cancelled = false;
     if (trimmedDatabaseQuery.length < 2) {
-      setDatabaseMatches([]);
+      // Keeps the same empty list, so a search that isn't open doesn't re-render whenever foods change.
+      setDatabaseMatches(current => current.length ? [] : current);
       setDatabaseMessage('');
+      setDatabaseQuery(trimmedDatabaseQuery);
       return;
     }
     loadFoodDatabaseWithStatus()
@@ -3020,11 +3040,13 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
         const matches = rankDatabaseFoods([...result.items, ...customItems], trimmedDatabaseQuery, foods);
         setDatabaseMatches(matches);
         setDatabaseMessage(result.message && !customItems.length ? result.message : (!result.items.length && !customItems.length ? 'Food estimate database is not available right now.' : ''));
+        setDatabaseQuery(trimmedDatabaseQuery);
       })
       .catch(() => {
         if (!cancelled) {
           setDatabaseMatches([]);
           setDatabaseMessage('Food estimate database could not be loaded.');
+          setDatabaseQuery(trimmedDatabaseQuery);
         }
       });
     return () => {
@@ -3032,14 +3054,24 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
     };
   }, [foods, state.customFoodDatabases, trimmedDatabaseQuery]);
 
+  return { trimmedQuery, recentFoods, userResults, databaseMatches, databaseMessage, databaseQuery };
+}
+
+function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact = false }: { state: AppState; foods: Food[]; onChoose: (food: Food) => void; onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void; compact?: boolean }) {
+  const [query, setQuery] = useState('');
+  const [favouritesOpen, setFavouritesOpen] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(false);
+  const [databaseOpen, setDatabaseOpen] = useState(false);
+  const [databasePreview, setDatabasePreview] = useState<FoodDatabaseItem | null>(null);
+  const { trimmedQuery, recentFoods, userResults: allUserResults, databaseMatches, databaseMessage } = useFoodSearch(state, foods, query);
+  const favourites = recentFoods.filter(food => food.favourite).slice(0, 12);
+  const recent = recentFoods.slice(0, 14);
+  const userResults = allUserResults.slice(0, 5);
+  const shownDatabase = databaseMatches.slice(0, 3);
+
   const choose = (food: Food) => {
     setDatabaseOpen(false);
     setQuery('');
-    if (browseToggle) {
-      setBrowseOpen(false);
-      setFavouritesOpen(false);
-      setRecentOpen(false);
-    }
     onChoose(food);
   };
   const previewDatabase = (item: FoodDatabaseItem) => {
@@ -3050,11 +3082,6 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
     setDatabasePreview(null);
     setDatabaseOpen(false);
     setQuery('');
-    if (browseToggle) {
-      setBrowseOpen(false);
-      setFavouritesOpen(false);
-      setRecentOpen(false);
-    }
     onChoose(databaseItemToFood(item));
   };
   const saveDatabaseFood = async (item: FoodDatabaseItem) => {
@@ -3070,32 +3097,9 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
     const food = databaseItemToFood(item);
     return <QuickFoodResultRow key={item.id} state={state} food={food} sourceChip={databaseSourceChip(item.tags, item.sourceKind)} sourceName={item.customDatabaseName} databaseSuggestion onChoose={() => previewDatabase(item)} />;
   });
-  const browsePanels = (
-    <>
-      <details open={favouritesOpen} onToggle={event => setFavouritesOpen(event.currentTarget.open)}>
-        <summary>Favourites</summary>
-        {rows(favourites, 'No favourites yet.')}
-      </details>
-      <details open={recentOpen} onToggle={event => setRecentOpen(event.currentTarget.open)}>
-        <summary>Recent foods</summary>
-        {rows(recent, 'Recent foods appear after saving entries.')}
-      </details>
-    </>
-  );
   return (
-    <section className={`quick-picker ${compact ? 'compact' : ''} ${browseToggle ? 'tracking-search' : ''}`}>
-      {browseToggle ? (
-        <div className={`quick-search-row ${trailing ? 'has-trailing' : ''}`}>
-          <span className="quick-search-field">
-            <Icon name="search" size={18} />
-            <input type="search" aria-label="Search foods" placeholder="Search foods" value={query} onChange={event => setQuery(event.target.value)} onFocus={event => liftSearchAboveKeyboard(event.currentTarget)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
-          </span>
-          <button className={`quick-browse-toggle ${browseOpen ? 'open' : ''}`} type="button" aria-label={browseOpen ? 'Hide favourites and recent foods' : 'Show favourites and recent foods'} aria-expanded={browseOpen} onClick={() => setBrowseOpen(open => !open)}><span aria-hidden="true" /></button>
-          {trailing}
-        </div>
-      ) : (
-        <input type="search" placeholder="Search saved foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
-      )}
+    <section className={`quick-picker ${compact ? 'compact' : ''}`}>
+      <input type="search" placeholder="Search saved foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
       {trimmedQuery ? (
         <>
           {userResults.length ? (
@@ -3111,7 +3115,18 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
           )}
           {databaseMessage && <p className="hint database-load-message">{databaseMessage}</p>}
         </>
-      ) : browseToggle ? (browseOpen ? browsePanels : null) : browsePanels}
+      ) : (
+        <>
+          <details open={favouritesOpen} onToggle={event => setFavouritesOpen(event.currentTarget.open)}>
+            <summary>Favourites</summary>
+            {rows(favourites, 'No favourites yet.')}
+          </details>
+          <details open={recentOpen} onToggle={event => setRecentOpen(event.currentTarget.open)}>
+            <summary>Recent foods</summary>
+            {rows(recent, 'Recent foods appear after saving entries.')}
+          </details>
+        </>
+      )}
       <Modal open={databaseOpen} title="Food database results" onClose={() => setDatabaseOpen(false)} wide>
         <p className="hint database-query">Results for “{trimmedQuery}”</p>
         <div className="quick-result-list modal-results">{dbRows(databaseMatches.slice(0, 20))}</div>
@@ -3156,6 +3171,339 @@ function FoodDatabasePreviewModal({ state, item, onUse, onSave, onClose }: { sta
         </div>
       </div>
     </Modal>
+  );
+}
+
+type FoodSearchKind = 'favourite' | 'recent' | 'database';
+const SEARCH_GLYPH: Record<FoodSearchKind, IconName> = { favourite: 'heart', recent: 'recent', database: 'database' };
+const SEARCH_KIND_TEXT: Record<FoodSearchKind, string> = { favourite: 'Favourite', recent: 'Recent', database: 'From the food database' };
+const SEARCH_EASE = 'cubic-bezier(.2, .8, .2, 1)';
+const prefersReducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** What the numbers are per, unless it's a plain serving: "per 100g", "1 bowl", "1 medium (120g)". */
+function servingNote(food: Food) {
+  return entryUnitModeValue(food.unitMode) === '100g' || food.servingLabel || food.servingGrams ? databaseServingText(food) : '';
+}
+
+/** The brand, unless the name already says it. */
+function brandNote(name: string, brand?: string) {
+  return brand && !name.toLowerCase().includes(brand.toLowerCase()) ? brand : '';
+}
+
+/** One result in Today's search, marked by where it comes from: a heart for a favourite, a clock for a recent food, a database tile for the food database. */
+function FoodSearchRow({ state, kind, food, meta, onChoose }: { state: AppState; kind: FoodSearchKind; food: Food; meta: string; onChoose: () => void }) {
+  return (
+    <button type="button" className="food-search-row" onClick={onChoose}>
+      <span className={`food-search-glyph ${kind}`} aria-hidden="true"><Icon name={SEARCH_GLYPH[kind]} size={18} filled={kind === 'favourite'} /></span>
+      <span className="food-search-main">
+        <span className="sr-only">{SEARCH_KIND_TEXT[kind]}: </span>
+        <span className="food-search-name">{food.name}</span>
+        <span className="food-search-sub">
+          {meta}
+          {/* Your own foods end on protein, like the day line; database rows keep the room for what their numbers are. */}
+          {kind !== 'database' && <>{meta && ' · '}<b>{fmt(food.protein)}g</b> protein</>}
+        </span>
+      </span>
+      <span className="food-search-cal"><span>{fmt(energyValue(state, food.calories))}</span><small>{energyLabel(state)}</small></span>
+    </button>
+  );
+}
+
+/**
+ * Search on Today: everything logged before, favourites first, and the food database, each
+ * result marked by where it comes from. The bar rises out of Today's search field and sinks
+ * back into it on Cancel. A saved food opens Log food filled in; a database food shows its
+ * estimate first, as in Log food's own search.
+ */
+function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseFood, onLogNew }: {
+  open: boolean;
+  state: AppState;
+  /** Today's search field: where the bar rises from and sinks back to. */
+  anchorRef: React.RefObject<HTMLElement | null>;
+  onClose: () => void;
+  onChoose: (food: Food) => void;
+  onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
+  /** Log food to type in, named after the search. */
+  onLogNew: (name: string) => void;
+}) {
+  const [rendered, setRendered] = useState(open);
+  const [query, setQuery] = useState('');
+  const [moreDatabase, setMoreDatabase] = useState(false);
+  const [preview, setPreview] = useState<FoodDatabaseItem | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  /** Set by Cancel, so the bar sinks back into Today's field. A picked food just fades the search as Log food comes up. */
+  const settleBack = useRef(false);
+  /** How far opening had got when Cancel cut it short, so closing carries on from there rather than jumping. */
+  const midway = useRef<{ bar: string; cancel: Keyframe; results: string; backdrop: string } | null>(null);
+  const { trimmedQuery, recentFoods, userResults, databaseMatches, databaseMessage, databaseQuery } = useFoodSearch(state, state.foods, query);
+
+  useEffect(() => {
+    if (open) setRendered(true);
+  }, [open]);
+
+  // While it's up, the page behind stays put.
+  useEffect(() => (rendered ? acquireModalScrollLock() : undefined), [rendered]);
+
+  // Loaded now, so the first search doesn't wait for the food database.
+  useEffect(() => {
+    if (open) loadFoodDatabaseWithStatus().catch(() => undefined);
+  }, [open]);
+
+  // Each new search starts at the top, with the short database list.
+  useEffect(() => {
+    setMoreDatabase(false);
+    resultsRef.current?.scrollTo({ top: 0 });
+  }, [trimmedQuery]);
+
+  /**
+   * Where the bar moves to sit exactly on Today's field: the offset for the bar, and the margin
+   * that tucks Cancel past the edge so the box is the field's full width.
+   */
+  const overField = (bar: HTMLElement, anchor: HTMLElement) => {
+    const field = anchor.getBoundingClientRect();
+    const box = bar.querySelector('.food-search-field')!.getBoundingClientRect();
+    const cancelButton = bar.querySelector<HTMLElement>('.food-search-cancel');
+    return {
+      offset: `translate(${field.left - box.left}px, ${field.top - box.top}px)`,
+      cancelButton,
+      tucked: `${-((cancelButton?.offsetWidth || 0) + 12)}px`
+    };
+  };
+
+  // Before paint, so the first frame already has the bar over Today's field.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const bar = barRef.current;
+    const input = inputRef.current;
+    if (!open || !rendered || !root || !bar || !input) return;
+    const anchor = anchorRef.current;
+    // Today's field becomes the bar, so it isn't left showing underneath.
+    if (anchor) anchor.style.visibility = 'hidden';
+    // The keyboard came up on a stand-in during the tap; the box takes it over once it's in place.
+    const handOver = () => {
+      const typed = takeKeyboardFromStandIn(input);
+      if (typed) setQuery(current => current || typed);
+    };
+    if (!anchor || prefersReducedMotion()) {
+      const fade = root.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: 'ease-out' });
+      handOver();
+      return () => fade.cancel();
+    }
+    const { offset, cancelButton, tucked } = overField(bar, anchor);
+    const backdrop = root.querySelector<HTMLElement>('.food-search-backdrop');
+    const results = resultsRef.current;
+    midway.current = null;
+    const lift = bar.animate([{ transform: offset }, { transform: 'none' }], { duration: 320, easing: SEARCH_EASE });
+    const parts = [
+      lift,
+      // Cancel slides in from the edge as the box narrows to make room for it.
+      cancelButton?.animate([{ marginRight: tucked, opacity: 0 }, { marginRight: '0px', opacity: 1 }], { duration: 320, easing: SEARCH_EASE }),
+      backdrop?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'ease-out' }),
+      results?.animate([{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: 140, easing: SEARCH_EASE, fill: 'backwards' })
+    ];
+    let stopped = false;
+    lift.finished.then(() => { if (!stopped) handOver(); }, () => undefined);
+    return () => {
+      stopped = true;
+      if (parts.some(part => part?.playState === 'running')) {
+        const cancelStyle = cancelButton ? getComputedStyle(cancelButton) : null;
+        midway.current = {
+          bar: getComputedStyle(bar).transform,
+          cancel: { marginRight: cancelStyle?.marginRight || '0px', opacity: cancelStyle?.opacity || '1' },
+          results: results ? getComputedStyle(results).opacity : '1',
+          backdrop: backdrop ? getComputedStyle(backdrop).opacity : '1'
+        };
+      }
+      parts.forEach(part => part?.cancel());
+    };
+  }, [open, rendered]);
+
+  // Also before paint: closing takes over from a cut-short open in the same frame.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const bar = barRef.current;
+    if (open || !rendered || !root || !bar) return;
+    inputRef.current?.blur();
+    const anchor = anchorRef.current;
+    const back = settleBack.current && !!anchor && !prefersReducedMotion();
+    settleBack.current = false;
+    const from = midway.current;
+    midway.current = null;
+    let parts: (Animation | undefined)[];
+    if (back && anchor) {
+      const { offset, cancelButton, tucked } = overField(bar, anchor);
+      parts = [
+        bar.animate([{ transform: from?.bar || 'none' }, { transform: offset }], { duration: 300, easing: SEARCH_EASE, fill: 'forwards' }),
+        cancelButton?.animate([from?.cancel || { marginRight: '0px', opacity: 1 }, { marginRight: tucked, opacity: 0 }], { duration: 300, easing: SEARCH_EASE, fill: 'forwards' }),
+        // The results go first, so they never sit over Today as it shows through.
+        resultsRef.current?.animate([{ opacity: from?.results || 1 }, { opacity: 0 }], { duration: 90, easing: 'ease-out', fill: 'forwards' }),
+        root.querySelector('.food-search-backdrop')?.animate([{ opacity: from?.backdrop || 1 }, { opacity: 0 }], { duration: 220, delay: 80, easing: 'ease-in-out', fill: 'forwards' })
+      ];
+    } else {
+      parts = [root.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 180, easing: 'ease-out', fill: 'forwards' })];
+    }
+    let stopped = false;
+    Promise.all(parts.map(part => part?.finished)).then(() => {
+      if (stopped) return;
+      if (anchor) {
+        anchor.style.visibility = '';
+        // Back where search was opened, for anyone moving around with a keyboard.
+        if (back) anchor.focus({ preventScroll: true });
+      }
+      setRendered(false);
+      setQuery('');
+      setPreview(null);
+    }, () => undefined);
+    return () => {
+      stopped = true;
+      parts.forEach(part => part?.cancel());
+    };
+  }, [open, rendered]);
+
+  const cancel = () => {
+    settleBack.current = true;
+    onClose();
+  };
+
+  // Esc on a keyboard, unless a food's estimate is open over the search: that closes first.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('.modal-backdrop')) return;
+      event.preventDefault();
+      cancel();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  if (!rendered) return null;
+
+  const browsing = !trimmedQuery;
+  const pool = browsing ? recentFoods : userResults;
+  const favouriteRows = pool.filter(food => food.favourite).slice(0, browsing ? 12 : 8);
+  const recentRows = pool.filter(food => !food.favourite).slice(0, browsing ? 12 : 8);
+  const databaseRows = browsing ? [] : databaseMatches.slice(0, moreDatabase ? 20 : 3);
+  const moreCount = Math.min(databaseMatches.length, 20) - databaseRows.length;
+  // Database matches land a moment after the typing, so "no matches" waits for them.
+  const waiting = !browsing && databaseQuery !== trimmedQuery;
+  const nothing = !browsing && !waiting && !favouriteRows.length && !recentRows.length && !databaseRows.length;
+  const summary = browsing || waiting ? '' : nothing ? `No matches for ${trimmedQuery}` : [
+    favouriteRows.length ? `${favouriteRows.length} favourite${favouriteRows.length === 1 ? '' : 's'}` : '',
+    recentRows.length ? `${recentRows.length} recent` : '',
+    databaseMatches.length ? `${Math.min(databaseMatches.length, 20)} from the food database` : ''
+  ].filter(Boolean).join(', ');
+
+  const savedMeta = (food: Food) => [brandNote(food.name, food.brand), servingNote(food), estimateSourceLabel(food.estimateSource)].filter(Boolean).join(' · ');
+  const databaseMeta = (item: FoodDatabaseItem) => [databaseSourceChip(item.tags, item.sourceKind), brandNote(item.name, item.brand) || item.customDatabaseName, databaseServingText(item)].filter(Boolean).join(' · ');
+  const pickDatabase = (item: FoodDatabaseItem) => {
+    inputRef.current?.blur();
+    setPreview(item);
+  };
+  const logDatabaseFood = (item: FoodDatabaseItem) => {
+    setPreview(null);
+    onChoose(databaseItemToFood(item));
+  };
+  const saveDatabaseFood = async (item: FoodDatabaseItem) => {
+    await onSaveDatabaseFood(item);
+    setPreview(null);
+  };
+  // Dragging the results puts the keyboard away, as in iOS, so the whole list can be seen.
+  const dismissKeyboard = () => {
+    if (document.activeElement === inputRef.current) inputRef.current?.blur();
+  };
+  const savedSection = (title: string, kind: FoodSearchKind, foods: Food[]) => foods.length > 0 && (
+    <section className="food-search-group">
+      <h2 className="food-search-label">{title}</h2>
+      <div className="food-search-list">
+        {foods.map(food => <FoodSearchRow key={food.id} state={state} kind={kind} food={food} meta={savedMeta(food)} onChoose={() => onChoose(food)} />)}
+      </div>
+    </section>
+  );
+
+  return (
+    <>
+      {createPortal(
+        <div ref={rootRef} className="food-search" role="dialog" aria-modal="true" aria-label="Search foods">
+          <div className="food-search-backdrop" aria-hidden="true" />
+          <div className="food-search-head">
+            <div ref={barRef} className="food-search-bar">
+              <div className="food-search-field">
+                <Icon name="search" size={20} />
+                <input
+                  ref={inputRef}
+                  type="search"
+                  value={query}
+                  placeholder="Search foods"
+                  aria-label="Search foods"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  spellCheck={false}
+                  enterKeyHint="search"
+                  onChange={event => setQuery(event.target.value)}
+                  onKeyDown={event => {
+                    // Search on the keyboard puts it away, so every result shows.
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }}
+                />
+                {query && (
+                  <button type="button" className="food-search-clear" aria-label="Clear search" onClick={() => { setQuery(''); inputRef.current?.focus(); }}>
+                    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="9" /><path d="M6.2 6.2l5.6 5.6M11.8 6.2l-5.6 5.6" /></svg>
+                  </button>
+                )}
+              </div>
+              <button type="button" className="food-search-cancel" onClick={cancel}>Cancel</button>
+            </div>
+          </div>
+          <div ref={resultsRef} className="food-search-results" onTouchMove={dismissKeyboard}>
+            {savedSection('Favourites', 'favourite', favouriteRows)}
+            {savedSection('Recent', 'recent', recentRows)}
+            {databaseRows.length > 0 && (
+              <section className="food-search-group">
+                <h2 className="food-search-label">Food database</h2>
+                <div className="food-search-list">
+                  {databaseRows.map(item => <FoodSearchRow key={item.id} state={state} kind="database" food={databaseItemToFood(item)} meta={databaseMeta(item)} onChoose={() => pickDatabase(item)} />)}
+                  {moreCount > 0 && <button type="button" className="food-search-more" onClick={() => setMoreDatabase(true)}>Show {moreCount} more</button>}
+                </div>
+              </section>
+            )}
+            {browsing && !recentFoods.length && (
+              <div className="food-search-empty">
+                <strong>Nothing saved yet</strong>
+                <span>Foods you log are kept here, favourites first. Type a food to search the food database too.</span>
+              </div>
+            )}
+            {nothing && (
+              <div className="food-search-empty">
+                <strong>No matches for “{trimmedQuery}”</strong>
+                <span>Try another word, or log it yourself.</span>
+              </div>
+            )}
+            {!browsing && (
+              <div className="food-search-list food-search-new">
+                <button type="button" className="food-search-row" onClick={() => onLogNew(trimmedQuery.charAt(0).toUpperCase() + trimmedQuery.slice(1))}>
+                  <span className="food-search-glyph new" aria-hidden="true"><Icon name="plus" size={18} /></span>
+                  <span className="food-search-main">
+                    <span className="food-search-name">Log “{trimmedQuery}” yourself</span>
+                    <span className="food-search-sub">Type in the calories</span>
+                  </span>
+                </button>
+              </div>
+            )}
+            {!browsing && databaseMessage && <p className="food-search-note">{databaseMessage}</p>}
+            <p className="sr-only" aria-live="polite">{summary}</p>
+          </div>
+        </div>,
+        document.body
+      )}
+      <FoodDatabasePreviewModal state={state} item={preview} onUse={logDatabaseFood} onSave={saveDatabaseFood} onClose={() => setPreview(null)} />
+    </>
   );
 }
 
