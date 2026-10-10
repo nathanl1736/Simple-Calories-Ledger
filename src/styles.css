@@ -1699,10 +1699,6 @@ textarea { min-height: 78px; resize: vertical; }
   --held-ghost: rgba(185, 205, 203, .14);
   --held-line: #B9CDCB;
   --target-line: rgba(234, 242, 239, .45);
-  --zero: rgba(234, 242, 239, .20);
-  --tide-line: #4CC8BB;
-  --wash-up: rgba(76, 200, 187, .16);
-  --wash-down: rgba(210, 179, 115, .22);
   --accent-tint: color-mix(in srgb, var(--accent) 30%, #0A1B1E);
 }
 :root[data-theme="light"] {
@@ -1732,10 +1728,6 @@ textarea { min-height: 78px; resize: vertical; }
   --held-ghost: rgba(49, 73, 77, .14);
   --held-line: #31494D;
   --target-line: #6B8386;
-  --zero: rgba(15, 42, 46, .18);
-  --tide-line: #0F6660;
-  --wash-up: rgba(14, 124, 118, .14);
-  --wash-down: rgba(224, 174, 93, .30);
   --accent-tint: color-mix(in srgb, var(--accent) 16%, #fff);
 }
 @media (max-width: 480px) {
@@ -1788,12 +1780,11 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-day.is-today .tl-day-date { font-weight: var(--weight-bold); }
 .tl-day.selected .tl-day-date, .tl-day.selected .tl-day-letter { color: var(--color-accent-text); }
 .tl-mini { position: absolute; left: 50%; top: 36px; margin-left: -25px; overflow: visible; }
-.tl-mini-track { fill: none; stroke: var(--track); stroke-width: 2; stroke-linecap: round; }
-.tl-day.upcoming .tl-mini-track { stroke: var(--track-faint); }
-.tl-mini-fill { fill: none; stroke: var(--sky-ink-2); stroke-width: 2; stroke-linecap: round; }
-.tl-day.live .tl-mini-fill { stroke: var(--arc); }
-.tl-mini-ring { fill: none; stroke: var(--sky-ink-2); stroke-width: 1.5; }
-.tl-mini-dot { fill: var(--sky-ink-2); }
+.tl-mini-track { fill: none; stroke: color-mix(in srgb, var(--sky-ink) 45%, transparent); stroke-width: 2; stroke-linecap: round; }
+.tl-day.upcoming .tl-mini-track { stroke: color-mix(in srgb, var(--sky-ink) 22%, transparent); }
+.tl-mini-fill { fill: none; stroke: var(--arc); stroke-width: 2; stroke-linecap: round; }
+.tl-mini-ring { fill: none; stroke: var(--sky-ink-2); stroke-width: 2; }
+.tl-mini-dot { fill: var(--over-mark); }
 .tl-mini-dot.live { fill: #F7B547; stroke: var(--arc); stroke-width: 1; }
 
 /* The sun on the day's arc. */
@@ -1918,17 +1909,6 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-bank-number.size-6 { font-size: 64px; line-height: 62px; }
 .tl-bank-label { display: inline-flex; align-items: center; gap: 4px; font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; color: var(--sky-ink-2); }
 .tl-answer { margin: 12px 0 0; font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; color: var(--sky-ink); }
-.tl-story { margin: 8px 0 0; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--sky-ink-2); }
-.tl-tide { position: relative; height: 48px; margin-top: 12px; }
-.tl-tide svg { position: absolute; left: 0; top: 0; width: 100%; height: 48px; overflow: visible; }
-.tl-tide path { vector-effect: non-scaling-stroke; }
-.tl-tide-zero { fill: none; stroke: var(--zero); stroke-width: 1; }
-.tl-tide-up { fill: var(--wash-up); }
-.tl-tide-down { fill: var(--wash-down); }
-.tl-tide-line { fill: none; stroke: var(--tide-line); stroke-width: 2; stroke-linecap: round; }
-.tl-tide-line.held { stroke: var(--sky-ink-2); stroke-dasharray: 0 8; }
-.tl-tide-end { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--tide-line); box-shadow: 0 0 0 2px var(--bg); }
-.tl-tide-label { position: absolute; right: 0; top: 6px; font-size: 11px; line-height: 13px; font-weight: var(--weight-semibold); letter-spacing: .06px; color: var(--sky-ink-2); }
 .tl-deltas { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 8px; font-size: 12px; line-height: 16px; font-weight: var(--weight-semibold); text-align: center; white-space: nowrap; color: var(--sky-ink-2); font-variant-numeric: tabular-nums; }
 .tl-deltas span { min-width: 0; line-height: 15px; }
 .tl-deltas .today { color: var(--color-accent-text); }
@@ -1959,7 +1939,6 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-platter > span { display: grid; min-width: 0; }
 .tl-platter strong { font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-platter small { font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tl-platter > .icon { margin-right: 8px; color: var(--muted); }
 .tl-text-btn { min-height: 44px; padding: 0 12px; background: none; color: var(--color-accent-text); font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; }
 .week-table { width: 100%; margin-bottom: 8px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .week-table th, .week-table td { padding: 10px 4px; border-bottom: 1px solid var(--color-border-soft); font-size: 15px; text-align: right; }
@@ -2185,3 +2164,26 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .batch-actions-note { margin: 0; text-align: center; font-size: 13px; }
 .batch-entry-hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 13px; line-height: 1.35; }
 .batch-entry-hint .icon { flex: none; color: var(--color-accent-text); }
+
+/* ===== 3.0 Week (chunk 2) ===== */
+/* Week: the working under the headline, the plan on the days after today, and the stats block. */
+.tl-working { margin: 8px 0 0; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--sky-ink-2); font-variant-numeric: tabular-nums; }
+.tl-working + .tl-answer { margin-top: 6px; }
+.tl-deltas .plan { color: var(--level); }
+.tl-tile > .tl-tile-plan { height: 0; border-top: 2px dashed var(--level); }
+.tl-tiles-target { top: auto; right: 6px; text-align: right; white-space: nowrap; }
+.tl-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; width: 100%; margin-top: 12px; padding: 16px 20px 18px; border-radius: 24px; background: var(--card); color: var(--ink); text-align: left; font-variant-numeric: tabular-nums; }
+.tl-stats:active { transform: scale(.985); }
+.tl-stat { display: grid; align-content: start; min-width: 0; }
+.tl-stat small { font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-stat b { font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; white-space: nowrap; }
+.tl-stat em { font-style: normal; font-size: 13px; line-height: 17px; color: var(--muted); }
+.tl-stat.more { display: flex; align-items: center; align-self: end; gap: 2px; font-size: 15px; line-height: 20px; font-weight: var(--weight-semibold); letter-spacing: -.23px; color: var(--color-accent-text); }
+/* The details sheet: the plan rows read as plans, and Left in budget explains what it counts. */
+.week-table tr.plan td { color: var(--muted); }
+.stat .stat-note { display: block; margin-top: 2px; font-size: 13px; line-height: 17px; color: var(--muted); }
+/* Today: protein past its goal leads with "goal met". */
+.tl-macro-value > .lead { margin: 0 4px 0 0; }
+.tl-feet > span { white-space: nowrap; }
+.tl-feet button { text-align: right; }
+.tl-feet-bank { display: block; font-weight: var(--weight-medium); }
