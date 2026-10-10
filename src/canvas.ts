@@ -93,7 +93,11 @@ export async function renderMealCardCanvas(group: MealGroup, energyUnit: EnergyU
   // Pastel accents are unreadable as text on the light theme's cream, so darken
   // them towards the ink the same way the app's own light theme does.
   const accentText = document.documentElement.dataset.theme === 'light' ? mixHex(accent, ink, 0.14) || ink : accent;
-  const font = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+  const font = cssVar('--font-ui', 'sans-serif');
+  const display = cssVar('--font-display', 'serif');
+  // A canvas draws with whatever has loaded by now, so wait for the app's fonts
+  // instead of letting the card fall back to the system font.
+  await Promise.all([`900 34px ${font}`, `600 82px ${display}`].map(spec => document.fonts.load(spec).catch(() => [])));
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = card;
@@ -104,7 +108,7 @@ export async function renderMealCardCanvas(group: MealGroup, energyUnit: EnergyU
   ctx.font = `900 34px ${font}`;
   ctx.fillText('Meal Summary', x, kickerY);
   ctx.fillStyle = ink;
-  ctx.font = `950 82px ${font}`;
+  ctx.font = `600 82px ${display}`;
   ctx.fillText(group.meal, x, titleY);
   ctx.textAlign = 'right';
   ctx.fillStyle = muted;
@@ -126,7 +130,7 @@ export async function renderMealCardCanvas(group: MealGroup, energyUnit: EnergyU
   roundRect(ctx, x, totalsY, maxW, totalsH, 30);
   ctx.fill();
   ctx.fillStyle = accentText;
-  ctx.font = `950 82px ${font}`;
+  ctx.font = `600 82px ${display}`;
   const calText = energy(group.totals.calories);
   ctx.fillText(calText, x + 32, totalsY + 86);
   // Measure while the large font is still set, so the unit sits beside the number.
