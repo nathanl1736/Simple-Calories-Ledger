@@ -561,9 +561,9 @@ export async function interact(s, cfg) {
     await s.settle(300);
     const after = await panelScroll();
     s.registry.problems.notes.push(`Log sheet, heart tapped after scrolling: panel scrollTop ${before.panel} -> ${after.panel}, header top ${before.headTop} -> ${after.headTop} (panel top ${after.panelTop}).`);
-    await s.shot('log-manually', 'heart-tapped-header-nudged', 'Heart tapped after scrolling the sheet: focus scrolled the sheet panel itself by about 34 px, so the title row is pushed up under the sheet edge and the close button is clipped.');
+    await s.shot('log-manually', 'heart-tapped-header-nudged', 'Heart tapped after scrolling the sheet. Playwright scrolled the heart into view and, because the sheet panel is overflow:hidden but still programmatically scrollable, the whole panel moved about 34 px: the title row is pushed up under the sheet edge and the close button is clipped. iOS does the same when it scrolls to a focused field (see OBSERVATIONS.md).');
     await s.swipe(0.95);
-    await s.shot('log-manually', 'favourite-and-swipe', 'Heart tapped ("Also saves it to favourites") and the swipe held past the threshold ("Release to log"). The sheet header is still nudged up (see the previous shot).');
+    await s.shot('log-manually', 'favourite-and-swipe', 'Heart tapped ("Also saves it to favourites") and the swipe held past the threshold ("Release to log"). The sheet header is still nudged up (see the previous shot, a side effect of the programmatic scroll).');
     await s.releaseSwipe();
     await s.settle(350);
     await s.shot('toast', 'entry-saved', 'Toast "Entry saved" with the favourites note after logging.');
