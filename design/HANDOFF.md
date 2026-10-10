@@ -27,10 +27,10 @@ If you are a Claude session picking this up (Fable, Opus or Sonnet), this file i
 | Screenshot capture (Sonnet) | done (445 files + INDEX.md; the agent hit a rate limit before writing OBSERVATIONS.md) |
 | Build brief | done, incl. section 9 visual findings |
 | Chunk 0: split `App.tsx` into files, zero behaviour change | done and merged (c843a02); verified: 150/150 declarations moved once, tsc, 88 tests, build, `design/audit/smoke.mjs` |
-| Chunk 1: Log sheet + estimate flow + tap-to-save + inline key connect (Opus, worktree) | running |
+| Chunk 1: Log sheet + estimate flow + tap-to-save + inline key connect (Opus) | done and merged with chunk 2; 127 tests; smoke OK light+dark; screenshots in design/build/chunk1/ |
 | Chunk 2: `weekView.ts` + Week screen + Today week row (Opus) | done and merged (6c8a104); 106 tests; owner's Saturday reconciles (163 to even out, Sunday about 1,287 = 1,450 − 163); screenshots in design/build/chunk2/; `weekViewFor(...).promptLine` ready for chunk 3 |
-| Chunk 3: Suggest mode (Sonnet) | after 1+2 merged |
-| Chunk 4: Motion (Sonnet, parallel with 3) | after 1+2 merged |
+| Chunk 3: Suggest mode | running |
+| Chunk 4: Motion (parallel with 3) | running |
 | Chunk 5: a11y/polish, version 3.0.0.0, release notes (Sonnet) | after 3+4 (PDD v0.2 already done, 420590b) |
 | Verify with re-captured screenshots; fix; PR; CI; merge; confirm Pages deploy | last |
 
