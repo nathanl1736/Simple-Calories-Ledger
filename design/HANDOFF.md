@@ -9,7 +9,8 @@ If you are a Claude session picking this up (Fable, Opus or Sonnet), this file i
 - Keep the calm, local-first identity; update the PDD (`Calories_Tracker_Product_Design_Document.txt`) to be AI-first.
 - **Build it, open a PR, merge to main, let GitHub Pages deploy.** The owner said not to come back for permission; it is a hobby app used by them and friends.
 - Keep Fable usage low: Fable orchestrates and makes design calls; Sonnet/Opus agents (within the owner's plan) do the building. If Fable credit runs out, continue on Opus with this file and the brief.
-- If the owner hits a usage limit, resume automatically; two `send_later` check-ins were scheduled for 2026-10-10 16:45Z and 20:05Z.
+- If the owner hits a usage limit, resume automatically via `send_later` check-ins (re-arm them when they fire).
+- The session switched from Fable to Opus after a usage limit; continue on Opus.
 
 ## Where things are
 - Branch: `claude/ai-first-redesign` (pushed). Base: `main` at `5769f7c` (v2.8.2.0).
@@ -23,15 +24,19 @@ If you are a Claude session picking this up (Fable, Opus or Sonnet), this file i
 | Step | Status |
 |---|---|
 | Code inventory (Sonnet) | done |
-| Screenshot capture (Sonnet) | done (445 files + INDEX.md; OBSERVATIONS.md pending from the agent) |
+| Screenshot capture (Sonnet) | done (445 files + INDEX.md; the agent hit a rate limit before writing OBSERVATIONS.md) |
 | Build brief | done, incl. section 9 visual findings |
-| Chunk 0: split `App.tsx` into files, zero behaviour change (Sonnet) | running in a git worktree; merge its branch into `claude/ai-first-redesign` when it reports |
-| Chunk 1: Log sheet + estimate flow + tap-to-save + inline key connect (Opus, worktree) | not started |
-| Chunk 2: `weekView.ts` + Week screen + Today week row (Opus, worktree, parallel with 1) | not started |
+| Chunk 0: split `App.tsx` into files, zero behaviour change | done and merged (c843a02); verified: 150/150 declarations moved once, tsc, 88 tests, build, `design/audit/smoke.mjs` |
+| Chunk 1: Log sheet + estimate flow + tap-to-save + inline key connect (Opus, worktree) | running |
+| Chunk 2: `weekView.ts` + Week screen + Today week row (Opus, worktree, parallel with 1) | running |
 | Chunk 3: Suggest mode (Sonnet) | after 1+2 merged |
 | Chunk 4: Motion (Sonnet, parallel with 3) | after 1+2 merged |
-| Chunk 5: a11y/polish, version 3.0.0.0, release notes, PDD (Sonnet) | after 3+4 |
+| Chunk 5: a11y/polish, version 3.0.0.0, release notes (Sonnet) | after 3+4 (PDD v0.2 already done, 420590b) |
 | Verify with re-captured screenshots; fix; PR; CI; merge; confirm Pages deploy | last |
+
+## Verifying a chunk
+- `npx tsc --noEmit`, `npm test`, `npm run build`, then `npx vite --host 127.0.0.1 --port 519x --strictPort` and `SMOKE_URL=http://127.0.0.1:519x/Simple-Calories-Ledger/ node design/audit/smoke.mjs` (prints SMOKE OK).
+- Merge each worktree branch into `claude/ai-first-redesign` with `git merge --no-edit <branch>`; resolve `src/styles.css` conflicts by keeping both appended blocks.
 
 ## Conventions for whoever continues
 - Commit messages end with the Co-Authored-By and Claude-Session lines used in this branch's history. No model names in code, commits or the PR body.
