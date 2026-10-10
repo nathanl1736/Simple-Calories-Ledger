@@ -1,4 +1,5 @@
 import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, Food, Meal, Settings, Totals } from './types';
+import { inDayOrder } from './tidelight';
 
 export const MEALS: Meal[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Drink'];
 
@@ -99,10 +100,9 @@ export function sum(entries: Entry[]): Totals {
   }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
 }
 
+/** A day's entries in the order eaten: morning, afternoon, evening, then the order logged. */
 export function dayEntries(state: AppState, key: string) {
-  return state.entries
-    .filter(entry => normalizeDateKey(entry.date) === key)
-    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  return inDayOrder(state.entries.filter(entry => normalizeDateKey(entry.date) === key));
 }
 
 export function isDayComplete(state: AppState, key: string) {

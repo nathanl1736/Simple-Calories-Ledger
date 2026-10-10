@@ -151,10 +151,55 @@ test('the plan uses the target Today shows: a custom target or a spread bank', (
   assert.equal(t.restOfWeekPlan(WEEK, -600, '2026-10-09', 1600).perDay, 1600);
 });
 
-test('entries added to a day afterwards sit at a typical time for their meal', () => {
-  // Local times, so this passes in any time zone.
-  const at = new Date(2026, 9, 7, 7, 40).getTime();
-  assert.deepEqual(t.eatenMinutes({ createdAt: at, date: '2026-10-07', meal: 'Breakfast' }), { minutes: 7 * 60 + 40, late: false });
-  const late = t.eatenMinutes({ createdAt: new Date(2026, 9, 9, 9, 5).getTime(), date: '2026-10-07', meal: 'Dinner' });
-  assert.deepEqual(late, { minutes: 19 * 60, late: true });
+test('parts of the day: morning until noon, afternoon until 5pm, then evening', () => {
+  assert.equal(t.dayPartAt(0), 'morning');
+  assert.equal(t.dayPartAt(11 * 60 + 59), 'morning');
+  assert.equal(t.dayPartAt(12 * 60), 'afternoon');
+  assert.equal(t.dayPartAt(16 * 60 + 59), 'afternoon');
+  assert.equal(t.dayPartAt(17 * 60), 'evening');
+  assert.equal(t.dayPartAt(23 * 60 + 30), 'evening');
+});
+
+test('meals place themselves; logging time never moves breakfast, lunch or dinner', () => {
+  // All logged at 1:05pm on the day.
+  const at = new Date(2026, 9, 10, 13, 5).getTime();
+  const date = '2026-10-10';
+  assert.equal(t.entryDayPart({ createdAt: at, date, meal: 'Breakfast' }), 'morning');
+  assert.equal(t.entryDayPart({ createdAt: at, date, meal: 'Lunch' }), 'afternoon');
+  assert.equal(t.entryDayPart({ createdAt: at, date, meal: 'Dinner' }), 'evening');
+  // A stray part on a meal is ignored: the meal says when.
+  assert.equal(t.entryDayPart({ createdAt: at, date, meal: 'Dinner', part: 'morning' }), 'evening');
+});
+
+test('a snack or drink goes where it was picked, or for older entries, when it was logged', () => {
+  const date = '2026-10-10';
+  const lunchtime = new Date(2026, 9, 10, 13, 5).getTime();
+  assert.equal(t.entryDayPart({ createdAt: lunchtime, date, meal: 'Drink', part: 'morning' }), 'morning');
+  assert.equal(t.entryDayPart({ createdAt: lunchtime, date, meal: 'Snack', part: 'evening' }), 'evening');
+  // Saved before parts existed: the time it was logged, when that was on its own day.
+  assert.equal(t.entryDayPart({ createdAt: new Date(2026, 9, 10, 20, 30).getTime(), date, meal: 'Snack' }), 'evening');
+  // Added to its day afterwards: drinks in the morning, snacks in the afternoon.
+  const nextDay = new Date(2026, 9, 11, 9, 0).getTime();
+  assert.equal(t.entryDayPart({ createdAt: nextDay, date, meal: 'Drink' }), 'morning');
+  assert.equal(t.entryDayPart({ createdAt: nextDay, date, meal: 'Snack' }), 'afternoon');
+  assert.equal(t.entryDayPart({ createdAt: nextDay, date, meal: 'Snack', part: 'noon' }), 'afternoon');
+});
+
+test('a day logged in one go reads in the order eaten, grouped by part', () => {
+  const date = '2026-10-10';
+  const at = minute => new Date(2026, 9, 10, 13, minute).getTime();
+  const entries = [
+    { id: 'wrap', createdAt: at(7), date, meal: 'Lunch' },
+    { id: 'weetbix', createdAt: at(5), date, meal: 'Breakfast' },
+    { id: 'apple', createdAt: at(8), date, meal: 'Snack', part: 'afternoon' },
+    { id: 'coffee', createdAt: at(6), date, meal: 'Drink', part: 'morning' },
+    { id: 'tea', createdAt: at(9), date, meal: 'Drink', part: 'evening' }
+  ];
+  assert.deepEqual(t.inDayOrder(entries).map(entry => entry.id), ['weetbix', 'coffee', 'wrap', 'apple', 'tea']);
+  assert.deepEqual(t.dayPartGroups(entries).map(group => [group.part, group.entries.map(entry => entry.id)]), [
+    ['morning', ['weetbix', 'coffee']],
+    ['afternoon', ['wrap', 'apple']],
+    ['evening', ['tea']]
+  ]);
+  assert.deepEqual(t.dayPartGroups([]), []);
 });

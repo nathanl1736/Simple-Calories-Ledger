@@ -1,6 +1,7 @@
 import type { AppState, Entry, Food, Settings } from './types';
 import { normalizeCustomFoodDatabases } from './customFoodDatabases';
 import { estimateSourceValue } from './aiEstimate';
+import { dayPartValue } from './tidelight';
 import { energyUnitValue, entryTotals, entryUnitModeValue, goalSnapshotFromSettings, lockPastGoals, n, normalizeDateKey, normalizeGoalSnapshot, portionValue, validBackupReminderDays } from './utils';
 
 export const DEFAULT: AppState = {
@@ -48,6 +49,9 @@ export function normalizeEntry(input: Partial<Entry>): Entry {
   entry.estimateSource = estimateSourceValue(entry.estimateSource);
   entry.photo = entry.photo || null;
   entry.meal = entry.meal || 'Snack';
+  const part = dayPartValue(entry.part);
+  if (part) entry.part = part;
+  else delete entry.part;
   entry.createdAt = entry.createdAt || Date.now();
   entry.updatedAt = entry.updatedAt || entry.createdAt;
   return entry;

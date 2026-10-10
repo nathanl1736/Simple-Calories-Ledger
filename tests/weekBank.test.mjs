@@ -1,4 +1,5 @@
 // Week bank maths, run straight from src/utils.ts: npm test (Node 22.6+).
+import { register } from 'node:module';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -12,6 +13,8 @@ class FixedDate extends RealDate {
 globalThis.Date = FixedDate;
 const setToday = key => { now = new RealDate(`${key}T12:00:00`).getTime(); };
 
+// utils.ts imports tidelight.ts without an extension, as Vite allows.
+register('./resolveTs.mjs', import.meta.url);
 const u = await import('../src/utils.ts');
 
 // Monday 28 September to Sunday 4 October 2026 (Melbourne's clocks go forward that Sunday).
