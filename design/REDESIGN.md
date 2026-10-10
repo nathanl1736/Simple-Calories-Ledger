@@ -63,7 +63,7 @@ One bottom sheet, opened by the sparkle, by the "Now" button on Today, by the fi
 1. **Header**: title "Log food" (Fraunces 24). Right: close. Under the title a small segmented control: **Log** | **Suggest**. Suggest is section 5. The title becomes "What should I eat?" in Suggest mode.
 2. **Composer**: a textarea that grows from 2 to 5 lines. Placeholder (Log): *"What did you eat? e.g. 2 eggs on toast with butter, flat white"*. Beneath it a toolbar row: a **Photo** chip (camera glyph, 44 px; opens the picker, multiple allowed, up to 3; thumbnails 56 px with an X appear above the toolbar) and, right-aligned, the primary **Estimate** button (disabled until text or a photo exists; reads "Estimating…" while busy). Enter inside the textarea inserts a newline; the button is the only submit.
 3. **Usuals row** (Log mode, hidden while a request runs): a horizontally scrolling row of up to 8 chips, 44 px tall: the day-part's usuals first (`usualsFor`, existing), then meal-prep batches with serves left (prep glyph, "Name · 3 left"), then favourites. Chip = name + Cal. **Tap logs it immediately** to the sheet's meal/day-part with an Undo toast; the sheet closes. Long-press (or the "…" at the end of the row: "More") opens the review sheet prefilled instead.
-4. **Other ways** (plain rows, 52 px, chevron): **Search foods** (opens the existing overlay), **Type it in** (opens the manual entry sheet exactly as "Log manually" does now, including the decimal keyboard hand-off), **Rough meal** (opens the rough-meal panel; this also fixes A10's hidden actions), **Meal prep a batch**.
+4. **Other ways** (plain rows, 52 px, chevron): **Search foods** (opens the existing overlay), **Type it in** (opens the manual entry sheet exactly as "Log manually" does now, including the decimal keyboard hand-off), **Rough meal** (opens the rough-meal panel; this also fixes A10's hidden actions), **Meal prep a batch**. These rows are the only manual entry points: the **Search foods** and **Log manually** rows are removed from Today (V1).
 5. **Footer**: 13 px muted. Left: *"Estimates can be wrong. You check the numbers before anything is saved."* Right: the model line when a key is set, e.g. *"Gemini 2.5 Flash · your key"* (from the cached key profile; never block on it). Under it a text link **Paste an estimate from another chatbot** (keeps the copy/paste path; "Copy prompt" lives in Settings only).
 
 ### 4.2 Gestures to a saved entry (acceptance)
@@ -73,7 +73,7 @@ One bottom sheet, opened by the sparkle, by the "Now" button on Today, by the fi
 | Estimate by text | 5 + typing + wait | **3** (sparkle, Estimate, Log) + typing + wait |
 | Estimate by photo | 5 + OS picker | **3** + OS picker |
 | Usual / favourite / meal-prep serve | 2–3 | **2** (sparkle, chip) with Undo |
-| Manual typed | 2 + typing | **3** (sparkle, Type it in, Log) + typing — one more than today's "Log manually" row, which stays on Today, so the fast manual path is unchanged at 2 |
+| Manual typed | 2 + typing | **3** (sparkle, Type it in, Log) + typing. One more gesture than the old "Log manually" row, accepted so the log itself is visible on Today (V1); "Type it in" is the first row under the composer. |
 | Suggest → log | 6 | **4** (sparkle, Suggest, Log this, Log) |
 
 ### 4.3 Estimating state (in the sheet)
@@ -177,8 +177,8 @@ Worked example (the owner's Saturday): deltas +304 −38 +238 −110 +173 → ba
    - last day: *"Last day. About 1,290 left after what's logged."* / *"Last day. It finishes about 160 over and resets Monday."*
    - finished: *"Finished 320 under target."* / *"Finished 160 over target."* / *"Finished right on target."*
    Delete "Still on track." and the `weekStory` line.
-4. **Tide chart, tiles, weekday labels**: keep. Changes: upcoming tiles draw a **dashed plan line** at `allowance` when it differs from the base target by ≥ 10, labelled in the deltas row as "~1,290"; today's cell keeps "730 over"; the tiles' corner label reads *"target 1,450"*. The static "on pace" label on the tide chart is removed (the answer line says it).
-5. **Platter**: light-day "Check" platter unchanged. Otherwise: *"5 of 7 days counted · average 1,336"* on the left and nothing else (the misleading "N Cal left this week" moves to the details sheet, relabelled *"Left in the weekly budget, counting today's unspent"*).
+4. **Tide chart**: removed (V3). **Deltas row, tiles, weekday labels**: keep. Changes: upcoming tiles draw a **dashed plan line** at `allowance` when it differs from the base target by ≥ 10, labelled in the deltas row as "~1,290"; today's cell keeps "730 over"; the tiles' corner label reads *"target 1,450"*.
+5. **Platter**: light-day "Check" platter unchanged. Otherwise the platter is removed and replaced by a **stats block** (V4) under the weekday labels: two columns, 15 px, label muted / value semibold: Weekly budget 10,150 · Left in budget 1,287 (*counting today's unspent*) · Counted 5 of 7 · Average 1,336 · Protein 123g / 150g avg. Tapping the block opens the details sheet.
 6. **Details sheet**: table as now but every cell from `weekView`; add a "Plan" row for upcoming days; keep "How the week bank works" and add one bullet: *"Until midnight, today only counts what it is over by. What you haven't eaten yet is still yours."*
 7. **Custom targets**: keep the bank on base goals (the weekly budget is the sum of base goals), but Today's Target button reads *"Target 2,400 · custom (week bank uses 1,800)"* when overridden.
 
@@ -190,6 +190,8 @@ Right column, two lines from the same model: `net` with sign and label ("−163 
 ## 7. Today
 
 Keep the sky, hero, week strip, macros, day line, status card. Changes:
+- **Remove the Search foods and Log manually rows** (V1). Order under the hero: meal prep rows (if any), This week, macros, day line.
+- **Week strip mini-arcs** redrawn for legibility (V2). **Protein tail** copy per V11.
 - **Motion** (section 8): sun, arc and numbers animate.
 - **Empty state / first run**: section 4.7.
 - **Now line**: chips become one-tap logs with Undo (same as meal prep); the "Now" button opens the Log sheet (not the manual sheet); a "What should I eat?" chip leads the row when there is room (5.4).
@@ -215,7 +217,23 @@ Principles: respond on pointer-down; animate from the current on-screen value, n
 
 ## 9. Visual findings from the screenshot review
 
-(Filled after the Fable review of `design/audit/screenshots/`.)
+Reviewed at 390x844, light and dark (`design/audit/screenshots/`). The visual system is strong and stays: the sky, the sun arc with one lit segment per entry, Fraunces numerals, glass chrome, amber-not-red. These are the things the screenshots showed that the code alone did not.
+
+| # | Finding | Decision |
+|---|---|---|
+| V1 | **The log is below the fold.** On Today the day line (what you actually ate) starts at ~y=1480 of 1688 because five same-weight pill cards sit between the hero and it: Search foods, Log manually, meal prep, This week, macros. The user's own record is the least visible thing on the screen. (`035-today-1300-viewport`) | Remove the **Search foods** and **Log manually** rows from Today; both live in the Log sheet (section 4). Keep meal prep (one-tap serves), This week and macros. The day line rises ~230 px and is on screen at first paint. |
+| V2 | **Week strip mini-arcs are near invisible**: 1 px grey arcs, the "check" ring on a held day is a faint dot, over-target days show a 3 px amber dot. They carry the week's story but cannot be read. (`035`, `110`) | Stroke 2 px; eaten share in `--arc` at full opacity, remainder at 45 % ink; held day = hollow ring 2 px; over = amber dot 5 px. Keep the geometry. |
+| V3 | **Week's tide chart is 48 px tall with a static "on pace" label** that says "on pace" even when the week is behind; the deltas row beneath it (+97 +90 −486 Check +41 710 left) carries all the information. (`054-week-current`) | Remove the tide chart. The headline, working line and answer sentence (6.2) replace it. |
+| V4 | **Week has ~300 px of empty space under the platter**, while the useful stats (counted days, average, left in budget, protein average) are hidden in the details sheet. (`054`, `116`) | Add a compact two-column stats block under the platter: Weekly budget · Left in budget (counting today's unspent) · Counted days · Average on counted days · Average protein. The details sheet keeps the day table. |
+| V5 | **The "Log with AI" chooser is a menu, and the Estimate sheet is a form**: hint paragraph, field label, 260 px textarea, dashed photo drop-zone, a "Tips" disclosure, then two stacked buttons. Four blocks before the primary action. (`217`, `153`) | Section 4.1: one composer block (textarea that grows, Photo chip, Estimate button on one row). Tips move into the textarea placeholder and a single "Tips" link in the footer. |
+| V6 | **The review sheet is good.** Name, basis toggles, big number, macros, servings with "1 bowl", the estimate card with confidence, assumptions and Refine, and the amber "After this: 10 Cal over today" line read clearly. (`158`, `159`) | Keep the layout. Only change the primary action (tap, not swipe), the estimate header line, and the attached photo (4.5). |
+| V7 | **Meal chips wrap to two rows with "Drink" orphaned** in every entry sheet. (`138`, `159`) | Make the chip row a single horizontally scrolling line (44 px chips, 10 px gap) with the selected chip scrolled into view. |
+| V8 | **Menu pick is text-heavy**: a three-line intro, a three-line photo tip, a long "What gets sent" block. (`172`) | Suggest mode (section 5): one-line placeholder, chips, the budget line, Photo chip. "What gets sent" stays as a collapsed disclosure. The result card (`177`) is good; reuse it. |
+| V9 | **Foods rows truncate** both the name ("Greek yoghurt, ber…") and the meta ("logged 9× ·…") because the heart, "+" disc and "…" eat 150 px. (`077`) | Names wrap to two lines; meta shows only "logged 9×" (drop "per serving ·"); "…" becomes 44 px and sits closer to "+". |
+| V10 | **Settings is one long column** with the Gemini card fifth, below Backup. In an AI-first app the key and the About-you text should be near the top. (`195`) | Order: Goals · Gemini · About you, for AI · Weekly banking · Display · Backup · AI estimate helper · Food estimates · Custom food databases · App. |
+| V11 | **Protein copy**: "19g past goal" on an over-target day reads as a problem; over on protein is good when cutting. (`110`) | "goal met · +19g". |
+| V12 | **Dark mode is excellent** (`036-…-dark`): the night sky, the gold arc and the cream numerals. Nothing to change. | Keep; every new element must be checked in dark. |
+| V13 | **Error states** are a red paragraph inside the sheet with the same primary button; nothing is announced. (`167`) | `role="alert"`, and the primary button reads **Try again**; the timeout error offers **Type it in**. |
 
 ---
 
@@ -232,6 +250,7 @@ Principles: respond on pointer-down; animate from the current on-screen value, n
 - Foods "Manage food" and Settings Goals: keep the typed string while editing, parse on blur/save (fixes "1.5").
 - Delete entry: soft delete with Undo toast (5 s), no `confirm()`.
 - Brand: page title "Dawni", backup title "Dawni backup", share file names `dawni-…`; README updated to the current stack and the AI-first flow.
+- Meal chip rows scroll horizontally on one line (V7). Foods rows: two-line names, shorter meta, 44 px "…" (V9). Settings card order per V10.
 - Dead CSS: remove a selector only if `grep` over `src/` finds no use of the class; otherwise leave it.
 
 ---
