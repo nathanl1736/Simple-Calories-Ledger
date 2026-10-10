@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { linkedFood, recordFoodUse } = await import('../src/favourites.ts');
+const { linkedFood, pruneOneOffEstimates, recordFoodUse } = await import('../src/favourites.ts');
 
 const NOW = 1_800_000_000_000;
 const food = (id, name, extra = {}) => ({ id, name, unitMode: 'serving', calories: 100, protein: 10, carbs: 10, fat: 2, favourite: false, usageCount: 3, lastUsedAt: 1, createdAt: 1, updatedAt: 1, ...extra });
@@ -86,4 +86,36 @@ test('a favourite saved from an estimate stays labelled as one', () => {
   const foods = [];
   log(foods, { name: 'Burrito bowl', favourite: true, extra: { estimateSource: 'ai' } });
   assert.equal(foods[0].estimateSource, 'ai');
+});
+
+const DAY = 24 * 60 * 60 * 1000;
+const ago = days => NOW - days * DAY;
+/** An AI estimate logged once, `days` ago, untouched since. */
+const oneOff = (id, days, extra = {}) => food(id, id, { estimateSource: 'ai', usageCount: 1, lastUsedAt: ago(days), createdAt: ago(days), updatedAt: ago(days), ...extra });
+const kept = foods => pruneOneOffEstimates(foods, NOW).map(item => item.id);
+
+test('a one-off AI or menu estimate clears from Recent after 30 days unused', () => {
+  assert.deepEqual(kept([oneOff('fresh', 29), oneOff('stale', 31), oneOff('menu', 31, { estimateSource: 'menu' })]), ['fresh']);
+  assert.deepEqual(kept([oneOff('edge', 30)]), ['edge'], 'kept through day 30');
+});
+
+test('favourites, repeats and hand edits keep an estimate', () => {
+  assert.deepEqual(kept([
+    oneOff('hearted', 90, { favourite: true }),
+    oneOff('twice', 90, { usageCount: 2 }),
+    oneOff('edited', 90, { updatedAt: ago(10) })
+  ]), ['hearted', 'twice', 'edited']);
+  assert.deepEqual(kept([oneOff('stamped late', 90, { updatedAt: ago(90) + 5 })]), [], 'a few ms between stamps is not an edit');
+});
+
+test('only AI and menu estimates are ever cleared', () => {
+  assert.deepEqual(kept([
+    oneOff('typed', 90, { estimateSource: undefined }),
+    oneOff('label', 90, { estimateSource: 'label' }),
+    oneOff('rough', 90, { estimateSource: 'rough' })
+  ]), ['typed', 'label', 'rough']);
+});
+
+test('an estimate with no last-used time falls back to when it was saved', () => {
+  assert.deepEqual(kept([oneOff('old', 60, { lastUsedAt: 0 }), oneOff('new', 5, { lastUsedAt: 0 })]), ['new']);
 });
