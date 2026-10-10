@@ -11,8 +11,8 @@
   "out": "/home/user/Simple-Calories-Ledger/design/audit/screenshots",
   "midweekDate": "2026-10-07"
  },
- "shotCount": 442,
- "seconds": 720,
+ "shotCount": 444,
+ "seconds": 713,
  "problems": {
   "console": [
    {
@@ -5394,9 +5394,16 @@
     "dialog": "Log breakfast",
     "focusStartsInside": true,
     "startsOn": "input:Cal per serving",
-    "tabPressesOutside": 0,
+    "tabPressesOutside": 11,
     "of": 30,
-    "outsideSample": [],
+    "outsideSample": [
+     "button:Today",
+     "button:Week",
+     "button:Journal",
+     "button:Foods",
+     "button:Log with AI",
+     "body:Today\nM\n5\nT\n6\nW\n7\nT\n8\nF\n9\nS\n10\nS\n11\n\n1,8"
+    ],
     "a11y": {
      "dialogs": 1,
      "ariaModalDialogs": 1,
