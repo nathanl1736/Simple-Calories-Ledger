@@ -242,7 +242,7 @@ html[data-sky-at-rest] .status-bar-scrim { opacity: 0; }
   margin: 0;
 }
 .brand-kicker { text-transform: none; letter-spacing: .02em; font-size: 13px; }
-h1, .page-title { margin: 0; font-family: var(--font-display); font-size: var(--type-page-title); line-height: 1.05; letter-spacing: 0; font-weight: 600; }
+h1, .page-title { margin: 0; font-family: var(--font-display); font-size: var(--type-page-title); line-height: 1.05; letter-spacing: 0; font-weight: 700; }
 h2 { margin: 0 0 14px; font-size: var(--type-section-title); line-height: 1.1; letter-spacing: 0; font-weight: var(--weight-bold); }
 .hint, .page-helper { color: var(--muted); font-size: var(--type-helper); line-height: 1.45; }
 .page-subtitle { margin: 0; }
@@ -1014,7 +1014,7 @@ textarea { min-height: 78px; resize: vertical; }
   padding: 12px;
 }
 .modal-head { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 16px 10px; border-bottom: 1px solid var(--color-border-soft); }
-.modal-head h2 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 1.1; font-weight: 600; }
+.modal-head h2 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 1.1; font-weight: 700; }
 .close { position: relative; width: var(--tap); height: var(--tap); border-radius: var(--radius-pill); background: var(--color-control); color: var(--color-text-soft); font-size: 0; border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--color-inset-highlight); display: grid; place-items: center; }
 .close span::before, .close span::after { content: ""; position: absolute; left: 50%; top: 50%; width: 18px; height: 2px; border-radius: 999px; background: currentColor; transform-origin: center; }
 .close span::before { transform: translate(-50%, -50%) rotate(45deg); }
@@ -1767,7 +1767,7 @@ textarea { min-height: 78px; resize: vertical; }
 @media (max-width: 400px) {
   .tl-head:has(.tl-pill) .tl-title { font-size: 28px; line-height: 34px; }
 }
-.tl-title { margin: 0; font-family: var(--font-display); font-size: 34px; line-height: 41px; font-weight: 600; letter-spacing: 0; color: var(--sky-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-title { margin: 0; font-family: var(--font-display); font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: 0; color: var(--sky-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-range { margin: 0; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--sky-ink-2); }
 .tl-tools { display: flex; align-items: center; gap: 8px; flex: none; padding-bottom: 1px; }
 .tl-toolbar { display: flex; height: 44px; border-radius: 22px; }
@@ -1804,7 +1804,7 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-arc-lit { fill: none; stroke: var(--arc); stroke-width: 4; stroke-linecap: round; }
 .tl-sun { stroke: var(--arc); stroke-width: 1.5; }
 .tl-hero-text { position: absolute; left: 0; right: 0; top: 38.4%; text-align: center; pointer-events: none; }
-.tl-hero-number { margin: 0; font-family: var(--serif-num); font-size: 88px; line-height: 80px; font-weight: 500; letter-spacing: -.02em; font-variant-numeric: lining-nums tabular-nums; color: var(--sky-ink); }
+.tl-hero-number { margin: 0; font-family: var(--serif-num); font-size: 88px; line-height: 80px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: lining-nums tabular-nums; color: var(--sky-ink); }
 .tl-hero-number.size-5 { margin-top: 8px; font-size: 76px; line-height: 72px; }
 .tl-hero-number.size-6 { margin-top: 14px; font-size: 64px; line-height: 62px; }
 .tl-hero-unit { margin: 2px 0 0; font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; color: var(--sky-ink-2); }
@@ -1913,7 +1913,7 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-sky.week { padding-bottom: 4px; }
 .tl-bank { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin-top: 14px; padding: 0; background: none; color: var(--sky-ink); text-align: left; }
 .tl-bank:active { transform: none; opacity: .8; }
-.tl-bank-number { font-family: var(--serif-num); font-size: 88px; line-height: 80px; font-weight: 500; letter-spacing: -.02em; font-variant-numeric: lining-nums tabular-nums; }
+.tl-bank-number { font-family: var(--serif-num); font-size: 88px; line-height: 80px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: lining-nums tabular-nums; }
 .tl-bank-number.size-5 { font-size: 76px; line-height: 72px; }
 .tl-bank-number.size-6 { font-size: 64px; line-height: 62px; }
 .tl-bank-label { display: inline-flex; align-items: center; gap: 4px; font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; color: var(--sky-ink-2); }
