@@ -1,4 +1,5 @@
 import { ESTIMATE_SCHEMA, GEMINI_ESTIMATE_PROMPT, JSON_RETRY_NOTE } from './aiEstimate';
+import { BATCH_ESTIMATE_PROMPT, BATCH_SCHEMA } from './mealPrep';
 import { MENU_PICK_PROMPT, MENU_PICK_SCHEMA } from './menuPick';
 import { readValue, saveValue } from './storage';
 
@@ -765,6 +766,29 @@ export async function requestMealEstimate({
     accept,
     signal,
     fallbackError: 'Gemini could not estimate this meal.'
+  });
+}
+
+/** Estimates a whole meal prep batch, ingredient by ingredient; `userText` is built by `buildBatchRequest`. */
+export async function requestBatchEstimate({
+  apiKey,
+  userText,
+  accept,
+  signal
+}: {
+  apiKey: string;
+  userText: string;
+  accept?: (text: string) => boolean;
+  signal?: AbortSignal;
+}) {
+  return requestGeminiJson(apiKey, {
+    systemPrompt: BATCH_ESTIMATE_PROMPT,
+    userText,
+    imageParts: [],
+    responseSchema: BATCH_SCHEMA,
+    accept,
+    signal,
+    fallbackError: 'Gemini could not estimate this batch.'
   });
 }
 

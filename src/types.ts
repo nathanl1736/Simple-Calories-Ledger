@@ -49,8 +49,46 @@ export type Entry = {
   part?: DayPart;
   /** Set when the numbers came from AI, so the log can say so. */
   estimateSource?: EntryEstimateSource | null;
+  /** The meal prep batch this was a serve of. Its servings eaten count toward what's left. */
+  batchId?: string;
   notes?: string;
   photo?: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** One line of a batch as Gemini counted it, for the whole batch. kcal and grams. */
+export type BatchIngredient = {
+  name: string;
+  amount: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+};
+
+/**
+ * A cooked batch split into serves (meal prep). Kept apart from saved foods: a serve is logged
+ * at a time until none are left, a week has passed since cooking, or it is finished early.
+ */
+export type Batch = {
+  id: string;
+  name: string;
+  /** What went in, as typed: ingredients and amounts. */
+  recipe: string;
+  /** Serves the batch was split into. One serve is `total` divided by this. */
+  servings: number;
+  /** The whole batch. kcal and grams. */
+  total: Totals;
+  /** Gemini's breakdown of `total`. Empty when the numbers were typed in. */
+  ingredients: BatchIngredient[];
+  estimateSource: EntryEstimateSource | null;
+  assumptions: string[];
+  confidence: 'high' | 'medium' | 'low' | null;
+  /** The day it was cooked. It drops off Today a week later. */
+  cookedOn: string;
+  /** Set by Finish, when the rest was eaten without logging or thrown out. */
+  finishedAt: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -117,6 +155,8 @@ export type AppState = {
   /** Optional per-day calorie target (kcal) for open days; does not change macro targets on Track. */
   dayCalorieOverrides: Record<string, number>;
   customFoodDatabases: CustomFoodDatabase[];
+  /** Meal prep: batches on the go, plus the last few finished ones to cook again. */
+  batches: Batch[];
 };
 
 export type Totals = {

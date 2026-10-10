@@ -1,6 +1,7 @@
 import type { AppState, Entry, Food, Settings } from './types';
 import { normalizeCustomFoodDatabases } from './customFoodDatabases';
 import { estimateSourceValue } from './aiEstimate';
+import { normalizeBatch } from './mealPrep';
 import { dayPartValue } from './tidelight';
 import { energyUnitValue, entryTotals, entryUnitModeValue, goalSnapshotFromSettings, lockPastGoals, n, normalizeDateKey, normalizeGoalSnapshot, portionValue, validBackupReminderDays } from './utils';
 
@@ -28,7 +29,8 @@ export const DEFAULT: AppState = {
   dayEstimates: {},
   dailyGoals: {},
   dayCalorieOverrides: {},
-  customFoodDatabases: []
+  customFoodDatabases: [],
+  batches: []
 };
 
 export function normalizeEntry(input: Partial<Entry>): Entry {
@@ -52,6 +54,7 @@ export function normalizeEntry(input: Partial<Entry>): Entry {
   const part = dayPartValue(entry.part);
   if (part) entry.part = part;
   else delete entry.part;
+  if (typeof entry.batchId !== 'string' || !entry.batchId) delete entry.batchId;
   entry.createdAt = entry.createdAt || Date.now();
   entry.updatedAt = entry.updatedAt || entry.createdAt;
   return entry;
@@ -108,7 +111,8 @@ export function normalizeStateShape(input: unknown): AppState {
     dayEstimates: {},
     dailyGoals: {},
     dayCalorieOverrides: {},
-    customFoodDatabases: normalizeCustomFoodDatabases((raw as { customFoodDatabases?: unknown }).customFoodDatabases)
+    customFoodDatabases: normalizeCustomFoodDatabases((raw as { customFoodDatabases?: unknown }).customFoodDatabases),
+    batches: (Array.isArray(raw.batches) ? raw.batches : []).map(normalizeBatch).filter((batch): batch is NonNullable<typeof batch> => !!batch)
   };
   const rawDailyGoals = raw.dailyGoals && typeof raw.dailyGoals === 'object' ? raw.dailyGoals : {};
   Object.entries(rawDailyGoals).forEach(([key, value]) => {
