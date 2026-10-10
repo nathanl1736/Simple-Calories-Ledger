@@ -172,6 +172,7 @@ function todayPlan(hour, variant) {
     plan.push(['yogbowl', 'Breakfast', 7, 5, { photo: 'yog' }]);
     plan.push(['flatwhite', 'Drink', 7, 10, { part: 'morning' }]);
   }
+  if (variant === 'light') return plan;
   if (hour >= 13 || variant === 'over') plan.push(['gyg', 'Lunch', 12, 40, { source: 'ai' }]);
   if (hour >= 19) {
     plan.push(['timtam', 'Snack', 15, 30, { part: 'afternoon' }]);
@@ -215,7 +216,7 @@ const sumIngredients = list => list.reduce((acc, i) => ({
  * @param {number} o.hour        clock hour today is captured at (7, 13, 19, 23); decides what is already logged today
  * @param {string} [o.theme]     'light' | 'dark' | 'system'
  * @param {boolean} [o.key]      set a (mock) Gemini key
- * @param {string} [o.variant]   'over' for an over-target today
+ * @param {string} [o.variant]   'over' for an over-target today, 'light' for a day with only breakfast logged
  * @param {'normal'|'overdue'|'recent'} [o.backup]  backup reminder state
  * @param {object} o.photos      { yog, chick, mince, pizza } data URLs from PHOTO_SCRIPT
  */
