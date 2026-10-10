@@ -23,9 +23,9 @@ If you are a Claude session picking this up (Fable, Opus or Sonnet), this file i
 | Step | Status |
 |---|---|
 | Code inventory (Sonnet) | done |
-| Screenshot capture (Sonnet) | running at time of writing |
-| Build brief | written; section 9 pending |
-| Chunk 0: split `App.tsx` into files, zero behaviour change (Sonnet) | not started — must wait for the capture agent to stop using the dev server |
+| Screenshot capture (Sonnet) | done (445 files + INDEX.md; OBSERVATIONS.md pending from the agent) |
+| Build brief | done, incl. section 9 visual findings |
+| Chunk 0: split `App.tsx` into files, zero behaviour change (Sonnet) | running in a git worktree; merge its branch into `claude/ai-first-redesign` when it reports |
 | Chunk 1: Log sheet + estimate flow + tap-to-save + inline key connect (Opus, worktree) | not started |
 | Chunk 2: `weekView.ts` + Week screen + Today week row (Opus, worktree, parallel with 1) | not started |
 | Chunk 3: Suggest mode (Sonnet) | after 1+2 merged |
