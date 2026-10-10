@@ -21,6 +21,7 @@ import {
 } from '../utils';
 import { type JournalDayViewMode, type JournalLabelMode } from '../appTypes';
 import { Modal } from '../ui/Modal';
+import { SettingsGlassButton } from '../ui/SettingsButton';
 import { MacroChips } from '../ui/controls';
 import { useSettleAnimation } from '../ui/AppShell';
 
@@ -88,7 +89,8 @@ export function JournalView({
   onPhoto,
   mealGroups,
   onOpenMealCard,
-  onOpenDay
+  onOpenDay,
+  onLogForDay
 }: {
   state: AppState;
   journalMonth: Date;
@@ -105,6 +107,8 @@ export function JournalView({
   mealGroups: MealGroup[];
   onOpenMealCard: (group: MealGroup) => void;
   onOpenDay: (date: string) => void;
+  /** Log food for a day with nothing logged, without leaving Journal. */
+  onLogForDay: (date: string) => void;
 }) {
   const year = journalMonth.getFullYear();
   const month = journalMonth.getMonth();
@@ -134,9 +138,10 @@ export function JournalView({
     };
     return (
       <div className="screen-swipe-zone view-transition" ref={settleRef}>
-        <header className="page-header">
+        <header className="page-header has-tools">
           <div className="page-kicker">{new Date(`${journalDay}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</div>
           <h1 className="page-title">{readable(journalDay)}</h1>
+          <SettingsGlassButton />
         </header>
         <div className="journal-day-nav">
           <DayNav value={journalDay} onChange={setDay} />
@@ -215,7 +220,7 @@ export function JournalView({
             </div>
           </section>
         )}
-        <button className="secondary journal-open-track" type="button" onClick={() => onOpenDay(journalDay)}>
+        <button className="secondary journal-open-track" type="button" onClick={() => (entries.length ? onOpenDay(journalDay) : onLogForDay(journalDay))}>
           {entries.length ? 'Open this day' : 'Log food for this day'}
         </button>
         <div className="journal-day-summary-bar" data-swipe-lock aria-label="Journal day totals">
@@ -236,8 +241,9 @@ export function JournalView({
   const days = Array.from({ length: 42 }, (_, i) => new Date(year, month, i - offset + 1));
   return (
     <div className="screen-swipe-zone view-transition" ref={settleRef}>
-      <header className="page-header has-helper">
+      <header className="page-header has-helper has-tools">
         <h1 className="page-title">Journal</h1>
+        <SettingsGlassButton />
         <p className="hint page-subtitle">A visual memory of what you ate, organised by day.</p>
       </header>
       <MonthNav value={journalMonth} onChange={setJournalMonth} />

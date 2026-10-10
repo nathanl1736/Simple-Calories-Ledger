@@ -4,17 +4,20 @@ import { flushSync } from 'react-dom';
 import type { AppState, Batch, DayPart, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
-import { compressImage } from './image';
+import { compressImage, recompressDataUrl } from './image';
 import { backupAgeDays, backupCounts, exportBackup, parseBackup } from './backup';
 import { applyAppUpdate, checkForAppUpdate, clearUpdateReloadMarkers, dismissUpdatePrompt, registerServiceWorker, watchForUpdatesOnResume, type UpdateInfo } from './pwa';
 import { MealGroup } from './canvas';
 import { databaseItemToFood, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import { parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { pruneOneOffEstimates, recordFoodUse, type FavouriteChange } from './favourites';
-import { dayPartAt, entryDayPart, mealDayPart } from './tidelight';
-import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
+import { dayPartAt, entryDayPart, mealDayPart, usualsForMeal } from './tidelight';
+import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import { buildEstimateRequest, estimateNotes, estimateSourceValue, parseGeminiEstimate, type GeminiEstimate } from './aiEstimate';
-import { requestBatchEstimate, requestMealEstimate } from './geminiEstimate';
+import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstimate } from './geminiEstimate';
+import { usualChips, type UsualChip } from './logUsuals';
+import { removeEntry, restoreEntry, revertFoodUse, type RemovedEntry } from './undo';
+import { estimatingLabel, logSheetTitle } from './estimateJob';
 import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, parseBatchEstimate, pruneBatches } from './mealPrep';
 import { type MenuPickItem } from './menuPick';
 import {
@@ -45,9 +48,9 @@ import {
   weekBank,
   weekStartMonday
 } from './utils';
-import { type Tab, type EntryOpenMode, type JournalDayViewMode, type JournalLabelMode, type EntryDraft, type BatchInput, type BatchSheetRequest } from './appTypes';
+import { type Tab, type EntryOpenMode, type JournalDayViewMode, type JournalLabelMode, type EntryDraft, type BatchInput, type BatchSheetRequest, type EstimateJob, type LogDraft } from './appTypes';
 import { modalScrollLockCount, holdKeyboard, afterModalScrollLock, Modal } from './ui/Modal';
-import { Icon } from './ui/icons';
+import { OpenSettingsContext } from './ui/SettingsButton';
 import { TABS, AppShell } from './ui/AppShell';
 import { defaultMealForCurrentTime, accentInk } from './ui/format';
 import { TrackingView } from './views/TodayView';
@@ -57,7 +60,8 @@ import { LibraryView } from './views/LibraryView';
 import { SettingsView } from './views/SettingsView';
 import { draftNumberText, draftEnergyText, draftPortion, EntryModal } from './sheets/EntryModal';
 import { FoodSearch } from './sheets/FoodSearch';
-import { GeminiEstimateModal } from './sheets/GeminiEstimateModal';
+import { LogSheet } from './sheets/LogSheet';
+import { GeminiKeyHelp } from './sheets/ConnectGemini';
 import { BatchSheet } from './sheets/BatchSheet';
 import { MenuPickModal } from './sheets/MenuPickModal';
 import { AiQuickLogModal } from './sheets/AiQuickLogModal';
@@ -65,12 +69,14 @@ import { FoodModal } from './sheets/FoodModal';
 import { RoughMealPanel } from './sheets/RoughMeal';
 import { DayCalorieGoalPanel } from './sheets/DayTarget';
 
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'geminiSetup' | 'menuPick' | 'customDbHelp' | 'addFood' | 'dayTarget' | 'roughMeal' | 'foodSearch' | 'batch' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'menuPick' | 'customDbHelp' | 'log' | 'dayTarget' | 'roughMeal' | 'foodSearch' | 'batch' | null;
 type SetTabOptions = { date?: string; resetScroll?: boolean };
 
 function storedTab(value: string | null): Tab {
   // Cards used to be its own tab; meal cards now live in Journal's day view.
   if (value === 'cards') return 'journal';
+  // Settings is visited from a tab, not somewhere the app opens.
+  if (value === 'settings') return 'tracking';
   return TABS.some(([id]) => id === value) ? value as Tab : 'tracking';
 }
 
@@ -123,6 +129,13 @@ const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kc
   batchId: ''
 });
 
+/** " yesterday", " on Tue, Oct 6", or nothing for today: which day something went to, for its toast. */
+function dayNote(date: string) {
+  if (date === todayKey()) return '';
+  const day = readable(date);
+  return day === 'Yesterday' || day === 'Tomorrow' ? ` ${day.toLowerCase()}` : ` on ${day}`;
+}
+
 /** A toast can offer one action, like Undo after a one-tap log. */
 type ToastAction = { label: string; run: () => void };
 type Toast = { id: number; text: string; action?: ToastAction } | null;
@@ -169,7 +182,6 @@ export function App() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [activeMealCard, setActiveMealCard] = useState<MealGroup | null>(null);
   const [bankingWeekStart, setBankingWeekStart] = useState(() => weekStartMonday(todayKey()));
-  const [settingsFocus, setSettingsFocus] = useState<'gemini' | null>(null);
   const [goalsEditing, setGoalsEditing] = useState(false);
   const [goalDraft, setGoalDraft] = useState<Settings>(DEFAULT.settings);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateInfo | null>(null);
@@ -177,6 +189,13 @@ export function App() {
   const [aiQuickLogSeedText, setAiQuickLogSeedText] = useState('');
   const [estimateSession, setEstimateSession] = useState<EstimateSession | null>(null);
   const [batchSheet, setBatchSheet] = useState<BatchSheetRequest>({ mode: 'new', batchId: null, opened: 0 });
+  /** The Log sheet's composer, kept here so closing the sheet (or a failed estimate) loses nothing. */
+  const [logDraft, setLogDraft] = useState<LogDraft>({ text: '', photos: [] });
+  /** The meal the Log sheet's usuals are for and log to. */
+  const [logMeal, setLogMeal] = useState<Meal>('Snack');
+  const [estimateJob, setEstimateJob] = useState<EstimateJob | null>(null);
+  /** The meal prep sheet is waiting on Gemini, for the pill while it's closed. */
+  const [batchBusy, setBatchBusy] = useState(false);
   /** The state as last saved, for work that finishes after the render that started it, like Undo. */
   const latestState = useRef(state);
   const tabScrollRef = useRef<Partial<Record<Tab, number>>>({});
@@ -186,10 +205,18 @@ export function App() {
   const customDatabaseImportRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const entryPhotoInputRef = useRef<HTMLInputElement>(null);
-  const searchFieldRef = useRef<HTMLButtonElement>(null);
+  const toastSeq = useRef(0);
+  /** The sheet showing now, for work that finishes later: an estimate goes to review if its sheet is still up. */
+  const modalRef = useRef<ModalName>(null);
+  modalRef.current = modal;
+  const estimateJobRef = useRef(estimateJob);
+  estimateJobRef.current = estimateJob;
+  const estimateAbort = useRef<AbortController | null>(null);
+  /** Bumped by each estimate and by Cancel, so a reply to an older one is ignored. */
+  const estimateSeq = useRef(0);
 
   const notify = (text: string, durationMs: number = 1800, action?: ToastAction) => {
-    const id = Date.now();
+    const id = ++toastSeq.current;
     setToast({ id, text, action });
     window.setTimeout(() => setToast(current => current?.id === id ? null : current), durationMs);
   };
@@ -324,10 +351,18 @@ export function App() {
     setBankingWeekStart(weekStartMonday(date));
     setTab('stats', { resetScroll: true });
   };
-  const openSettingsSection = (sectionId: 'backupSection' | 'geminiSection') => {
-    setModal(null);
-    if (sectionId === 'geminiSection') setSettingsFocus('gemini');
+  /** Settings from any tab. Done goes back to that tab, and to the day Today was showing. */
+  const openSettings = (from: Tab = tab) => {
+    if (from !== 'settings') settingsReturnTab.current = from;
     setTab('settings', { resetScroll: true });
+  };
+  const closeSettings = () => {
+    const back = settingsReturnTab.current;
+    setTab(back, back === 'tracking' ? { date: selectedDate } : {});
+  };
+  const openSettingsSection = (sectionId: 'backupSection') => {
+    setModal(null);
+    openSettings();
     afterModalScrollLock(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
@@ -342,10 +377,13 @@ export function App() {
     date: selectedDate
   }), [entries, entryDraft.editingId, state, selectedDate]);
 
-  /** The sparkle beside the tab bar: Log with AI for the day shown on Today, or for today from any other tab. */
-  const logWithAiFromTabBar = () => {
-    if (tab !== 'tracking') setTab('tracking');
-    setModal('addFood');
+  /**
+   * Log food, over whichever tab is showing: the sparkle, the Now line, the first-run card and Journal
+   * open it. It logs to the day shown on Today, and its title names that day when it isn't today.
+   */
+  const openLogSheet = (meal: Meal = defaultMealForLogging()) => {
+    setLogMeal(meal);
+    setModal('log');
   };
 
   /** Log food for typing a food in. `name` comes from a search that found nothing. */
@@ -396,57 +434,57 @@ export function App() {
     setModal('entry');
   };
 
-  const formEntry = () => {
-    const id = entryDraft.editingId || uid();
-    const rawName = entryDraft.name.trim();
+  const formEntry = (draft: EntryDraft) => {
+    const id = draft.editingId || uid();
+    const rawName = draft.name.trim();
     const autoNamed = !rawName;
     return normalizeEntry({
       id,
-      sourceFoodId: entryDraft.sourceFoodId || null,
+      sourceFoodId: draft.sourceFoodId || null,
       date: selectedDate,
-      name: rawName || `${entryDraft.meal} entry`,
+      name: rawName || `${draft.meal} entry`,
       autoNamed,
-      unitMode: entryDraft.unitMode,
-      baseCalories: energyInputToKcal(entryDraft.calories, entryDraft.entryEnergyUnit),
-      baseProtein: n(entryDraft.protein),
-      baseCarbs: n(entryDraft.carbs),
-      baseFat: n(entryDraft.fat),
-      portion: draftPortion(entryDraft),
-      calories: energyInputToKcal(entryDraft.calories, entryDraft.entryEnergyUnit),
-      protein: n(entryDraft.protein),
-      carbs: n(entryDraft.carbs),
-      fat: n(entryDraft.fat),
-      meal: entryDraft.meal,
-      part: mealDayPart(entryDraft.meal) ? undefined : entryDraft.part,
-      estimateSource: entryDraft.estimateSource,
-      batchId: entryDraft.batchId || undefined,
-      notes: entryDraft.notes.trim(),
-      photo: entryDraft.photo,
+      unitMode: draft.unitMode,
+      baseCalories: energyInputToKcal(draft.calories, draft.entryEnergyUnit),
+      baseProtein: n(draft.protein),
+      baseCarbs: n(draft.carbs),
+      baseFat: n(draft.fat),
+      portion: draftPortion(draft),
+      calories: energyInputToKcal(draft.calories, draft.entryEnergyUnit),
+      protein: n(draft.protein),
+      carbs: n(draft.carbs),
+      fat: n(draft.fat),
+      meal: draft.meal,
+      part: mealDayPart(draft.meal) ? undefined : draft.part,
+      estimateSource: draft.estimateSource,
+      batchId: draft.batchId || undefined,
+      notes: draft.notes.trim(),
+      photo: draft.photo,
       createdAt: Date.now(),
       updatedAt: Date.now()
     });
   };
 
-  const touchFoodAfterLog = (draftState: AppState, entry: Entry): FavouriteChange => {
+  const touchFoodAfterLog = (draftState: AppState, entry: Entry, draft: EntryDraft): FavouriteChange => {
     // Meal prep runs out, so its serves stay out of saved foods and Recent.
     if (entry.autoNamed || entry.batchId) return null;
-    const isDatabaseFood = entryDraft.source === 'foodEstimateDatabase' || entryDraft.source === 'customFoodDatabase';
+    const isDatabaseFood = draft.source === 'foodEstimateDatabase' || draft.source === 'customFoodDatabase';
     return recordFoodUse(draftState.foods, {
       sourceFoodId: entry.sourceFoodId,
-      favourite: entryDraft.favourite,
+      favourite: draft.favourite,
       fromDatabase: isDatabaseFood,
       now: Date.now(),
       newId: uid,
       snapshot: {
         name: entry.name,
         unitMode: entryUnitModeValue(entry.unitMode),
-        brand: entryDraft.brand.trim() || undefined,
-        servingLabel: entryDraft.servingLabel.trim() || undefined,
-        servingGrams: n(entryDraft.servingGrams) || undefined,
-        source: isDatabaseFood ? undefined : entryDraft.source.trim() || undefined,
-        sourceId: entryDraft.sourceId.trim() || undefined,
-        category: entryDraft.category.trim() || undefined,
-        tags: entryDraft.tags.length ? entryDraft.tags : undefined,
+        brand: draft.brand.trim() || undefined,
+        servingLabel: draft.servingLabel.trim() || undefined,
+        servingGrams: n(draft.servingGrams) || undefined,
+        source: isDatabaseFood ? undefined : draft.source.trim() || undefined,
+        sourceId: draft.sourceId.trim() || undefined,
+        category: draft.category.trim() || undefined,
+        tags: draft.tags.length ? draft.tags : undefined,
         calories: macroBase(entry, 'calories'),
         protein: macroBase(entry, 'protein'),
         carbs: macroBase(entry, 'carbs'),
@@ -456,28 +494,52 @@ export function App() {
     });
   };
 
+  /**
+   * Saves a Log food draft to the day shown on Today and says so, with Undo: a new entry goes again
+   * (with what it did to saved foods), an edit goes back to how it was. One tap, nothing to confirm.
+   */
+  const commitEntry = async (draft: EntryDraft) => {
+    const entry = formEntry(draft);
+    const editing = !!draft.editingId;
+    const previous = editing ? latestState.current.entries.find(item => item.id === entry.id) || null : null;
+    const foodsBefore = latestState.current.foods;
+    let favouriteChange = null as FavouriteChange;
+    await updateLatest(next => {
+      const idx = next.entries.findIndex(item => item.id === entry.id);
+      if (idx >= 0) {
+        entry.createdAt = next.entries[idx].createdAt;
+        next.entries[idx] = entry;
+      } else {
+        next.entries.push(entry);
+      }
+      favouriteChange = touchFoodAfterLog(next, entry, draft);
+    });
+    const foodsAfter = latestState.current.foods;
+    if (!editing) lastLogged = { meal: entry.meal || 'Snack', part: entryDayPart(entry), at: Date.now() };
+    const favourite = favouriteChange ? ` · ${favouriteChange === 'added' ? 'added to' : 'removed from'} favourites` : '';
+    const text = editing
+      ? `Entry updated${favourite}`
+      : `Logged ${energyText(state, entry.calories)} · ${(entry.meal || 'Snack').toLowerCase()}${dayNote(entry.date)}${favourite}`;
+    notify(text, 5000, {
+      label: 'Undo',
+      run: () => updateLatest(next => {
+        next.entries = previous
+          ? next.entries.map(item => (item.id === entry.id ? previous : item))
+          : next.entries.filter(item => item.id !== entry.id);
+        next.foods = revertFoodUse(next.foods, foodsBefore, foodsAfter);
+      }).then(() => notify('Undone'))
+    });
+  };
+
   const saveEntry = async (keepOpen = false) => {
     if (!entryDraft.calories) return notify(`${energyUnitLabel(entryDraft.entryEnergyUnit)} required`);
     if (entryDraft.favourite && !entryDraft.name.trim()) {
       document.getElementById('entryName')?.focus();
       return notify('Name this food to save it as a favourite');
     }
-    const entry = formEntry();
-    let favouriteChange = null as FavouriteChange;
-    await updateState(draft => {
-      const idx = draft.entries.findIndex(item => item.id === entry.id);
-      if (idx >= 0) {
-        entry.createdAt = draft.entries[idx].createdAt;
-        draft.entries[idx] = entry;
-      } else {
-        draft.entries.push(entry);
-      }
-      favouriteChange = touchFoodAfterLog(draft, entry);
-    });
-    if (!entryDraft.editingId) lastLogged = { meal: entry.meal || 'Snack', part: entryDayPart(entry), at: Date.now() };
-    const saved = entryDraft.editingId ? 'Entry updated' : 'Entry saved';
-    notify(favouriteChange ? `${saved} · ${favouriteChange === 'added' ? 'added to' : 'removed from'} favourites` : saved);
-    if (keepOpen) setEntryDraft({ ...blankEntryDraft(entryDraft.meal, energyUnitValue(state.settings.energyUnit)), part: entryDraft.part });
+    const draft = entryDraft;
+    await commitEntry(draft);
+    if (keepOpen) setEntryDraft({ ...blankEntryDraft(draft.meal, energyUnitValue(state.settings.energyUnit)), part: draft.part });
     else setModal(null);
   };
 
@@ -516,25 +578,41 @@ export function App() {
       createdAt: Date.now(),
       updatedAt: Date.now()
     });
-    await updateState(draft => {
+    await updateLatest(draft => {
       draft.entries.push(entry);
     });
     setModal(null);
-    notify(`Rough ${meal.toLowerCase()} logged: ${energyText(state, kcal)}`);
-  };
-
-  const deleteEntry = async (id: string) => {
-    if (!confirm('Delete this entry?')) return;
-    await updateState(draft => {
-      draft.entries = draft.entries.filter(entry => entry.id !== id);
+    notify(`Rough ${meal.toLowerCase()} logged: ${energyText(state, kcal)}`, 5000, {
+      label: 'Undo',
+      run: () => updateLatest(draft => {
+        draft.entries = draft.entries.filter(item => item.id !== entry.id);
+      }).then(() => notify('Undone'))
     });
-    notify('Entry deleted');
   };
 
-  const prefillFood = (food: Food) => {
+  /** One tap with Undo, like logging, rather than a confirm box. */
+  const deleteEntry = async (id: string) => {
+    let removed = null as RemovedEntry | null;
+    await updateLatest(draft => {
+      const result = removeEntry(draft.entries, id);
+      draft.entries = result.entries;
+      removed = result.removed;
+    });
+    const gone = removed;
+    if (!gone) return;
+    notify('Entry deleted', 5000, {
+      label: 'Undo',
+      run: () => updateLatest(draft => {
+        draft.entries = restoreEntry(draft.entries, gone);
+      }).then(() => notify('Undone'))
+    });
+  };
+
+  /** A saved food as a Log food draft: one serving, or 100 g. */
+  const foodDraft = (food: Food, meal: Meal): EntryDraft => {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
-    setEntryDraft({
-      ...blankEntryDraft(defaultMealForLogging(), entryEnergyUnit),
+    return {
+      ...blankEntryDraft(meal, entryEnergyUnit),
       sourceFoodId: food.source ? '' : food.id,
       name: food.name,
       unitMode: entryUnitModeValue(food.unitMode),
@@ -551,16 +629,20 @@ export function App() {
       fat: draftNumberText(food.fat),
       portion: entryUnitModeValue(food.unitMode) === '100g' ? '100' : '1',
       estimateSource: estimateSourceValue(food.estimateSource)
-    });
+    };
+  };
+
+  const prefillFood = (food: Food) => {
+    setEntryDraft(foodDraft(food, defaultMealForLogging()));
     setEntryOpenMode('prefill');
     setModal('entry');
   };
 
-  /** A usual from the Now line: Log food filled in with exactly what was logged last time, for the meal the Now line is suggesting. */
-  const logUsual = (entry: Entry, meal: Meal) => {
+  /** A usual as a Log food draft: exactly what was logged last time, for `meal`. */
+  const usualDraft = (entry: Entry, meal: Meal): EntryDraft => {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
     const sourceFood = entry.sourceFoodId ? state.foods.find(food => food.id === entry.sourceFoodId) : null;
-    setEntryDraft({
+    return {
       ...blankEntryDraft(meal, entryEnergyUnit),
       sourceFoodId: sourceFood ? sourceFood.id : '',
       name: entry.name,
@@ -578,7 +660,39 @@ export function App() {
       fat: draftNumberText(macroBase(entry, 'fat')),
       portion: fmtPortion(entry.portion),
       estimateSource: estimateSourceValue(entry.estimateSource)
-    });
+    };
+  };
+
+  /** A usual from the Now line or the Log sheet: logged at once, with Undo. */
+  const logUsualNow = (entry: Entry, meal: Meal) => commitEntry(usualDraft(entry, meal));
+
+  /** A serve of meal prep as a Log food draft, for checking before logging. */
+  const serveDraft = (batch: Batch, meal: Meal): EntryDraft => {
+    const serve = batchServe(batch);
+    const left = batchServesLeft(batch, latestState.current.entries);
+    return {
+      ...blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)),
+      name: batch.name,
+      calories: draftEnergyText(Math.round(serve.calories), energyUnitValue(state.settings.energyUnit)),
+      protein: draftNumberText(Math.round(serve.protein * 10) / 10),
+      carbs: draftNumberText(Math.round(serve.carbs * 10) / 10),
+      fat: draftNumberText(Math.round(serve.fat * 10) / 10),
+      portion: fmtPortion(Math.max(0, Math.min(1, left)) || 1),
+      notes: `Meal prep: a serve of a batch of ${fmt(batch.servings)}.`,
+      estimateSource: batch.estimateSource,
+      batchId: batch.id
+    };
+  };
+
+  /** A chip in the Log sheet's usuals row: a tap logs it to the sheet's meal, with Undo. */
+  const logChip = (chip: UsualChip) => {
+    setModal(null);
+    if (chip.kind === 'prep') return logBatchServe(chip.batch, selectedDate, logMeal);
+    return commitEntry(chip.kind === 'usual' ? usualDraft(chip.entry, logMeal) : foodDraft(chip.food, logMeal));
+  };
+  /** Touch and hold (or More): the review sheet, filled in, instead of logging straight away. */
+  const reviewChip = (chip: UsualChip) => {
+    setEntryDraft(chip.kind === 'usual' ? usualDraft(chip.entry, logMeal) : chip.kind === 'favourite' ? foodDraft(chip.food, logMeal) : serveDraft(chip.batch, logMeal));
     setEntryOpenMode('prefill');
     setModal('entry');
   };
@@ -632,15 +746,13 @@ export function App() {
     }
   };
 
-  const openGeminiEstimate = () => {
-    if (!state.settings.geminiApiKey.trim()) return setModal('geminiSetup');
-    setModal('geminiEstimate');
-  };
+  /** Suggest, for now the menu helper. With no key the Log sheet connects one first. */
+  const openMenuPick = () => setModal('menuPick');
 
-  const openMenuPick = () => {
-    if (!state.settings.geminiApiKey.trim()) return setModal('geminiSetup');
-    setModal('menuPick');
-  };
+  /** Saves a key connected from a Connect card. */
+  const saveGeminiKey = (key: string) => updateLatest(draft => {
+    draft.settings.geminiApiKey = key.trim();
+  });
 
   const prefillMenuPick = (item: MenuPickItem, meal: Meal) => {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
@@ -663,9 +775,11 @@ export function App() {
     });
   };
 
-  /** With `keepChoices` (a refine), Gemini's new numbers replace the old ones but the meal, photo and favourite picked while reviewing stay. */
-  const prefillGeminiEstimate = (estimate: GeminiEstimate, keepChoices = false) => {
-    setToast(null); // The "Estimating…" message would otherwise cover the result.
+  /**
+   * With `keepChoices` (a refine), Gemini's new numbers replace the old ones but the meal, photo and
+   * favourite picked while reviewing stay. `photo` is the journal photo to start with.
+   */
+  const prefillGeminiEstimate = (estimate: GeminiEstimate, keepChoices = false, photo: string | null = null) => {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
     const fromLabel = estimate.source === 'label';
     flushSync(() => {
@@ -683,7 +797,8 @@ export function App() {
           portion: String(estimate.portion),
           notes: estimateNotes(fromLabel ? 'Read from the nutrition label.' : estimate.notes, estimate.assumptions, estimate.confidence),
           estimateSource: fromLabel ? 'label' : 'ai',
-          estimateDetails: { confidence: estimate.confidence, assumptions: estimate.assumptions }
+          estimateDetails: { confidence: estimate.confidence, assumptions: estimate.assumptions },
+          photo
         };
         return keepChoices ? { ...next, meal: current.meal, part: current.part, photo: current.photo, favourite: current.favourite } : next;
       });
@@ -693,37 +808,97 @@ export function App() {
   };
 
   /** Asks Gemini; with `correction`, refines the last estimate using the same photos. */
-  const runGeminiEstimate = async (description: string, photos: string[], correction?: string) => {
-    const meal = correction && estimateSession ? estimateSession.meal : defaultMealForLogging();
+  const runGeminiEstimate = async (description: string, photos: string[], correction?: string, forMeal?: Meal, signal?: AbortSignal) => {
+    const meal = correction && estimateSession ? estimateSession.meal : forMeal || defaultMealForLogging();
+    // The latest settings: a key connected a moment ago from the Log sheet is already in use.
+    const { settings } = latestState.current;
     const raw = await requestMealEstimate({
-      apiKey: state.settings.geminiApiKey,
+      apiKey: settings.geminiApiKey,
       userText: buildEstimateRequest({
         description,
         photoCount: photos.length,
         meal,
-        preferences: state.settings.aiPreferences,
+        preferences: settings.aiPreferences,
         previous: correction ? estimateSession?.reply : undefined,
         correction
       }),
       imageDataUrls: photos,
-      accept: text => !!parseGeminiEstimate(text, meal)
+      accept: text => !!parseGeminiEstimate(text, meal),
+      signal
     });
     return { raw, meal, parsed: parseGeminiEstimate(raw, meal) };
   };
 
-  const estimateWithGemini = async (description: string, photos: string[]) => {
-    notify('Estimating… You can close this and navigate again once the result is back.', 6000);
-    const { raw, meal, parsed } = await runGeminiEstimate(description, photos);
-    if (parsed) {
-      setEstimateSession({ description, photos, meal, reply: raw });
-      setAiQuickLogSeedText('');
-      prefillGeminiEstimate(parsed);
+  /**
+   * An estimate's result into the review sheet, with the first photo as the journal photo (never a
+   * label's). A reply Gemini garbled goes to the paste helper instead, so it can be fixed by hand.
+   */
+  const reviewEstimate = async (job: Pick<EstimateJob, 'description' | 'photos' | 'meal'>, result: { raw: string; parsed: GeminiEstimate | null }) => {
+    const { parsed, raw } = result;
+    if (!parsed) {
+      setEstimateJob(null);
+      notify('Gemini returned text Dawni could not read. You can fix it below.');
+      setAiQuickLogMeal(job.meal);
+      setAiQuickLogSeedText(raw);
+      setModal('aiQuickLog');
       return;
     }
-    notify('Gemini returned text Dawni could not read. You can fix it below.');
-    setAiQuickLogMeal(meal);
-    setAiQuickLogSeedText(raw);
-    setModal('aiQuickLog');
+    // At the journal's size and quality, not the sharp copy Gemini read.
+    const photo = parsed.source !== 'label' && job.photos[0] ? await recompressDataUrl(job.photos[0]).catch(() => null) : null;
+    setEstimateSession({ description: job.description, photos: job.photos, meal: job.meal, reply: raw });
+    setAiQuickLogSeedText('');
+    setEstimateJob(null);
+    setLogDraft({ text: '', photos: [] });
+    prefillGeminiEstimate(parsed, false, photo);
+  };
+
+  /** Review for an estimate that finished while its sheet was closed (the toast's Review, or the sheet's). */
+  const reviewJob = (id: number) => {
+    const job = estimateJobRef.current;
+    if (job?.id === id && job.status === 'ready' && job.result) void reviewEstimate(job, job.result);
+  };
+
+  /**
+   * Estimate from the Log sheet. Closing the sheet doesn't stop it: the pill above the tab bar says
+   * it's running, and when it lands the review sheet replaces the Log sheet if that's still up, or a
+   * toast offers Review (Try again if it failed). Gives up after 45 s; Cancel stops it at once.
+   */
+  const startEstimate = async () => {
+    const description = logDraft.text.trim();
+    const photos = logDraft.photos;
+    if (!description && !photos.length) return;
+    estimateAbort.current?.abort();
+    const controller = new AbortController();
+    estimateAbort.current = controller;
+    const id = ++estimateSeq.current;
+    const meal = logMeal;
+    setEstimateJob({ id, status: 'running', description, photos, meal, startedAt: performance.now() });
+    try {
+      const { raw, parsed } = await runGeminiEstimate(description, photos, undefined, meal, controller.signal);
+      if (estimateSeq.current !== id) return;
+      estimateAbort.current = null;
+      if (modalRef.current === 'log') return reviewEstimate({ description, photos, meal }, { raw, parsed });
+      setEstimateJob(current => (current?.id === id ? { ...current, status: 'ready', result: { raw, parsed } } : current));
+      notify('Your estimate is ready', 8000, { label: 'Review', run: () => reviewJob(id) });
+    } catch (err) {
+      if (estimateSeq.current !== id) return;
+      estimateAbort.current = null;
+      if (isGeminiAbort(err)) {
+        setEstimateJob(null);
+        return;
+      }
+      const error = err instanceof Error && err.message ? err.message : 'Gemini could not estimate this meal.';
+      setEstimateJob(current => (current?.id === id ? { ...current, status: 'failed', error, timedOut: isGeminiTimeout(err) } : current));
+      if (modalRef.current !== 'log') notify(error, 8000, { label: 'Try again', run: () => openLogSheet(meal) });
+    }
+  };
+
+  /** Cancel on the estimating card: stops the request, and the composer comes back as it was. */
+  const cancelEstimate = () => {
+    estimateSeq.current += 1;
+    estimateAbort.current?.abort();
+    estimateAbort.current = null;
+    setEstimateJob(null);
   };
 
   const refineGeminiEstimate = async (correction: string) => {
@@ -738,10 +913,9 @@ export function App() {
    * Meal prep: one tap logs a serve of a batch straight away, to the meal the clock suggests,
    * with Undo in the toast. Tapping the entry afterwards changes the meal or the amount.
    */
-  const logBatchServe = async (batch: Batch, date: string) => {
+  const logBatchServe = async (batch: Batch, date: string, meal: Meal = defaultMealForLogging()) => {
     const left = batchServesLeft(batch, latestState.current.entries);
     if (left <= 0) return notify(`No serves of ${batch.name} left`);
-    const meal = defaultMealForLogging();
     const serve = batchServe(batch);
     // The last half serve is logged as a half, so the batch ends at exactly none.
     const portion = Math.min(1, left);
@@ -771,8 +945,7 @@ export function App() {
     });
     lastLogged = { meal, part: entryDayPart(entry), at: now };
     const leftAfter = Math.round((left - portion) * 100) / 100;
-    const where = `${meal.toLowerCase()}${date === todayKey() ? '' : ` on ${readable(date)}`}`;
-    notify(`Logged to ${where} · ${leftAfter > 0 ? `${fmtPortion(leftAfter)} left` : 'last serve'}`, 5000, {
+    notify(`Logged ${energyText(state, entry.calories)} · ${meal.toLowerCase()}${dayNote(date)} · ${leftAfter > 0 ? `${fmtPortion(leftAfter)} left` : 'last serve'}`, 5000, {
       label: 'Undo',
       run: () => updateLatest(draft => {
         draft.entries = draft.entries.filter(item => item.id !== entry.id);
@@ -785,11 +958,13 @@ export function App() {
     setModal('batch');
   };
 
-  const estimateBatch = async (recipe: string, servings: number, previous?: string, correction?: string) => {
+  const estimateBatch = async (recipe: string, servings: number, previous?: string, correction?: string, signal?: AbortSignal) => {
+    const { settings } = latestState.current;
     const raw = await requestBatchEstimate({
-      apiKey: state.settings.geminiApiKey,
-      userText: buildBatchRequest({ recipe, servings, preferences: state.settings.aiPreferences, previous, correction }),
-      accept: text => !!parseBatchEstimate(text)
+      apiKey: settings.geminiApiKey,
+      userText: buildBatchRequest({ recipe, servings, preferences: settings.aiPreferences, previous, correction }),
+      accept: text => !!parseBatchEstimate(text),
+      signal
     });
     const estimate = parseBatchEstimate(raw);
     if (!estimate) throw new Error('Gemini replied in a format Dawni couldn’t read. Try again.');
@@ -876,6 +1051,28 @@ export function App() {
   // Meal prep with serves left that was cooked by the day shown on Today.
   const batchesForDay = activeBatches(state.batches, state.entries, todayKey()).filter(batch => batch.cookedOn <= selectedDate);
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
+  // The Log sheet's usuals row: this meal's usuals, meal prep with serves left, then favourites.
+  const logChips = modal === 'log'
+    ? usualChips({
+      usuals: usualsForMeal(state.entries, logMeal, todayKey(), new Set(state.foods.map(food => food.id)), 28, 8),
+      batches: batchesForDay.map(batch => {
+        const left = batchServesLeft(batch, state.entries);
+        return { batch, left, calories: Math.round(batchServe(batch).calories) * Math.min(1, left) };
+      }),
+      foods: state.foods
+    })
+    : [];
+  // While Gemini works on something whose sheet was closed: a slim pill above the tab bar, on every tab.
+  const estimating = estimateJob?.status === 'running' && modal !== 'log';
+  const pillLabel = estimating && estimateJob ? estimatingLabel(estimateJob.meal) : batchBusy && modal !== 'batch' ? 'Estimating the batch…' : '';
+  const pill = pillLabel ? (
+    <div className="log-pill-wrap" role="status">
+      <button type="button" className="log-pill" aria-label={`${pillLabel} Open to see it.`} onClick={() => setModal(estimating ? 'log' : 'batch')}>
+        <span className="log-spinner" aria-hidden="true" />
+        <span>{pillLabel}</span>
+      </button>
+    </div>
+  ) : null;
   const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 5);
   const incomingVersion = availableUpdate?.version || '';
   const copyAiPrompt = () => navigator.clipboard
@@ -914,13 +1111,16 @@ export function App() {
     }).then(() => notify('Custom database deleted'));
   };
 
+  const openSettingsHere = () => openSettings();
+
   if (!loaded) {
     // A blank screen in the right colour: the read takes a few milliseconds, so text here only flickers.
     return <main className="app loading" aria-busy="true" />;
   }
 
   return (
-    <AppShell tab={tab} setTab={setTab} onLogWithAi={logWithAiFromTabBar}>
+    <OpenSettingsContext.Provider value={openSettingsHere}>
+    <AppShell tab={tab} setTab={setTab} onLogFood={() => openLogSheet()} pill={pill}>
       {tab === 'tracking' && (
         <TrackingView
           state={state}
@@ -928,7 +1128,7 @@ export function App() {
           setSelectedDate={setSelectedDate}
           entries={entries}
           totals={totals}
-          onOpenEntry={openEntry}
+          onOpenLog={openLogSheet}
           onEditEntry={editEntry}
           onRepeatEntry={repeatEntry}
           onDeleteEntry={deleteEntry}
@@ -945,17 +1145,12 @@ export function App() {
           onSetEstimate={kcal => updateState(draft => setDayEstimate(draft, selectedDate, kcal)).then(() => notify(kcal == null ? 'Rough guess cleared' : 'Rough guess saved'))}
           onUseLog={() => updateState(draft => setDayComplete(setDayEstimate(draft, selectedDate, null), selectedDate, true)).then(() => notify('Using your log'))}
           onRoughMeal={() => setModal('roughMeal')}
-          searchFieldRef={searchFieldRef}
-          onOpenSearch={openFoodSearch}
-          onLogUsual={logUsual}
+          onLogUsual={logUsualNow}
           batches={batchesForDay}
           onLogBatch={batch => logBatchServe(batch, selectedDate)}
           onOpenTarget={() => setModal('dayTarget')}
           onOpenWeek={() => openWeek(selectedDate)}
-          onOpenSettings={() => {
-            settingsReturnTab.current = 'tracking';
-            setTab('settings', { resetScroll: true });
-          }}
+          onOpenSettings={() => openSettings('tracking')}
         />
       )}
       {tab === 'journal' && (
@@ -981,6 +1176,10 @@ export function App() {
             setModal('mealCard');
           }}
           onOpenDay={openDayInTrack}
+          onLogForDay={date => {
+            setSelectedDate(date);
+            openLogSheet();
+          }}
         />
       )}
       {tab === 'library' && (
@@ -1020,9 +1219,7 @@ export function App() {
       {tab === 'settings' && (
         <SettingsView
           state={state}
-          onDone={() => setTab(settingsReturnTab.current)}
-          focus={settingsFocus}
-          onFocusHandled={() => setSettingsFocus(null)}
+          onDone={closeSettings}
           goalsEditing={goalsEditing}
           goalDraft={goalDraft}
           setGoalDraft={setGoalDraft}
@@ -1132,6 +1329,32 @@ export function App() {
         })).then(() => notify('Meal photo saved'));
       }} />
 
+      {/* Before the sheets it hands over to, so each of them opens above it as it slides away. */}
+      <LogSheet
+        open={modal === 'log'}
+        title={logSheetTitle(selectedDate, todayKey())}
+        state={state}
+        meal={logMeal}
+        draft={logDraft}
+        setDraft={setLogDraft}
+        job={estimateJob}
+        chips={logChips}
+        // Its own close only: Estimate, a chip or another way may already have opened the next sheet.
+        onClose={() => setModal(current => (current === 'log' ? null : current))}
+        onEstimate={startEstimate}
+        onCancelEstimate={cancelEstimate}
+        onReview={() => estimateJob && reviewJob(estimateJob.id)}
+        onDismissJob={() => setEstimateJob(current => (current?.status === 'running' ? current : null))}
+        onLogChip={logChip}
+        onReviewChip={reviewChip}
+        onTypeIn={() => openEntry(logMeal)}
+        onSearch={openFoodSearch}
+        onRoughMeal={() => setModal('roughMeal')}
+        onBatch={() => openBatchSheet('new')}
+        onSuggest={openMenuPick}
+        onPasteEstimate={pasteAiQuickLogFromClipboard}
+        onSaveKey={saveGeminiKey}
+      />
       <EntryModal
         open={modal === 'entry'}
         openMode={entryOpenMode}
@@ -1152,18 +1375,14 @@ export function App() {
           repeatEntry(entry);
         }}
         onDelete={id => {
-          if (!confirm('Delete this entry?')) return;
           setModal(null);
-          updateState(draft => {
-            draft.entries = draft.entries.filter(entry => entry.id !== id);
-          }).then(() => notify('Entry deleted'));
+          deleteEntry(id);
         }}
         day={entryDay}
       />
       <FoodSearch
         open={modal === 'foodSearch'}
         state={state}
-        anchorRef={searchFieldRef}
         onClose={() => setModal(current => (current === 'foodSearch' ? null : current))}
         onChoose={prefillFood}
         onSaveDatabaseFood={saveDatabaseFood}
@@ -1231,22 +1450,20 @@ export function App() {
         }}
         onParsed={prefillAiQuickLog}
       />
-      <GeminiEstimateModal
-        open={modal === 'geminiEstimate'}
-        // Modal runs a close animation then calls onClose; if we already opened Log Food, do not setModal(null).
-        onClose={() => setModal(current => (current === 'geminiEstimate' ? null : current))}
-        onEstimate={estimateWithGemini}
-      />
       <BatchSheet
         open={modal === 'batch'}
         request={batchSheet}
         batch={batchSheet.batchId ? state.batches.find(batch => batch.id === batchSheet.batchId) || null : null}
         state={state}
         onEstimate={estimateBatch}
-        onSetupGemini={() => setModal('geminiSetup')}
+        onSaveKey={saveGeminiKey}
+        onBusyChange={setBatchBusy}
+        onBackground={outcome => (outcome.ok
+          ? notify('Your batch estimate is ready', 8000, { label: 'Review', run: () => setModal('batch') })
+          : notify(outcome.message, 8000, { label: 'Try again', run: () => setModal('batch') }))}
         onSave={saveBatch}
         onFinish={finishBatch}
-        // Save hands over to a toast and Set up Gemini to another sheet, so only close what is still this one.
+        // Save hands over to a toast, so only close what is still this one.
         onClose={() => setModal(current => (current === 'batch' ? null : current))}
       />
       <MenuPickModal
@@ -1259,35 +1476,6 @@ export function App() {
         onLog={prefillMenuPick}
         onBackgroundNotice={message => notify(message, 4000)}
       />
-      <Modal open={modal === 'addFood'} title="Log with AI" onClose={() => setModal(current => (current === 'addFood' ? null : current))} bottomSheet>
-        <div className="add-sheet">
-          <div className="add-list">
-            <button className="add-row" type="button" onClick={openGeminiEstimate}>
-              <span className="add-icon"><Icon name="sparkle" /></span>
-              <span className="add-text"><strong>Estimate with Gemini</strong><small>Describe it, or photograph the meal or nutrition label</small></span>
-              <Icon name="chevron" size={18} />
-            </button>
-            <button className="add-row" type="button" onClick={() => openBatchSheet('new')}>
-              <span className="add-icon"><Icon name="prep" /></span>
-              <span className="add-text"><strong>Meal prep a batch</strong><small>List what you cooked and split it into serves to log through the week</small></span>
-              <Icon name="chevron" size={18} />
-            </button>
-            <button className="add-row" type="button" onClick={openMenuPick}>
-              <span className="add-icon"><Icon name="menu" /></span>
-              <span className="add-text"><strong>Help me pick from a menu</strong><small>Snap the menu and get a pick that fits today</small></span>
-              <Icon name="chevron" size={18} />
-            </button>
-          </div>
-          <div className="add-chatbot">
-            <span className="add-chatbot-label">Using another AI chatbot?</span>
-            <div className="add-chatbot-actions">
-              <button className="secondary" type="button" onClick={() => copyAiPrompt()}><Icon name="copy" size={18} />Copy prompt</button>
-              <button className="secondary" type="button" onClick={() => pasteAiQuickLogFromClipboard()}><Icon name="paste" size={18} />Paste estimate</button>
-            </div>
-          </div>
-          <p className="hint add-disclaimer">{AI_ESTIMATE_DISCLAIMER}</p>
-        </div>
-      </Modal>
       <Modal open={modal === 'dayTarget'} title={selectedDate === todayKey() ? 'Today\u2019s target' : `Target for ${readable(selectedDate)}`} onClose={() => setModal(null)} bottomSheet>
         <DayCalorieGoalPanel
           key={selectedDate}
@@ -1308,48 +1496,18 @@ export function App() {
           onLog={logRoughMeal}
         />
       </Modal>
-      <Modal open={modal === 'geminiSetup'} title="Set up Gemini" onClose={() => setModal(null)}>
-        <p className="hint">Estimate with Gemini, Meal prep a batch and Help me pick from a menu use your own Google Gemini API key. It takes a couple of minutes to set up, and the key stays on this device.</p>
-        <ol className="update-list ai-help-list">
-          <li>
-            Create a key in Google AI Studio at{' '}
-            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/app/apikey</a>.
-            The free tier is enough, and no card is needed.
-          </li>
-          <li>Paste it into Settings → Gemini and tap Save.</li>
-          <li>Dawni checks the key and shows which Gemini model it will use.</li>
-        </ol>
-        <div className="help-callout">No key? Tap the sparkle button beside the tabs, then Copy prompt and Paste estimate. That works with any AI chatbot.</div>
-        <div className="actions vertical">
-          <button className="primary" type="button" onClick={() => openSettingsSection('geminiSection')}>Open Gemini settings</button>
-          <button className="secondary" type="button" onClick={() => setModal(null)}>Not now</button>
-        </div>
-      </Modal>
       <Modal open={modal === 'aiQuickLogHelp'} title="AI estimate helper" onClose={() => setModal(null)}>
         <ol className="update-list ai-help-list">
           <li>Copy the prompt.</li>
           <li>Paste it into your AI chatbot.</li>
           <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
           <li>Copy the returned JSON (it must include unitMode: per serving or per 100g, with calories matching that choice so nothing double-counts).</li>
-          <li>Tap the sparkle button beside the tabs, then Paste estimate.</li>
+          <li>Tap the sparkle button beside the tabs, then Paste an estimate from another chatbot.</li>
           <li>Review the Log Food form, then save normally.</li>
         </ol>
       </Modal>
       <Modal open={modal === 'geminiApiKeyHelp'} title="Gemini API key" onClose={() => setModal(null)}>
-        <ol className="update-list ai-help-list">
-          <li>
-            Open Google AI Studio at{' '}
-            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">https://aistudio.google.com/app/apikey</a>
-            .
-          </li>
-          <li>Tap Create API key. A new key starts on Google&apos;s free tier, with no card needed.</li>
-          <li>Paste the key into Dawni&apos;s Gemini API key field in Settings, then tap Save. Dawni checks which models the key can actually use and shows the one it picked. Test key runs the check again.</li>
-          <li>Free tier: Gemini Flash models with daily limits, which is plenty for logging meals. Pro models need a paid plan, where Google asks you to prepay credit (at least US$5).</li>
-          <li>Once billing is linked to a key&apos;s Google project, every request on it is charged, even ones the free tier would have covered. To keep a free key, create it in a project without billing.</li>
-          <li>The check is free on a free key. On a paid key it&apos;s one tiny request to the best model, a fraction of a cent.</li>
-          <li>Dawni only uses the key when you tap Estimate with Gemini or Help me pick from a menu. The key is stored locally in this browser and is included in exported backups.</li>
-        </ol>
-        <div className="help-callout">Dawni picks the best model your key&apos;s plan allows, so it keeps working as Google releases new models. If one model is busy or not in your plan, it moves to the next. Upgraded to a paid plan? Tap Test key and Dawni switches to the better model straight away.</div>
+        <GeminiKeyHelp />
       </Modal>
       <Modal open={modal === 'customDbHelp'} title="Custom Food Database Help" onClose={() => setModal(null)}>
         <div className="custom-db-help">
@@ -1405,7 +1563,7 @@ export function App() {
         </div>
       </Modal>
       {toast && (
-        <div key={toast.id} className={`toast ${toast.action ? 'has-action' : ''}`} role="status">
+        <div key={toast.id} className={`toast ${toast.action ? 'has-action' : ''} ${pill ? 'above-pill' : ''}`} role="status">
           <span>{toast.text}</span>
           {toast.action && (
             <button type="button" className="toast-action" onClick={() => { const action = toast.action; setToast(null); action?.run(); }}>{toast.action.label}</button>
@@ -1413,5 +1571,6 @@ export function App() {
         </div>
       )}
     </AppShell>
+    </OpenSettingsContext.Provider>
   );
 }

@@ -176,7 +176,8 @@ export function TrackingView(props: {
   setSelectedDate: (date: string) => void;
   entries: Entry[];
   totals: ReturnType<typeof sum>;
-  onOpenEntry: (meal?: Meal) => void;
+  /** Opens Log food, for the meal given or the clock's. */
+  onOpenLog: (meal?: Meal) => void;
   onEditEntry: (entry: Entry) => void;
   onRepeatEntry: (entry: Entry) => void;
   onDeleteEntry: (id: string) => void;
@@ -185,10 +186,7 @@ export function TrackingView(props: {
   onSetEstimate: (kcal: number | null) => void;
   onUseLog: () => void;
   onRoughMeal: () => void;
-  /** The search field, which the open search rises from. */
-  searchFieldRef: React.Ref<HTMLButtonElement>;
-  /** Opens search over Today: favourites, recent foods and the food database. */
-  onOpenSearch: () => void;
+  /** Logs a usual from the Now line straight away, with Undo. */
   onLogUsual: (entry: Entry, meal: Meal) => void;
   /** Meal prep with serves left, cooked by the day shown. */
   batches: Batch[];
@@ -296,6 +294,8 @@ export function TrackingView(props: {
     })
   }));
   const lastEntryId = ordered[ordered.length - 1]?.id;
+  // Nothing logged ever and no Gemini key: Today says how to start instead of a bare line.
+  const firstRun = !state.entries.length && !state.settings.geminiApiKey.trim();
 
   return (
     <div className="tl-screen today-screen view-transition" ref={settleRef}>
@@ -374,20 +374,13 @@ export function TrackingView(props: {
         </button>
       </div>
 
-      <button ref={props.searchFieldRef} type="button" className="tl-search" aria-haspopup="dialog" onClick={props.onOpenSearch}>
-        <Icon name="search" size={20} />
-        <span>Search foods</span>
-      </button>
-
-      {/* Typing a food in. Log with AI is the sparkle beside the tab bar, where a thumb lands first. */}
-      <button type="button" className="tl-manual-row" onClick={() => props.onOpenEntry()}>
-        <span className="tl-manual-icon" aria-hidden="true"><Icon name="edit" size={20} /></span>
-        <span className="tl-manual-text">
-          <strong>Log manually</strong>
-          <span>Type in the calories and macros</span>
-        </span>
-        <Icon name="chevron" size={16} />
-      </button>
+      {/* Search and typing it in live in Log food (the sparkle), so the day's own log sits higher. First run says how to start. */}
+      {firstRun && isToday && (
+        <section className="tl-first-run" aria-label="Log your first meal">
+          <p><strong>Log your first meal.</strong> Describe it or snap a photo and Gemini estimates it, or type the numbers in.</p>
+          <button type="button" className="primary" onClick={() => props.onOpenLog()}>Log food</button>
+        </section>
+      )}
 
       {/* Meal prep on the go: one tap logs a serve, with Undo in the toast. */}
       {props.selectedDate <= today && props.batches.length > 0 && (
@@ -479,13 +472,14 @@ export function TrackingView(props: {
             ))}
           </div>
         ))}
-        {!ordered.length && !usuals.length && (
-          <p className="tl-empty">{isToday ? <>Nothing logged yet. Tap <Icon name="sparkle" size={15} filled /> to log with AI.</> : isPast ? 'Nothing logged on this day.' : 'This day hasn’t started yet.'}</p>
+        {!ordered.length && !usuals.length && !(firstRun && isToday) && (
+          <p className="tl-empty">{isToday ? <>Nothing logged yet. Tap <Icon name="sparkle" size={15} filled /> to log food.</> : isPast ? 'Nothing logged on this day.' : 'This day hasn’t started yet.'}</p>
         )}
         {usuals.length > 0 && nextMeal && (
           <div className="tl-now">
             <span className="tl-node now" aria-hidden="true" />
-            <button type="button" className="tl-now-label" onClick={() => props.onOpenEntry(nextMeal)} aria-label={`Log ${nextMeal.toLowerCase()}`}>Now</button>
+            <button type="button" className="tl-now-label" onClick={() => props.onOpenLog(nextMeal)} aria-label={`Log ${nextMeal.toLowerCase()}`}>Now</button>
+            {/* One tap logs a usual, with Undo; Now opens Log food for anything else. */}
             <div className="tl-chips" role="group" aria-label={`${nextMeal} usuals`}>
               {usuals.map(usual => (
                 <button key={usual.key} type="button" className="tl-chip" onClick={() => props.onLogUsual(usual.latest, nextMeal)} aria-label={`Log ${usual.name} for ${nextMeal.toLowerCase()}, ${energyText(state, usual.latest.calories)}`}>

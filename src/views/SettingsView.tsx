@@ -43,7 +43,7 @@ function GeminiKeyStatus({ hasKey, check, saved }: { hasKey: boolean; check: Gem
       </div>
     );
   }
-  if (!hasKey) return <p className="hint gemini-status">Not set up. Add a key to use Estimate with Gemini and Help me pick from a menu.</p>;
+  if (!hasKey) return <p className="hint gemini-status">Not set up. Add a key to use Estimate and Help me pick from a menu.</p>;
   if (saved) {
     return (
       <p className="hint gemini-status">
@@ -56,9 +56,8 @@ function GeminiKeyStatus({ hasKey, check, saved }: { hasKey: boolean; check: Gem
 
 export function SettingsView(props: {
   state: AppState;
+  /** Back to the tab Settings was opened from. */
   onDone: () => void;
-  focus: 'gemini' | null;
-  onFocusHandled: () => void;
   goalsEditing: boolean;
   goalDraft: Settings;
   setGoalDraft: (settings: Settings) => void;
@@ -102,14 +101,6 @@ export function SettingsView(props: {
   useEffect(() => {
     if (!geminiEditing) setGeminiDraft(props.state.settings.geminiApiKey);
   }, [props.state.settings.geminiApiKey, geminiEditing]);
-
-  // Arriving from "Set up Gemini" opens the key field ready to paste into.
-  useEffect(() => {
-    if (props.focus !== 'gemini') return;
-    setGeminiDraft(props.state.settings.geminiApiKey);
-    setGeminiEditing(true);
-    props.onFocusHandled();
-  }, [props.focus]);
 
   // What the last check or estimate learned about the saved key, without calling Google.
   useEffect(() => {
@@ -184,7 +175,7 @@ export function SettingsView(props: {
             <button className="help-btn" type="button" onClick={props.onGeminiApiKeyHelp}>?</button>
           </div>
         </div>
-        <p className="hint">Use your own Gemini API key for Estimate with Gemini and Help me pick from a menu. A free key from Google AI Studio works. The key stays on this device and is included in backups.</p>
+        <p className="hint">Use your own Gemini API key for Estimate and Help me pick from a menu. A free key from Google AI Studio works. The key stays on this device and is included in backups.</p>
         <Field label="Gemini API key" full>
           <input
             type="password"

@@ -40,6 +40,19 @@ export function MacroChips({ fat = 0, carbs = 0, protein = 0, show = ['fat', 'ca
   );
 }
 
+/**
+ * Chip rows are one line that scrolls sideways; this keeps the chosen chip (`.active`) in view,
+ * centred where it can be. Only the row scrolls, never the sheet around it.
+ */
+export function scrollChipIntoView(row: HTMLElement | null, smooth: boolean) {
+  const active = row?.querySelector<HTMLElement>('.active');
+  if (!row || !active || row.scrollWidth <= row.clientWidth) return;
+  const rowBox = row.getBoundingClientRect();
+  const chipBox = active.getBoundingClientRect();
+  const left = row.scrollLeft + chipBox.left - rowBox.left - (row.clientWidth - chipBox.width) / 2;
+  row.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
+}
+
 export function Field({ label, children, full = false }: { label: string; children: ReactNode; full?: boolean }) {
   return <label className={full ? 'field full' : 'field'}><span>{label}</span>{children}</label>;
 }

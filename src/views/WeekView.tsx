@@ -19,6 +19,7 @@ import {
   type WeekBank
 } from '../utils';
 import { Icon } from '../ui/icons';
+import { SettingsTool } from '../ui/SettingsButton';
 import { useSettleAnimation } from '../ui/AppShell';
 import { useSky, skyStyle } from '../ui/sky';
 
@@ -226,6 +227,7 @@ export function RichStatsView({ state, bankingWeekStart, setBankingWeekStart, on
             <div className="tl-glass tl-toolbar">
               <button className="tl-tool" type="button" aria-label="Previous week" onClick={() => setBankingWeekStart(addDays(bankingWeekStart, -7))}><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
               <button className="tl-tool" type="button" aria-label="Next week" disabled={bankingWeekStart >= currentWeek} onClick={() => setBankingWeekStart(addDays(bankingWeekStart, 7))}><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+              <SettingsTool />
             </div>
           </div>
         </header>

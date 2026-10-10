@@ -5,6 +5,7 @@ import { activeBatches, batchServe, batchServesLeft, finishedBatches } from '../
 import { energyLabel, energyValue, fmt, fmtPortion, foodUnitText, todayKey } from '../utils';
 import { Icon } from '../ui/icons';
 import { FavouriteToggle, ServePips } from '../ui/controls';
+import { SettingsGlassButton } from '../ui/SettingsButton';
 import { cookedText } from '../ui/format';
 
 /** What Foods' Meal prep list can do with a batch. */
@@ -35,8 +36,9 @@ export function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, on
   const prep = sub === 'prep';
   return (
     <>
-      <header className="page-header has-helper">
+      <header className="page-header has-helper has-tools">
         <h1 className="page-title">Foods</h1>
+        <SettingsGlassButton />
         <p className="hint page-subtitle library-hint">{prep ? 'Cook once, log a serve at a time. A batch clears once it’s eaten, or a week after you cook it.' : sub === 'favourites' ? 'Tap + to log a food again. Heart the ones you eat often.' : `Tap + to log a food again. AI estimates you only log once clear after ${ONE_OFF_ESTIMATE_DAYS} days, unless you heart them.`}</p>
       </header>
       <div className="page-controls">

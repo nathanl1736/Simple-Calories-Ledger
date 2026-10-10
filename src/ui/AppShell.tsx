@@ -10,7 +10,7 @@ export const TABS: [Tab, string][] = [
   ['library', 'Foods'],
   ['settings', 'Settings']
 ];
-/** The tab bar: Settings opens from the gear on Today instead. */
+/** The tab bar: Settings opens from the sliders button in each tab's header instead. */
 const NAV_TABS = TABS.filter(([id]) => id !== 'settings');
 
 /**
@@ -31,7 +31,11 @@ export function useSettleAnimation(token: string) {
   return ref;
 }
 
-export function AppShell({ tab, setTab, onLogWithAi, children }: { tab: Tab; setTab: (tab: Tab) => void; onLogWithAi: () => void; children: ReactNode }) {
+/**
+ * The page, the floating tab bar and the sparkle. `pill` is a slim status line above the bar while
+ * something runs in the background (an estimate the person closed the sheet on); it hides with the bar.
+ */
+export function AppShell({ tab, setTab, onLogFood, pill, children }: { tab: Tab; setTab: (tab: Tab) => void; onLogFood: () => void; pill?: ReactNode; children: ReactNode }) {
   const [navHidden, setNavHidden] = useState(false);
 
   useEffect(() => {
@@ -76,6 +80,7 @@ export function AppShell({ tab, setTab, onLogWithAi, children }: { tab: Tab; set
       <div className="status-bar-scrim" aria-hidden="true" />
       <main className="app">{children}</main>
       <div className={`tabbar-wrap ${navHidden ? 'hidden' : ''}`} aria-hidden={navHidden}>
+        {pill}
         <nav className="tabbar" aria-label="Main tabs">
           {NAV_TABS.map(([id, label]) => (
             <button key={id} className={`tab tab-${id} ${tab === id ? 'active' : ''}`} type="button" onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}>
@@ -85,7 +90,7 @@ export function AppShell({ tab, setTab, onLogWithAi, children }: { tab: Tab; set
           ))}
         </nav>
         {tab !== 'settings' && (
-          <button className="log-button" type="button" aria-label="Log with AI" onClick={onLogWithAi}>
+          <button className="log-button" type="button" aria-label="Log food" onClick={onLogFood}>
             <Icon name="sparkle" size={28} filled />
           </button>
         )}

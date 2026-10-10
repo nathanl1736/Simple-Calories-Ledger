@@ -1,12 +1,14 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { AppState, Batch, BatchIngredient, EnergyUnit, EntryEstimateSource, Totals } from '../types';
 import { energyFromMacros, estimateSourceLabel, macrosDisagree } from '../aiEstimate';
+import { isGeminiAbort } from '../geminiEstimate';
 import { batchServe, batchServesLeft, DEFAULT_BATCH_SERVINGS, MAX_BATCH_SERVINGS, servingsValue, sumTotals, type BatchEstimate } from '../mealPrep';
 import { energyInputFromKcal, energyInputToKcal, energyTextForUnit, energyUnitLabel, energyUnitValue, energyValueForUnit, fmt, fmtPortion, n } from '../utils';
 import { type BatchInput, type BatchSheetRequest } from '../appTypes';
 import { Modal } from '../ui/Modal';
 import { Field, ServePips } from '../ui/controls';
 import { roundedText, cookedText } from '../ui/format';
+import { ConnectGeminiCard } from './ConnectGemini';
 
 function ServesStepper({ value, min = 1, onChange, disabled = false }: { value: number; min?: number; onChange: (next: number) => void; disabled?: boolean }) {
   return (
@@ -36,15 +38,21 @@ function serveInputs(total: Totals, servings: number, unit: EnergyUnit): ServeIn
  * Meal prep: list what went into a batch and how many serves, Gemini estimates the whole batch
  * ingredient by ingredient, and the review shows one serve. The batch is the fixed thing: changing
  * the serves re-splits it, and editing one serve's numbers changes the batch to match.
+ * The sheet can be closed while Gemini works: the request carries on and `onBackground` says how it went.
  */
-export function BatchSheet({ open, request, batch, state, onEstimate, onSetupGemini, onSave, onFinish, onClose }: {
+export function BatchSheet({ open, request, batch, state, onEstimate, onSaveKey, onBusyChange, onBackground, onSave, onFinish, onClose }: {
   open: boolean;
   request: BatchSheetRequest;
   /** The batch being edited, or the finished one being cooked again. */
   batch: Batch | null;
   state: AppState;
-  onEstimate: (recipe: string, servings: number, previous?: string, correction?: string) => Promise<{ raw: string; estimate: BatchEstimate }>;
-  onSetupGemini: () => void;
+  onEstimate: (recipe: string, servings: number, previous?: string, correction?: string, signal?: AbortSignal) => Promise<{ raw: string; estimate: BatchEstimate }>;
+  /** Saves a key connected from the sheet's own Connect card. */
+  onSaveKey: (key: string) => Promise<void>;
+  /** Gemini started or stopped working on this sheet's request. */
+  onBusyChange: (busy: boolean) => void;
+  /** A request finished while the sheet was closed. Reopening the sheet (same request) shows the result. */
+  onBackground: (outcome: { ok: true } | { ok: false; message: string }) => void;
   onSave: (input: BatchInput, logNow: boolean) => void;
   onFinish: (batch: Batch) => void;
   onClose: () => void;
@@ -67,11 +75,25 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onSetupGem
   const [refineText, setRefineText] = useState('');
   const [busy, setBusy] = useState<'estimate' | 'refine' | null>(null);
   const [error, setError] = useState('');
+  /** The error came from Gemini, so the button offers Try again. */
+  const [failed, setFailed] = useState(false);
+  /** No key yet: the describe step shows the Connect card in place of Estimate. */
+  const [connecting, setConnecting] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const openRef = useRef(open);
+  openRef.current = open;
+  const abortRef = useRef<AbortController | null>(null);
+  /** Bumped by each request and by Cancel, so a reply to an older one is ignored. */
+  const requestSeq = useRef(0);
+  /** The opening the sheet last started afresh for; reopening for a result keeps what's there. */
+  const startedFor = useRef(0);
 
-  // Each opening starts afresh: empty for a new batch, or from the batch being edited or cooked again.
+  // Each new opening starts afresh: empty for a new batch, or from the batch being edited or cooked again.
+  // Reopening the same one (the pill, or Review in a toast) keeps it, so a result that came in while closed is there.
   useEffect(() => {
-    if (!open) return;
+    if (!open || request.opened === startedFor.current) return;
+    startedFor.current = request.opened;
+    stopRequest();
     const source = request.mode === 'new' ? null : batch;
     const count = source?.servings || DEFAULT_BATCH_SERVINGS;
     const nextTotal = source?.total || ZERO_TOTALS;
@@ -87,8 +109,9 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onSetupGem
     setEstimateSource(source?.estimateSource || null);
     setReply('');
     setRefineText('');
-    setBusy(null);
     setError('');
+    setFailed(false);
+    setConnecting(false);
   }, [open, request.opened]);
 
   const used = editing && batch ? batch.servings - batchServesLeft(batch, state.entries) : 0;
@@ -121,40 +144,68 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onSetupGem
     setStep('review');
   };
 
-  const estimate = async () => {
-    if (!hasKey) return onSetupGemini();
-    if (!recipe.trim()) return setError('List what went in, with amounts.');
-    setBusy('estimate');
+  /** Stops whatever is running, quietly (a new opening, or Cancel). */
+  function stopRequest() {
+    requestSeq.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setBusy(null);
+    onBusyChange(false);
+  }
+
+  /**
+   * One Gemini request: cancellable, timed out by the transport, and still landing if the sheet
+   * was closed meanwhile. `apply` runs on success; a failure shows here, and both are announced
+   * when the sheet is closed.
+   */
+  const ask = async (kind: 'estimate' | 'refine', run: (signal: AbortSignal) => Promise<{ raw: string; estimate: BatchEstimate }>, apply: (raw: string, result: BatchEstimate) => void, fallback: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const id = ++requestSeq.current;
+    setBusy(kind);
     setError('');
+    setFailed(false);
+    onBusyChange(true);
+    let outcome: { ok: true } | { ok: false; message: string };
     try {
-      const result = await onEstimate(recipe, servings);
-      applyEstimate(result.raw, result.estimate);
+      const result = await run(controller.signal);
+      if (requestSeq.current !== id) return;
+      apply(result.raw, result.estimate);
+      outcome = { ok: true };
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gemini could not estimate this batch.');
-    } finally {
-      setBusy(null);
+      if (requestSeq.current !== id || isGeminiAbort(err)) return;
+      const message = err instanceof Error && err.message ? err.message : fallback;
+      setError(message);
+      setFailed(true);
+      outcome = { ok: false, message };
     }
+    abortRef.current = null;
+    setBusy(null);
+    onBusyChange(false);
+    if (!openRef.current) onBackground(outcome);
   };
 
-  const refine = async () => {
+  const estimate = () => {
+    if (!recipe.trim()) return setError('List what went in, with amounts.');
+    if (!hasKey) return setConnecting(true);
+    void ask('estimate', signal => onEstimate(recipe, servings, undefined, undefined, signal), applyEstimate, 'Gemini could not estimate this batch.');
+  };
+
+  const refine = () => {
     const correction = refineText.trim();
     if (!correction || busy) return;
-    setBusy('refine');
-    setError('');
-    try {
-      const result = await onEstimate(recipe, servings, reply, correction);
-      applyEstimate(result.raw, result.estimate);
+    void ask('refine', signal => onEstimate(recipe, servings, reply, correction, signal), (raw, result) => {
+      applyEstimate(raw, result);
       // Kept with the recipe, so cooking it again starts from the corrected version.
       setRecipe(current => `${current.trim()}\n(Correction: ${correction})`);
       setRefineText('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gemini could not refine this estimate.');
-    } finally {
-      setBusy(null);
-    }
+    }, 'Gemini could not refine this estimate.');
   };
 
   const typeIn = () => {
+    setConnecting(false);
+    setFailed(false);
     setReply('');
     setIngredients([]);
     setAssumptions([]);
@@ -185,7 +236,7 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onSetupGem
   const title = editing ? 'Edit batch' : request.mode === 'again' ? 'Cook again' : step === 'describe' ? 'Meal prep a batch' : 'Review batch';
 
   return (
-    <Modal open={open} title={title} onClose={onClose} wide bottomSheet closeDisabled={!!busy}>
+    <Modal open={open} title={title} onClose={onClose} wide bottomSheet>
       {step === 'describe' ? (
         <form className="form batch-sheet" onSubmit={(event: FormEvent) => { event.preventDefault(); estimate(); }}>
           <p className="hint full">List everything that went in, with amounts. Gemini estimates the whole batch, then Dawni splits it into serves you log one at a time.</p>
@@ -203,11 +254,33 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onSetupGem
             <span className="batch-serves-label"><strong>Serves</strong><small>How many portions you split it into</small></span>
             <ServesStepper value={servings} onChange={changeServings} disabled={!!busy} />
           </div>
-          {error && <p className="ai-quick-log-error full">{error}</p>}
-          <div className="actions vertical full">
-            <button className="primary" type="submit" disabled={!!busy || (hasKey && !recipe.trim())}>{busy ? 'Estimating…' : hasKey ? 'Estimate batch' : 'Set up Gemini to estimate'}</button>
-            <button className="text-btn" type="button" disabled={!!busy} onClick={typeIn}>Enter the numbers yourself</button>
-          </div>
+          {error && <p className="ai-quick-log-error full" role="alert">{error}</p>}
+          {/* Stays up through "Ready" after the key saves, then the estimate runs. */}
+          {connecting ? (
+            <div className="full">
+              <ConnectGeminiCard
+                onSaveKey={onSaveKey}
+                onTypeIn={typeIn}
+                typeInLabel="Enter the numbers yourself"
+                onConnected={() => {
+                  setConnecting(false);
+                  void ask('estimate', signal => onEstimate(recipe, servings, undefined, undefined, signal), applyEstimate, 'Gemini could not estimate this batch.');
+                }}
+              />
+            </div>
+          ) : (
+            <div className="actions vertical full">
+              <button className="primary" type="submit" disabled={!!busy || !recipe.trim()}>{busy ? 'Estimating…' : failed ? 'Try again' : 'Estimate batch'}</button>
+              {busy ? (
+                <>
+                  <button className="secondary" type="button" onClick={stopRequest}>Cancel</button>
+                  <p className="hint batch-actions-note">You can close this. Dawni will let you know when it’s ready.</p>
+                </>
+              ) : (
+                <button className="text-btn" type="button" onClick={typeIn}>Enter the numbers yourself</button>
+              )}
+            </div>
+          )}
         </form>
       ) : (
         <form className="form batch-sheet" onSubmit={(event: FormEvent) => { event.preventDefault(); save(false); }}>
@@ -267,6 +340,7 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onSetupGem
                     <button type="button" className="secondary" disabled={!refineText.trim() || !!busy} onClick={refine}>{busy === 'refine' ? 'Refining…' : 'Refine'}</button>
                   </div>
                 )}
+                {busy === 'refine' && <button type="button" className="text-btn" onClick={stopRequest}>Cancel</button>}
               </div>
             )}
           </div>
@@ -298,7 +372,7 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onSetupGem
               <button type="button" className="text-btn" disabled={!!busy} onClick={() => { setError(''); setStep('describe'); }}>{recipe.trim() ? 'Change what went in' : 'Estimate with Gemini instead'}</button>
             </div>
           )}
-          {error && <p className="ai-quick-log-error full">{error}</p>}
+          {error && <p className="ai-quick-log-error full" role="alert">{error}</p>}
           <div className="actions vertical full">
             {editing ? (
               <>

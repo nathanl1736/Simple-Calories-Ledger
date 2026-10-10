@@ -1,14 +1,13 @@
 /** Keeps small print (labels, menus) legible for Gemini; ~300-600 KB per photo. */
 export const SHARP_PHOTO_OPTIONS = { maxWidth: Infinity, maxSide: 1800, quality: 0.82 };
 
+type JpegOptions = { maxWidth?: number; maxSide?: number; quality?: number };
+
 /**
  * Re-encodes a photo as JPEG. Food photos only need to be ~1000px wide; a menu
  * needs its small print legible, so callers can cap the longer side instead.
  */
-export async function compressImage(
-  file?: File | null,
-  { maxWidth = 1000, maxSide = Infinity, quality = 0.72 }: { maxWidth?: number; maxSide?: number; quality?: number } = {}
-) {
+export async function compressImage(file?: File | null, options: JpegOptions = {}) {
   if (!file) return null;
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -16,6 +15,14 @@ export async function compressImage(
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+  return recompressDataUrl(dataUrl, options);
+}
+
+/**
+ * Re-encodes a photo already in memory, e.g. the sharp copy sent to Gemini becoming the
+ * entry's journal photo, which uses the journal's size and quality (the defaults).
+ */
+export async function recompressDataUrl(dataUrl: string, { maxWidth = 1000, maxSide = Infinity, quality = 0.72 }: JpegOptions = {}) {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
