@@ -2489,12 +2489,15 @@ function TrackingView(props: {
 
   const goalMacros = baseDayGoal;
   const proteinLeft = Math.round(goalMacros.protein - props.totals.protein);
-  // Suggesting protein that would cost more than the energy left reads as "eat more" after the day is spent.
+  // Suggesting protein that would cost more than the energy left reads as "eat more" after the day is spent,
+  // so it says "left" like carbs and fat instead of "to go".
   const proteinReachable = proteinLeft > 0 && proteinLeft * 4 <= Math.max(0, remaining);
   // A finished day shows what was eaten, not what's "left".
   const showEaten = macroView === 'eaten' || isPast;
-  const proteinBig = showEaten || proteinLeft <= 0 || !proteinReachable ? `${fmt(props.totals.protein)}g` : `${fmt(proteinLeft)}g`;
-  const proteinTail = proteinLeft <= 0 ? ' · goal met' : showEaten || !proteinReachable ? ' eaten' : ' to go';
+  const proteinBig = `${fmt(showEaten ? props.totals.protein : Math.abs(proteinLeft))}g`;
+  const proteinTail = showEaten
+    ? proteinLeft <= 0 ? '· goal met' : 'eaten'
+    : proteinLeft < 0 ? 'past goal' : proteinLeft === 0 ? '· goal met' : proteinReachable ? 'to go' : 'left';
   let proteinSoFar = 0;
   const proteinSegments = ordered.map((entry, index) => {
     const start = proteinSoFar / Math.max(1, goalMacros.protein) * 100;
@@ -2666,7 +2669,7 @@ function TrackingView(props: {
       >
         <span className="tl-macro protein" aria-hidden="true">
           <span className="tl-macro-label"><b>Protein</b> of {fmt(goalMacros.protein)}g</span>
-          <span className="tl-macro-value"><strong>{proteinBig}</strong><span>{proteinTail.trim()}</span></span>
+          <span className="tl-macro-value"><strong>{proteinBig}</strong><span>{proteinTail}</span></span>
           <span className="tl-macro-bar">{proteinSegments.map(segment => <i key={segment.key} style={{ left: `${segment.left}%`, width: `${segment.width}%` }} />)}</span>
         </span>
         {minorMacros.map(([name, value, target]) => {
