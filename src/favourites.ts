@@ -8,6 +8,12 @@ export type FoodSnapshot = Omit<Food, 'id' | 'favourite' | 'usageCount' | 'lastU
 
 const nameKey = (name: string) => name.toLowerCase().trim();
 
+/** How long a one-off AI or menu estimate stays in Recent without being logged again. */
+export const ONE_OFF_ESTIMATE_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Older builds stamped a new food's times a few ms apart, so only a later save counts as an edit in Foods. */
+const EDIT_GRACE_MS = 60 * 1000;
+
 /** The saved food an entry belongs to: the one it was picked from, else the one with the same name. */
 export function linkedFood(foods: Food[], sourceFoodId: string | null | undefined, name: string): Food | undefined {
   const picked = sourceFoodId ? foods.find(food => food.id === sourceFoodId) : undefined;
@@ -55,4 +61,23 @@ export function recordFoodUse(
   }
   if (!picked && !food.favourite) Object.assign(food, snapshot, { updatedAt: now });
   return null;
+}
+
+/**
+ * Saved foods minus the one-off estimates nobody went back to. Logging with AI saves each estimate to
+ * Recent and its name rarely comes back word for word, so they pile up. A food is dropped once it is:
+ * - an AI or menu estimate (one read off a label is a real product, so it stays),
+ * - not a favourite, logged only once and not edited in Foods since,
+ * - unused for `days`.
+ * Diary entries keep their own numbers, so nothing already logged changes.
+ */
+export function pruneOneOffEstimates(foods: Food[], now: number, days = ONE_OFF_ESTIMATE_DAYS): Food[] {
+  const cutoff = now - days * DAY_MS;
+  return foods.filter(food => {
+    if (food.favourite || (food.estimateSource !== 'ai' && food.estimateSource !== 'menu')) return true;
+    if ((food.usageCount || 0) > 1) return true;
+    const lastUsed = food.lastUsedAt || food.createdAt || now;
+    if ((food.updatedAt || 0) - lastUsed > EDIT_GRACE_MS) return true;
+    return lastUsed >= cutoff;
+  });
 }

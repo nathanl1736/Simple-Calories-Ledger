@@ -11,7 +11,7 @@ import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from './canvas';
 import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { nameHasWordStarting, normaliseSearchText, scoreFoodSearch, tokeniseQuery } from './foodSearch';
-import { linkedFood, recordFoodUse, type FavouriteChange } from './favourites';
+import { linkedFood, ONE_OFF_ESTIMATE_DAYS, pruneOneOffEstimates, recordFoodUse, type FavouriteChange } from './favourites';
 import { arcSlice, DAY_PART_BAND, DAY_PART_LABEL, DAY_PARTS, dayPartAt, dayPartGroups, entryDayPart, mealDayPart, miniArc, nextMealSlot, restOfWeekPlan, skyBackground, skyBand, skyFor, sunArc, tideBalance, usualsForMeal, weekStory, type Sky, type SkyBand } from './tidelight';
 import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import {
@@ -992,7 +992,11 @@ export function App() {
   };
 
   useEffect(() => {
-    readState().then(next => {
+    readState().then(saved => {
+      // One-off AI estimates leave Recent a month after they were logged.
+      const foods = pruneOneOffEstimates(saved.foods, Date.now());
+      const next = foods.length < saved.foods.length ? { ...saved, foods } : saved;
+      if (next !== saved) saveState(next).catch(console.warn);
       latestState.current = next;
       setState(next);
       setGoalDraft(next.settings);
@@ -5061,7 +5065,7 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onToggleF
     <>
       <header className="page-header has-helper">
         <h1 className="page-title">Foods</h1>
-        <p className="hint page-subtitle library-hint">{prep ? 'Cook once, log a serve at a time. A batch clears once it’s eaten, or a week after you cook it.' : 'Tap + to log a food again. Heart the ones you eat often.'}</p>
+        <p className="hint page-subtitle library-hint">{prep ? 'Cook once, log a serve at a time. A batch clears once it’s eaten, or a week after you cook it.' : sub === 'favourites' ? 'Tap + to log a food again. Heart the ones you eat often.' : `Tap + to log a food again. AI estimates you only log once clear after ${ONE_OFF_ESTIMATE_DAYS} days, unless you heart them.`}</p>
       </header>
       <div className="page-controls">
         <div className="seg" role="tablist" aria-label="Saved foods">
