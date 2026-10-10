@@ -7,6 +7,7 @@
  *   mkdir -p ~/dawni-audit-pw && cd ~/dawni-audit-pw && npm init -y && npm i playwright@1.56.1
  *   (1.56.x matches the preinstalled Chromium build 1194 in /opt/pw-browsers; never run `playwright install`.
  *    With another Playwright version, set CHROMIUM_PATH to a chrome binary instead.)
+ *   npm i axe-core@4.10.2                          # optional: adds an axe-core pass (contrast, names, target size)
  *   export PLAYWRIGHT_DIR=~/dawni-audit-pw        # where node_modules/playwright is
  *
  * RUN (the dev server must be up: `npm run dev`, serving http://127.0.0.1:5173/Simple-Calories-Ledger/)
@@ -15,13 +16,14 @@
  * OPTIONS (environment variables)
  *   AUDIT_URL      app URL                      (default http://127.0.0.1:5173/Simple-Calories-Ledger/)
  *   AUDIT_TZ       IANA time zone of the "user"  (default Australia/Melbourne)
+ *   AUDIT_TODAY    YYYY-MM-DD to treat as today  (default: the system date)
  *   AUDIT_THEMES   comma list                    (default light,dark)
  *   AUDIT_ONLY     comma list of scenario names  (fresh, today-0730, tour-1300, today-1900, today-1900-light, today-2300,
  *                  today-2300-over, midweek, interact, ai, settings, no-key, backup, update)
  *   AUDIT_OUT      output folder                 (default design/audit/screenshots)
  *   PLAYWRIGHT_DIR see above
  *
- * Today is the real date in AUDIT_TZ; seeded entries are dated relative to it, and the browser clock is fixed to that
+ * Today is the system date; seeded entries are dated relative to it, and the browser clock is fixed to that
  * date at 07:30, 13:00, 19:00 and 23:00 so the seeded entries land on "today".
  */
 import fs from 'node:fs';
@@ -46,7 +48,8 @@ const tz = process.env.AUDIT_TZ || 'Australia/Melbourne';
 const cfg = {
   url: process.env.AUDIT_URL || 'http://127.0.0.1:5173/Simple-Calories-Ledger/',
   tz,
-  today: dateKeyIn(tz),
+  // The system date (in the system time zone) unless AUDIT_TODAY says otherwise; the browser then lives in AUDIT_TZ on that date.
+  today: process.env.AUDIT_TODAY || dateKeyIn(Intl.DateTimeFormat().resolvedOptions().timeZone),
   themes: (process.env.AUDIT_THEMES || 'light,dark').split(',').map(t => t.trim()).filter(Boolean),
   only: (process.env.AUDIT_ONLY || '').split(',').map(t => t.trim()).filter(Boolean),
   out: process.env.AUDIT_OUT || path.join(here, 'screenshots')
@@ -79,7 +82,11 @@ const PLAN = [
 const { chromium } = loadPlaywright();
 const launchOptions = process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {};
 const browser = await chromium.launch(launchOptions);
-const registry = new Registry(cfg.out, { ...cfg, midweekDate });
+let axeSource = '';
+for (const dir of [process.env.PLAYWRIGHT_DIR, '/tmp/claude-0/-home-user-Simple-Calories-Ledger/c2b3286b-a6c3-570c-8c6a-5df39c844de9/scratchpad/pw'].filter(Boolean)) {
+  try { axeSource = fs.readFileSync(createRequire(path.join(dir, 'noop.js')).resolve('axe-core/axe.min.js'), 'utf8'); break; } catch { /* axe-core is optional: npm i axe-core in PLAYWRIGHT_DIR */ }
+}
+const registry = new Registry(cfg.out, { ...cfg, midweekDate, axeSource });
 const started = Date.now();
 
 for (const theme of cfg.themes) {

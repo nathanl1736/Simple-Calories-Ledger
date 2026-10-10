@@ -19,7 +19,9 @@ export class Registry {
     this.shots = [];
     this.numbers = new Map();
     this.max = 0;
-    this.problems = { console: [], pageErrors: [], failedRequests: [], targets: [], overflow: [], clipped: [], focus: [], dialogs: [], fonts: [], a11y: [], notes: [], scenarioErrors: [] };
+    /** Source of axe-core, when it is installed next to Playwright (optional). */
+    this.axeSource = config.axeSource || '';
+    this.problems = { console: [], pageErrors: [], failedRequests: [], targets: [], overflow: [], clipped: [], focus: [], dialogs: [], fonts: [], a11y: [], axe: [], notes: [], scenarioErrors: [] };
   }
 
   numberFor(key) {
@@ -93,8 +95,12 @@ export class Session {
 
   /* ---------------------------------------------------------------- driving the app */
 
-  dialog() { return this.page.locator('[role=dialog]').last(); }
-  hasDialog() { return this.page.locator('[role=dialog]').count().then(c => c > 0); }
+  /** The sheet on top. Modal sheets sit above Today's search overlay even though the overlay is later in the DOM. */
+  dialog() {
+    const sheets = this.page.locator('.modal-panel[role=dialog]');
+    return sheets.last();
+  }
+  async hasDialog() { return (await this.page.locator('[role=dialog]').count()) > 0; }
 
   async tab(id) {
     await this.page.locator(`.tabbar .tab-${id}`).click();
@@ -111,10 +117,11 @@ export class Session {
   async closeTop() {
     const page = this.page;
     if (!(await this.hasDialog())) return;
-    const dlg = this.dialog();
-    const cancel = dlg.locator('.food-search-cancel');
-    if (await cancel.count()) await cancel.click();
-    else await dlg.locator('.modal-head .close').click({ timeout: 4000 });
+    if (await page.locator('.modal-panel[role=dialog]').count()) {
+      await this.dialog().locator('.modal-head .close').click({ timeout: 4000 });
+    } else {
+      await page.locator('.food-search-cancel').click({ timeout: 4000 });
+    }
     await page.waitForTimeout(550);
   }
 
@@ -221,7 +228,31 @@ export class Session {
 
   /* ---------------------------------------------------------------- measuring */
 
+  /** axe-core on the current screen, both themes: contrast, names, target size, viewport zoom. */
+  async axe(label) {
+    if (!this.registry.axeSource) return;
+    try {
+      if (!(await this.page.evaluate(() => !!window.axe))) await this.page.addScriptTag({ content: this.registry.axeSource });
+      const result = await this.page.evaluate(async () => {
+        const rules = ['color-contrast', 'label', 'button-name', 'link-name', 'aria-hidden-focus', 'scrollable-region-focusable', 'target-size', 'nested-interactive', 'aria-dialog-name', 'aria-allowed-role', 'aria-required-children', 'aria-valid-attr-value', 'meta-viewport', 'select-name', 'input-button-name', 'image-alt'];
+        const run = await window.axe.run(document, { runOnly: { type: 'rule', values: rules }, resultTypes: ['violations', 'incomplete'] });
+        const shape = node => {
+          const data = node.any?.[0]?.data || {};
+          return { target: (node.target || []).join(' ').slice(0, 90), html: (node.html || '').slice(0, 110), fg: data.fgColor, bg: data.bgColor, ratio: data.contrastRatio, expected: data.expectedContrastRatio, size: data.fontSize, summary: (node.failureSummary || '').split('\n')[1]?.trim().slice(0, 120) };
+        };
+        return {
+          violations: run.violations.map(v => ({ id: v.id, impact: v.impact, count: v.nodes.length, nodes: v.nodes.slice(0, 6).map(shape) })),
+          incomplete: run.incomplete.map(v => ({ id: v.id, count: v.nodes.length }))
+        };
+      });
+      this.registry.problems.axe.push({ scenario: this.scenario, theme: this.theme, label, ...result });
+    } catch (err) {
+      this.registry.problems.notes.push(`axe failed on ${label}: ${String(err.message).split('\n')[0]}`);
+    }
+  }
+
   async audit(label) {
+    await this.axe(label);
     if (!this.auditing) return;
     const page = this.page;
     const at = { scenario: this.scenario, label };
@@ -256,7 +287,7 @@ export class Session {
 /* ------------------------------------------------------------------ scenario runner */
 
 export async function openSession(browser, registry, cfg, spec) {
-  const { name, theme, hour = 13, minute = 0, state, mode = 'ok', delayMs = 0, serviceWorkers = 'block', auditing = false, dateOffset = 0 } = spec;
+  const { name, theme, hour = 13, minute = 0, state, mode = 'ok', delayMs = 0, serviceWorkers = 'allow', auditing = false, dateOffset = 0 } = spec;
   const clockDate = addDays(cfg.today, dateOffset);
   const context = await browser.newContext({
     viewport: VIEWPORT, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: IPHONE_UA,
@@ -277,7 +308,9 @@ export async function openSession(browser, registry, cfg, spec) {
   const mocked = url => /generativelanguage\.googleapis\.com/.test(url || '');
   page.on('console', msg => {
     if (!['error', 'warning'].includes(msg.type())) return;
-    registry.problems.console.push({ ...here, type: msg.type(), text: msg.text().slice(0, 300), url: msg.location()?.url || '', expected: mocked(msg.location()?.url) });
+    // Expected: the mock's own 4xx/5xx replies, and the app's console.warn for each model the mock refused.
+    const text = msg.text();
+    registry.problems.console.push({ ...here, type: msg.type(), text: text.slice(0, 300), url: msg.location()?.url || '', expected: mocked(msg.location()?.url) || /^Gemini model ".+" could not be used\./.test(text) });
   });
   page.on('pageerror', err => registry.problems.pageErrors.push({ ...here, message: String(err.message || err).slice(0, 300) }));
   page.on('requestfailed', req => { if (!mocked(req.url())) registry.problems.failedRequests.push({ ...here, url: req.url().slice(0, 140), failure: req.failure()?.errorText }); });

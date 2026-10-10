@@ -419,6 +419,28 @@ export async function interact(s, cfg) {
   const { page } = s;
   const rowByName = name => page.locator('.tl-row', { hasText: name }).first();
 
+  await step(s, 'meal prep serve', async () => {
+    await s.scrollTop();
+    await page.locator('.tl-prep-row').click();
+    await s.settle(350);
+    await s.shot('toast', 'meal-prep-logged-undo', 'One tap on the meal prep row logs a serve and shows a toast with Undo ("Logged to lunch · 2 left").');
+    await s.audit('toast with undo');
+    await page.locator('.toast-action').click();
+    await s.settle(300);
+    await s.shot('toast', 'meal-prep-undone', 'Toast "Undone" after tapping Undo.');
+    await s.settle(1800);
+  });
+
+  await step(s, 'now line chip', async () => {
+    await s.scrollTo('.tl-now', 'center');
+    await s.shot('today', 'now-line-closeup', 'The Now line: next meal usuals as chips (name and Cal) one tap from logging.');
+    await page.locator('.tl-chip').first().click();
+    await s.waitFor('[role=dialog]');
+    await s.sheet('log-food-review', 'from-now-line-usual', 'A usual from the Now line opens the log sheet prefilled with what was logged last time.');
+    await s.closeTop();
+    await s.scrollTop();
+  });
+
   await step(s, 'long press menu', async () => {
     await s.scrollTo('.tl-dayline');
     await s.longPress(rowByName('Greek yoghurt, berries and oats'));
@@ -489,10 +511,18 @@ export async function interact(s, cfg) {
     await page.locator('.tl-feet button').click();
     await s.sheet('day-target', 'default', 'Today\'s target sheet: explanation, slider with endpoints, "Type a target" with Set, usual target note.');
     await s.audit('day target sheet');
+    // Keyboard steps on the slider are 10 Cal and a change within about 27 Cal of the usual target is discarded, so the
+    // slider never leaves the usual target that way (recorded as a problem). The typed target is what sets a custom one.
     await page.locator('.day-calorie-slider').focus();
     for (let i = 0; i < 12; i += 1) await page.keyboard.press('ArrowRight');
-    await s.settle(400);
-    await s.shot('day-target', 'custom-target', 'Day target after nudging the slider: a "Use usual target" button appears.');
+    await s.settle(300);
+    const sliderAfterKeys = await page.locator('.day-calorie-slider').inputValue();
+    s.registry.problems.notes.push(`Day target slider: 12 x ArrowRight from 1800 leaves the value at ${sliderAfterKeys} (each 10 Cal step is within the tolerance of the usual target and is discarded).`);
+    await s.shot('day-target', 'slider-after-12-arrow-keys', 'Day target slider after 12 ArrowRight presses: still at the usual target (changes within the tolerance snap back).');
+    await page.locator('.day-calorie-input').fill('2100');
+    await page.getByRole('button', { name: 'Set', exact: true }).click();
+    await s.settle(500);
+    await s.shot('day-target', 'custom-target', 'Day target after typing 2100 and Set: the slider moves and a "Use usual target" button appears.');
     await s.closeTop();
     await s.shot('today', 'custom-target-applied', 'Today with a custom day target (the target line says "custom" and the arc re-scales).');
     await s.settle(200);
@@ -500,28 +530,6 @@ export async function interact(s, cfg) {
     await s.settle(600);
     await page.getByRole('button', { name: 'Use usual target' }).click().catch(() => {});
     await s.closeTop();
-  });
-
-  await step(s, 'meal prep serve', async () => {
-    await s.scrollTop();
-    await page.locator('.tl-prep-row').click();
-    await s.settle(350);
-    await s.shot('toast', 'meal-prep-logged-undo', 'One tap on the meal prep row logs a serve and shows a toast with Undo ("Logged to lunch · 2 left").');
-    await s.audit('toast with undo');
-    await page.locator('.toast-action').click();
-    await s.settle(300);
-    await s.shot('toast', 'meal-prep-undone', 'Toast "Undone" after tapping Undo.');
-    await s.settle(1800);
-  });
-
-  await step(s, 'now line chip', async () => {
-    await s.scrollTo('.tl-now', 'center');
-    await s.shot('today', 'now-line-closeup', 'The Now line: next meal usuals as chips (name and Cal) one tap from logging.');
-    await page.locator('.tl-chip').first().click();
-    await s.waitFor('[role=dialog]');
-    await s.sheet('log-food-review', 'from-now-line-usual', 'A usual from the Now line opens the log sheet prefilled with what was logged last time.');
-    await s.closeTop();
-    await s.scrollTop();
   });
 
   await step(s, 'log manually', async () => {
@@ -547,8 +555,12 @@ export async function interact(s, cfg) {
     await s.chooseFile(() => page.locator('.photo-picker-label').click(), file);
     await s.settle(900);
     await s.sheet('log-manually', 'with-photo', 'A meal photo attached: preview and "Tap to replace the photo".');
-    await page.locator('.entry-form .heart, .fav-toggle').first().click();
+    const panelScroll = () => page.evaluate(() => { const p = document.querySelector('.modal-panel'); const b = p?.querySelector('.modal-body'); return { panel: p?.scrollTop ?? null, body: b?.scrollTop ?? null, headTop: Math.round(p?.querySelector('.modal-head')?.getBoundingClientRect().top ?? 0), panelTop: Math.round(p?.getBoundingClientRect().top ?? 0) }; });
+    const before = await panelScroll();
+    await page.locator('.fav-toggle').first().click();
     await s.settle(300);
+    const after = await panelScroll();
+    s.registry.problems.notes.push(`Log sheet, heart tapped after scrolling: panel scrollTop ${before.panel} -> ${after.panel}, header top ${before.headTop} -> ${after.headTop} (panel top ${after.panelTop}).`);
     await s.swipe(0.95);
     await s.shot('log-manually', 'favourite-and-swipe', 'Heart tapped ("Also saves it to favourites") and the swipe held past the threshold ("Release to log").');
     await s.releaseSwipe();
@@ -653,18 +665,24 @@ export async function aiFlows(s, cfg) {
     await s.closeTop();
   });
 
-  const errorCase = async (mode, tag, desc) => {
+  const errorCase = async (mode, tag, desc, { both = false } = {}) => {
     ctl.mode = mode;
     await openEstimate();
     await page.locator('.gemini-estimate-modal textarea').fill('Two slices of pepperoni pizza');
     await page.getByRole('button', { name: 'Estimate food' }).click();
     await page.waitForSelector('.ai-quick-log-error', { timeout: 20000 }).catch(() => {});
     await s.settle(600);
+    // The "Estimating…" toast lasts 6 s and is not cleared when the request fails, so it sits over the error text.
+    const covered = await page.locator('.toast').count();
+    if (both && covered) await s.shot('estimate-with-gemini', `${tag}-toast-still-showing`, `${desc} Taken straight away: the "Estimating…" toast is still on screen and covers the error text.`);
+    await page.waitForSelector('.toast', { state: 'detached', timeout: 9000 }).catch(() => {});
+    await s.settle(300);
     await s.shot('estimate-with-gemini', tag, desc);
+    if (!both) s.registry.problems.notes.push(`Estimate error (${mode}): the Estimating toast was ${covered ? 'still' : 'no longer'} showing when the error appeared.`);
     await s.closeTop();
     ctl.mode = 'ok';
   };
-  await step(s, 'error 429', async () => { await errorCase('rate', 'error-429-rate-limit', 'ERROR (HTTP 429, quota): "Your Gemini key has hit its rate limit…" shown inline in the sheet; the typed description is kept.'); });
+  await step(s, 'error 429', async () => { await errorCase('rate', 'error-429-rate-limit', 'ERROR (HTTP 429, quota): "Your Gemini key has hit its rate limit…" shown inline in the sheet; the typed description is kept.', { both: true }); });
   await step(s, 'error daily', async () => { await errorCase('daily', 'error-free-tier-daily-limit', 'ERROR (HTTP 429, free tier daily limit).'); });
   await step(s, 'error 400', async () => { await errorCase('badkey', 'error-400-invalid-key', 'ERROR (HTTP 400, API key not valid).'); });
   await step(s, 'error 503', async () => { await errorCase('busy', 'error-503-busy', 'ERROR (HTTP 503, overloaded).'); });
@@ -903,16 +921,29 @@ export async function backupReminder(s) {
 
 export async function updateModal(s, cfg) {
   const { page } = s;
-  // A newer build: version.json answers with a higher version and notes, as a deploy would.
-  await page.route(/version\.json/, route => route.fulfill({
-    status: 200, contentType: 'application/json',
-    body: JSON.stringify({ version: '2.9.0.0', notes: ['Search is faster, and recent foods now show the last time you logged them.', 'Meal prep serves can be logged to any day from Foods.', 'Fixes for kJ rounding on Week.'] })
-  }));
+  // A newer build: version.json answers with a higher version and notes, as a deploy would. The service worker passes
+  // version.json straight to the network (where Playwright cannot see it), so the page's own fetch is wrapped instead.
+  await page.evaluate(() => {
+    const original = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (/version\.json/.test(url)) {
+        return Promise.resolve(new Response(JSON.stringify({
+          version: '2.9.0.0',
+          notes: ['Search is faster, and recent foods now show the last time you logged them.', 'Meal prep serves can be logged to any day from Foods.', 'Fixes for kJ rounding on Week.']
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+      return original(input, init);
+    };
+  });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await s.settle(600);
   await s.scrollTo('.card:has(h2:text("App"))');
   await page.getByRole('button', { name: 'Check for updates' }).click();
   await page.waitForSelector('[role=dialog]', { timeout: 12000 }).catch(() => {});
+  await s.settle(500);
+  await s.shot('version', 'toast-over-update-button', 'The "Update ready" toast lands on top of the sheet\'s primary button (Update now) at the moment the sheet opens.');
+  await s.settle(2200);
   await s.sheet('version', 'update-available', 'Update available sheet: version badge, explanation, What\'s new notes, Update now and Not now.');
   await s.audit('update sheet');
 }

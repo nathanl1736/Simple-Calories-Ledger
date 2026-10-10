@@ -73,7 +73,8 @@ export const CLIPPED_SCRIPT = `(() => {
 
 /** Where focus is, relative to the topmost dialog. */
 export const FOCUS_SCRIPT = `(() => {
-  const dialogs = [...document.querySelectorAll('[role=dialog]')];
+  const sheets = [...document.querySelectorAll('.modal-panel[role=dialog]')];
+  const dialogs = sheets.length ? sheets : [...document.querySelectorAll('[role=dialog]')];
   const top = dialogs[dialogs.length - 1] || null;
   const active = document.activeElement;
   const label = el => el ? ((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('placeholder'))) || (el.innerText || '').trim().slice(0, 40) || el.tagName.toLowerCase()) : '';
