@@ -1,10 +1,12 @@
 // The Week view model (3.0): one place that turns the week bank into the numbers and words Week and Today show.
-// Every number is converted to the reader's unit and rounded once here; screens print these and never round again.
+// Every number is converted to the reader's unit and rounded once to a whole number here; screens print these and
+// never round again, and every bracketed working adds up exactly to the figure it explains.
 // Pure apart from weekViewFor's default `today`, so tests load it straight into Node.
 import type { AppState, DailyGoalSnapshot, EnergyUnit, TrackingMode } from './types';
 import { fmt, SPREAD_FLOOR_SHARE, todayKey, type BankDay, type DayBankStatus, type WeekBank } from './utils';
 
 const MINUS = '−';
+const NBSP = ' ';
 const KJ_PER_KCAL = 4.184;
 
 /**
@@ -45,7 +47,7 @@ export type WeekViewDay = {
   eaten: number | null;
   /** base − eaten for a day that counts; null otherwise. */
   delta: number | null;
-  /** The planned allowance for a day after today, when it differs from base by a rounding step or more. */
+  /** The planned allowance for a day after today, when it differs from base by 10 Cal (42 kJ) or more. */
   plan: number | null;
   /** The same plan in kcal, for drawing the tile's plan line. */
   planKcal: number | null;
@@ -79,7 +81,10 @@ export type WeekView = {
   baseAfter: number;
   even: number | null;
   floor: number | null;
-  /** "about N": max(even, floor) to the nearest 10 Cal (50 kJ), the only rounding to a step. */
+  /**
+   * "about N" for each day after today, a whole number like everything else: base + perDayAdjust when those days
+   * share a base and the floor isn't binding (so "(1,450 − 163)" adds up exactly), else the floor, else round(even).
+   */
   allowance: number | null;
   /** round(net / days after), for the working "(1,450 − 163)". */
   perDayAdjust: number | null;
@@ -132,6 +137,15 @@ function daysShort(dates: string[]) {
 /** "Sunday", or the short form for two or more days. */
 const daysWho = (dates: string[]) => (dates.length === 1 ? weekday(dates[0], 'long') : daysShort(dates));
 
+/** " (1,450 − 163)": a working whose two terms add up to the figure before it, or nothing when a term is 0. */
+function sumWorking(first: number, second: number, suffix = '') {
+  if (!first || !second) return '';
+  // Lead with a term that isn't negative, so the bracket reads "a − b" rather than "−a + b".
+  const [lead, other] = first >= 0 ? [first, second] : [second, first];
+  // Non-breaking spaces keep the working on one line.
+  return ` (${[fmt(lead), other < 0 ? MINUS : '+', fmt(Math.abs(other))].join(NBSP)}${suffix.replace(/^ /, NBSP)})`;
+}
+
 /** The week's goal: the mode its counted days share, or Cutting when they differ. */
 export function weekMode(week: WeekBank): TrackingMode {
   const first = (week.counted[0] || week.days[0]).goal.trackingMode;
@@ -148,11 +162,11 @@ function withinTarget(intake: number, goal: DailyGoalSnapshot) {
 
 export function weekView({ week, today, mode, unit }: WeekViewInput): WeekView {
   const factor = unit === 'kj' ? KJ_PER_KCAL : 1;
-  const step = unit === 'kj' ? 50 : 10;
   const L = unit === 'kj' ? 'kJ' : 'Cal';
   const toUnit = (kcal: number) => roundOnce(kcal * factor);
-  const toStep = (value: number) => roundOnce(Math.round(value / step) * step);
   const threshold = 100 * factor;
+  // Smaller than this a plan line or a floor overrun isn't worth showing: 10 Cal, 42 kJ.
+  const minShown = toUnit(10);
 
   const { days } = week;
   const base = days.map(day => toUnit(day.goal.calories));
@@ -177,9 +191,16 @@ export function weekView({ week, today, mode, unit }: WeekViewInput): WeekView {
   const baseAfter = afterIndexes.reduce((acc, i) => acc + base[i], 0);
   const even = n ? (baseAfter + net) / n : null;
   const floor = n ? SPREAD_FLOOR_SHARE * baseAfter / n : null;
-  const allowance = even != null && floor != null ? toStep(Math.max(even, floor)) : null;
   const perDayAdjust = n ? roundOnce(net / n) : null;
-  const overAtFloor = allowance != null && even != null && floor != null && even < floor ? Math.max(0, roundOnce((allowance - even) * n)) : 0;
+  const sameBase = n > 0 && afterIndexes.every(i => base[i] === base[afterIndexes[0]]);
+  const floorBinds = even != null && floor != null && even < floor;
+  const allowance = even == null || floor == null || perDayAdjust == null ? null
+    : floorBinds ? roundOnce(floor)
+      : sameBase ? base[afterIndexes[0]] + perDayAdjust
+        : roundOnce(even);
+  // The bracket only prints when its sum is the allowance shown.
+  const allowanceWorks = allowance != null && sameBase && !floorBinds && perDayAdjust !== 0;
+  const overAtFloor = allowance != null && even != null && floorBinds ? Math.max(0, roundOnce((allowance - even) * n)) : 0;
   const leftInBudget = roundOnce(bankedBefore + (todayDelta ?? 0) + baseAfter);
   const budget = base.reduce((acc, value) => acc + value, 0);
 
@@ -187,8 +208,8 @@ export function weekView({ week, today, mode, unit }: WeekViewInput): WeekView {
   const finished = !week.remaining.length;
   const empty = started && finished && !week.counted.length && !week.toCheck.length;
   const lastDay = n === 0 && todayState === 'inProgress';
-  // A floor overrun smaller than a rounding step reads as evened out, so nothing says "about 3 over".
-  const overWeek = overAtFloor >= step || (lastDay && leftInBudget < 0);
+  // A floor overrun under 10 Cal reads as evened out, so nothing says "about 3 over".
+  const overWeek = overAtFloor >= minShown || (lastDay && leftInBudget < 0);
   let status: WeekStatus;
   if (finished) status = 'finished';
   else if (mode === 'Bulking') status = overWeek || net <= -threshold ? 'ahead' : net >= threshold ? 'recoverable' : 'onPace';
@@ -227,27 +248,28 @@ export function weekView({ week, today, mode, unit }: WeekViewInput): WeekView {
       : todayExtra > 0 ? signedNumber(-todayExtra) : 'still going'}`
     : null;
 
-  // The answer: what the days after today can have, with the working in brackets.
-  const baseEach = n ? roundOnce(baseAfter / n) : 0;
+  // The answer: what the days after today can have, with the working in brackets that add up to it exactly.
   const who = daysWho(daysAfter);
   const each = n > 1 ? ' each' : '';
-  const sumWorking = perDayAdjust && allowance != null && allowance !== toStep(baseEach)
-    ? ` (${fmt(baseEach)} ${perDayAdjust < 0 ? MINUS : '+'} ${fmt(Math.abs(perDayAdjust))}${each})`
-    : '';
-  const plan = allowance != null ? `${who} can${each} have about ${fmt(allowance)}${sumWorking}.` : '';
+  const planWorking = allowanceWorks && perDayAdjust != null ? sumWorking(base[afterIndexes[0]], perDayAdjust, each) : '';
+  const plan = allowance != null ? `${who} can${each} have about ${fmt(allowance)}${planWorking}.` : '';
+  // The last day's working uses what's on screen: today's cell (left or over) and the net before today.
+  const todayTerm = todayDelta ?? 0;
   let answer: string;
   if (!started) answer = `This week hasn’t started yet. Its budget is ${fmt(budget)} ${L}.`;
   else if (empty) answer = 'Nothing was logged this week.';
   else if (finished) answer = net > 0 ? `Finished ${fmt(net)} under target.` : net < 0 ? `Finished ${fmt(-net)} over target.` : 'Finished right on target.';
   else if (lastDay) {
-    if (mode === 'Bulking') answer = leftInBudget >= 0 ? `Last day. ${fmt(leftInBudget)} to go to reach the week’s target.` : `Last day. The week is ${fmt(-leftInBudget)} over target.`;
-    else if (leftInBudget >= 0) answer = `Last day. ${fmt(leftInBudget)} left after what’s logged.`;
+    const leftWorking = sumWorking(todayTerm, bankedBefore);
+    const overWorking = sumWorking(-todayTerm, -bankedBefore);
+    if (mode === 'Bulking') answer = leftInBudget >= 0 ? `Last day. ${fmt(leftInBudget)} to go to reach the week’s target${leftWorking}.` : `Last day. The week is ${fmt(-leftInBudget)} over target${overWorking}.`;
+    else if (leftInBudget >= 0) answer = `Last day. ${fmt(leftInBudget)} left after what’s logged${leftWorking}.`;
     // Today's unspent target still counts, so a week behind before today can finish less over than the headline.
-    else answer = `Last day. It finishes ${todayExtra > 0 ? '' : 'at least '}${fmt(-leftInBudget)} over and resets Monday.`;
+    else answer = `Last day. It finishes ${todayExtra > 0 ? '' : 'at least '}${fmt(-leftInBudget)} over${overWorking} and resets Monday.`;
   } else if (status === 'overForWeek') {
     answer = `Over for the week. Aim for about ${fmt(allowance ?? 0)} ${n === 1 ? `on ${who}` : 'a day'}; it finishes about ${fmt(overAtFloor)} over and resets Monday.`;
   } else if (mode === 'Bulking') {
-    if (status === 'ahead' && overAtFloor >= step) answer = `A little ahead. ${who} can${each} have about ${fmt(allowance ?? 0)}, and the week still finishes about ${fmt(overAtFloor)} over target.`;
+    if (status === 'ahead' && overAtFloor >= minShown) answer = `A little ahead. ${who} can${each} have about ${fmt(allowance ?? 0)}, and the week still finishes about ${fmt(overAtFloor)} over target.`;
     else answer = `${status === 'ahead' ? 'A little ahead.' : status === 'recoverable' ? 'A little behind.' : 'On pace.'} ${plan}`;
   } else {
     const lead = status === 'ahead' ? 'A little ahead.' : status === 'recoverable' ? (mode === 'Maintaining' ? 'Easy to even out.' : 'Recoverable.') : 'On pace.';
@@ -267,7 +289,7 @@ export function weekView({ week, today, mode, unit }: WeekViewInput): WeekView {
     // A day in progress has no delta yet; its row shows the headline's net instead.
     if (delta != null) balance += delta;
     const upcomingPlan = day.status === 'upcoming' && allowance != null ? allowance : null;
-    const planShown = upcomingPlan != null && Math.abs(upcomingPlan - base[i]) >= step ? upcomingPlan : null;
+    const planShown = upcomingPlan != null && Math.abs(upcomingPlan - base[i]) >= minShown ? upcomingPlan : null;
     let cell: DeltaCell;
     let aria: string;
     let table: WeekViewDay['table'];
