@@ -1,7 +1,7 @@
 ﻿import { CSSProperties, FormEvent, ReactNode, type MouseEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { createPortal, flushSync } from 'react-dom';
-import type { AppState, DailyGoalSnapshot, DayPart, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference, TrackingMode } from './types';
+import type { AppState, Batch, BatchIngredient, DailyGoalSnapshot, DayPart, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference, Totals, TrackingMode } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
 import { compressImage, downloadBlob, SHARP_PHOTO_OPTIONS } from './image';
@@ -26,7 +26,8 @@ import {
   type EstimateConfidence,
   type GeminiEstimate
 } from './aiEstimate';
-import { geminiModelLabel, probeGeminiKey, readGeminiKeyStatus, requestMealEstimate, requestMenuPick, type GeminiError, type GeminiKeyStatus as SavedGeminiKeyStatus } from './geminiEstimate';
+import { geminiModelLabel, probeGeminiKey, readGeminiKeyStatus, requestBatchEstimate, requestMealEstimate, requestMenuPick, type GeminiError, type GeminiKeyStatus as SavedGeminiKeyStatus } from './geminiEstimate';
+import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, DEFAULT_BATCH_SERVINGS, finishedBatches, MAX_BATCH_SERVINGS, parseBatchEstimate, pruneBatches, servingsValue, sumTotals, type BatchEstimate } from './mealPrep';
 import {
   budgetReason,
   buildMenuPickContext,
@@ -93,7 +94,7 @@ import {
 } from './utils';
 
 type Tab = 'tracking' | 'journal' | 'library' | 'stats' | 'settings';
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'geminiSetup' | 'menuPick' | 'customDbHelp' | 'addFood' | 'dayTarget' | 'roughMeal' | 'foodSearch' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'geminiEstimate' | 'geminiSetup' | 'menuPick' | 'customDbHelp' | 'addFood' | 'dayTarget' | 'roughMeal' | 'foodSearch' | 'batch' | null;
 type SetTabOptions = { date?: string; resetScroll?: boolean };
 
 const TABS: [Tab, string][] = [
@@ -143,7 +144,14 @@ type EntryDraft = {
   estimateSource: EntryEstimateSource | null;
   /** What Gemini guessed and how sure it was; shown while reviewing, saved into notes. */
   estimateDetails: { confidence: EstimateConfidence; assumptions: string[] } | null;
+  /** Set when editing a serve of meal prep, so it keeps counting toward its batch. */
+  batchId: string;
 };
+
+/** What the meal prep sheet saves; the app adds the id and the dates. */
+type BatchInput = Pick<Batch, 'name' | 'recipe' | 'servings' | 'total' | 'ingredients' | 'estimateSource' | 'assumptions' | 'confidence'>;
+/** How the meal prep sheet was opened: a new batch, editing one on the go, or cooking a finished one again. `opened` starts it afresh. */
+type BatchSheetRequest = { mode: 'new' | 'edit' | 'again'; batchId: string | null; opened: number };
 
 /** The last Gemini estimate request, kept so Refine can send a correction with the same photos. */
 type EstimateSession = { description: string; photos: string[]; meal: Meal; reply: string };
@@ -190,7 +198,8 @@ const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kc
   photo: null,
   entryEnergyUnit,
   estimateSource: null,
-  estimateDetails: null
+  estimateDetails: null,
+  batchId: ''
 });
 
 function defaultMealForCurrentTime(): Meal {
@@ -239,7 +248,9 @@ function switchDraftBasis(draft: EntryDraft, next: EntryDraft['unitMode']): Part
   return { unitMode: next, portion: roundedText(servings * servingGrams, 1), ...scale(100 / servingGrams) };
 }
 
-type Toast = { id: number; text: string } | null;
+/** A toast can offer one action, like Undo after a one-tap log. */
+type ToastAction = { label: string; run: () => void };
+type Toast = { id: number; text: string; action?: ToastAction } | null;
 type GeminiCheck = {
   state: 'idle' | 'testing' | 'ok' | 'error';
   /** The key this check was for; a result for any other key is ignored. */
@@ -440,7 +451,7 @@ function useSettleAnimation(token: string) {
   return ref;
 }
 
-type IconName = 'today' | 'week' | 'journal' | 'foods' | 'settings' | 'plus' | 'search' | 'sparkle' | 'menu' | 'chevron' | 'copy' | 'paste' | 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'edit' | 'heart' | 'recent' | 'database';
+type IconName = 'today' | 'week' | 'journal' | 'foods' | 'settings' | 'plus' | 'search' | 'sparkle' | 'menu' | 'chevron' | 'copy' | 'paste' | 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'edit' | 'heart' | 'recent' | 'database' | 'prep';
 
 /** Line icons drawn on a 24px grid, stroked in the current text colour. */
 const ICON_PATHS: Record<IconName, ReactNode> = {
@@ -464,7 +475,9 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   edit: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></>,
   heart: <><path d="M12 19.5 5.5 13a4.6 4.6 0 0 1 6.5-6.5 4.6 4.6 0 0 1 6.5 6.5z" /></>,
   recent: <><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9" /><path d="M4.5 5.5V9H8" /><path d="M12 8.5V12l2.5 1.5" /></>,
-  database: <><ellipse cx="12" cy="6" rx="7" ry="2.5" /><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6" /><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5" /></>
+  database: <><ellipse cx="12" cy="6" rx="7" ry="2.5" /><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6" /><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5" /></>,
+  /** A meal prep container: lid, handle and two compartments. */
+  prep: <><rect x="3.5" y="10" width="17" height="10" rx="2.5" /><path d="M2.5 10h19" /><path d="M9.5 7h5" /><path d="M10 10v10" /></>
 };
 
 function Icon({ name, size = 22, filled = false }: { name: IconName; size?: number; filled?: boolean }) {
@@ -946,6 +959,9 @@ export function App() {
   const [aiQuickLogMeal, setAiQuickLogMeal] = useState<Meal>('Snack');
   const [aiQuickLogSeedText, setAiQuickLogSeedText] = useState('');
   const [estimateSession, setEstimateSession] = useState<EstimateSession | null>(null);
+  const [batchSheet, setBatchSheet] = useState<BatchSheetRequest>({ mode: 'new', batchId: null, opened: 0 });
+  /** The state as last saved, for work that finishes after the render that started it, like Undo. */
+  const latestState = useRef(state);
   const tabScrollRef = useRef<Partial<Record<Tab, number>>>({});
   const settingsReturnTab = useRef<Tab>('tracking');
   const nextTabScrollRef = useRef(0);
@@ -955,20 +971,29 @@ export function App() {
   const entryPhotoInputRef = useRef<HTMLInputElement>(null);
   const searchFieldRef = useRef<HTMLButtonElement>(null);
 
-  const notify = (text: string, durationMs: number = 1800) => {
+  const notify = (text: string, durationMs: number = 1800, action?: ToastAction) => {
     const id = Date.now();
-    setToast({ id, text });
+    setToast({ id, text, action });
     window.setTimeout(() => setToast(current => current?.id === id ? null : current), durationMs);
   };
 
   const persist = async (next: AppState) => {
     const normalized = normalizeStateShape(next);
+    latestState.current = normalized;
     setState(normalized);
     await saveState(normalized);
   };
 
+  /** Like updateState, but on the latest saved state rather than this render's, so a late Undo can't undo anything else. */
+  const updateLatest = (recipe: (state: AppState) => void) => {
+    const draft = structuredClone(latestState.current);
+    recipe(draft);
+    return persist(draft);
+  };
+
   useEffect(() => {
     readState().then(next => {
+      latestState.current = next;
       setState(next);
       setGoalDraft(next.settings);
       setLoaded(true);
@@ -1143,7 +1168,8 @@ export function App() {
       favourite: null,
       photo: entry.photo || null,
       estimateSource: estimateSourceValue(entry.estimateSource),
-      estimateDetails: null
+      estimateDetails: null,
+      batchId: entry.batchId || ''
     });
     setEntryOpenMode('edit');
     setModal('entry');
@@ -1172,6 +1198,7 @@ export function App() {
       meal: entryDraft.meal,
       part: mealDayPart(entryDraft.meal) ? undefined : entryDraft.part,
       estimateSource: entryDraft.estimateSource,
+      batchId: entryDraft.batchId || undefined,
       notes: entryDraft.notes.trim(),
       photo: entryDraft.photo,
       createdAt: Date.now(),
@@ -1180,7 +1207,8 @@ export function App() {
   };
 
   const touchFoodAfterLog = (draftState: AppState, entry: Entry): FavouriteChange => {
-    if (entry.autoNamed) return null;
+    // Meal prep runs out, so its serves stay out of saved foods and Recent.
+    if (entry.autoNamed || entry.batchId) return null;
     const isDatabaseFood = entryDraft.source === 'foodEstimateDatabase' || entryDraft.source === 'customFoodDatabase';
     return recordFoodUse(draftState.foods, {
       sourceFoodId: entry.sourceFoodId,
@@ -1485,6 +1513,115 @@ export function App() {
     prefillGeminiEstimate(parsed, true);
   };
 
+  /**
+   * Meal prep: one tap logs a serve of a batch straight away, to the meal the clock suggests,
+   * with Undo in the toast. Tapping the entry afterwards changes the meal or the amount.
+   */
+  const logBatchServe = async (batch: Batch, date: string) => {
+    const left = batchServesLeft(batch, latestState.current.entries);
+    if (left <= 0) return notify(`No serves of ${batch.name} left`);
+    const meal = defaultMealForLogging();
+    const serve = batchServe(batch);
+    // The last half serve is logged as a half, so the batch ends at exactly none.
+    const portion = Math.min(1, left);
+    const now = Date.now();
+    const entry = normalizeEntry({
+      id: uid(),
+      sourceFoodId: null,
+      date,
+      name: batch.name,
+      unitMode: 'serving',
+      portion,
+      // Whole Cal and tenths of a gram, as Log food shows them.
+      baseCalories: Math.round(serve.calories),
+      baseProtein: Math.round(serve.protein * 10) / 10,
+      baseCarbs: Math.round(serve.carbs * 10) / 10,
+      baseFat: Math.round(serve.fat * 10) / 10,
+      meal,
+      part: mealDayPart(meal) ? undefined : recentLog()?.part ?? dayPartNow(),
+      estimateSource: batch.estimateSource,
+      batchId: batch.id,
+      notes: `Meal prep: a serve of a batch of ${fmt(batch.servings)}.`,
+      createdAt: now,
+      updatedAt: now
+    });
+    await updateLatest(draft => {
+      draft.entries.push(entry);
+    });
+    lastLogged = { meal, part: entryDayPart(entry), at: now };
+    const leftAfter = Math.round((left - portion) * 100) / 100;
+    const where = `${meal.toLowerCase()}${date === todayKey() ? '' : ` on ${readable(date)}`}`;
+    notify(`Logged to ${where} · ${leftAfter > 0 ? `${fmtPortion(leftAfter)} left` : 'last serve'}`, 5000, {
+      label: 'Undo',
+      run: () => updateLatest(draft => {
+        draft.entries = draft.entries.filter(item => item.id !== entry.id);
+      }).then(() => notify('Undone'))
+    });
+  };
+
+  const openBatchSheet = (mode: BatchSheetRequest['mode'], batchId: string | null = null) => {
+    setBatchSheet({ mode, batchId, opened: Date.now() });
+    setModal('batch');
+  };
+
+  const estimateBatch = async (recipe: string, servings: number, previous?: string, correction?: string) => {
+    const raw = await requestBatchEstimate({
+      apiKey: state.settings.geminiApiKey,
+      userText: buildBatchRequest({ recipe, servings, preferences: state.settings.aiPreferences, previous, correction }),
+      accept: text => !!parseBatchEstimate(text)
+    });
+    const estimate = parseBatchEstimate(raw);
+    if (!estimate) throw new Error('Gemini replied in a format Dawni couldn’t read. Try again.');
+    return { raw, estimate };
+  };
+
+  const saveBatch = async (input: BatchInput, logNow: boolean) => {
+    const now = Date.now();
+    const today = todayKey();
+    const editing = batchSheet.mode === 'edit' && batchSheet.batchId;
+    let saved = null as Batch | null;
+    await updateLatest(draft => {
+      if (editing) {
+        const target = draft.batches.find(batch => batch.id === batchSheet.batchId);
+        if (target) saved = Object.assign(target, input, { updatedAt: now });
+        return;
+      }
+      saved = { ...input, id: uid(), cookedOn: today, finishedAt: null, createdAt: now, updatedAt: now };
+      draft.batches = pruneBatches([...draft.batches, saved], draft.entries, today);
+    });
+    setModal(null);
+    if (!saved) return;
+    if (logNow) return logBatchServe(saved, today);
+    notify(editing ? 'Batch updated' : `Saved · ${fmt(input.servings)} serves`);
+  };
+
+  const finishBatch = async (batch: Batch) => {
+    await updateLatest(draft => {
+      const target = draft.batches.find(item => item.id === batch.id);
+      if (target) target.finishedAt = Date.now();
+    });
+    setModal(null);
+    notify(`${batch.name} finished`, 5000, {
+      label: 'Undo',
+      run: () => updateLatest(draft => {
+        const target = draft.batches.find(item => item.id === batch.id);
+        if (target) target.finishedAt = null;
+      }).then(() => notify('Undone'))
+    });
+  };
+
+  const removeBatch = async (batch: Batch) => {
+    await updateLatest(draft => {
+      draft.batches = draft.batches.filter(item => item.id !== batch.id);
+    });
+    notify('Removed from Cook again', 5000, {
+      label: 'Undo',
+      run: () => updateLatest(draft => {
+        if (!draft.batches.some(item => item.id === batch.id)) draft.batches.push(batch);
+      }).then(() => notify('Undone'))
+    });
+  };
+
   const toggleFavourite = (food: Food) => {
     const next = !food.favourite;
     updateState(draft => {
@@ -1515,6 +1652,8 @@ export function App() {
   };
 
   const activeFood = state.foods.find(food => food.id === activeFoodId) || null;
+  // Meal prep with serves left that was cooked by the day shown on Today.
+  const batchesForDay = activeBatches(state.batches, state.entries, todayKey()).filter(batch => batch.cookedOn <= selectedDate);
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
   const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 5);
   const incomingVersion = availableUpdate?.version || '';
@@ -1588,6 +1727,8 @@ export function App() {
           searchFieldRef={searchFieldRef}
           onOpenSearch={openFoodSearch}
           onLogUsual={logUsual}
+          batches={batchesForDay}
+          onLogBatch={batch => logBatchServe(batch, selectedDate)}
           onOpenTarget={() => setModal('dayTarget')}
           onOpenWeek={() => openWeek(selectedDate)}
           onOpenSettings={() => {
@@ -1636,6 +1777,13 @@ export function App() {
           onManage={food => {
             setActiveFoodId(food.id);
             setModal('food');
+          }}
+          mealPrep={{
+            onNew: () => openBatchSheet('new'),
+            onLog: batch => logBatchServe(batch, todayKey()),
+            onManage: batch => openBatchSheet('edit', batch.id),
+            onCookAgain: batch => openBatchSheet('again', batch.id),
+            onRemove: removeBatch
           }}
         />
       )}
@@ -1799,6 +1947,11 @@ export function App() {
         onChoose={prefillFood}
         onSaveDatabaseFood={saveDatabaseFood}
         onLogNew={name => openEntry(defaultMealForLogging(), name)}
+        batches={batchesForDay}
+        onLogBatch={batch => {
+          setModal(null);
+          logBatchServe(batch, selectedDate);
+        }}
       />
       <FoodModal
         food={activeFood}
@@ -1863,6 +2016,18 @@ export function App() {
         onClose={() => setModal(current => (current === 'geminiEstimate' ? null : current))}
         onEstimate={estimateWithGemini}
       />
+      <BatchSheet
+        open={modal === 'batch'}
+        request={batchSheet}
+        batch={batchSheet.batchId ? state.batches.find(batch => batch.id === batchSheet.batchId) || null : null}
+        state={state}
+        onEstimate={estimateBatch}
+        onSetupGemini={() => setModal('geminiSetup')}
+        onSave={saveBatch}
+        onFinish={finishBatch}
+        // Save hands over to a toast and Set up Gemini to another sheet, so only close what is still this one.
+        onClose={() => setModal(current => (current === 'batch' ? null : current))}
+      />
       <MenuPickModal
         open={modal === 'menuPick'}
         state={state}
@@ -1879,6 +2044,11 @@ export function App() {
             <button className="add-row" type="button" onClick={openGeminiEstimate}>
               <span className="add-icon"><Icon name="sparkle" /></span>
               <span className="add-text"><strong>Estimate with Gemini</strong><small>Describe it, or photograph the meal or nutrition label</small></span>
+              <Icon name="chevron" size={18} />
+            </button>
+            <button className="add-row" type="button" onClick={() => openBatchSheet('new')}>
+              <span className="add-icon"><Icon name="prep" /></span>
+              <span className="add-text"><strong>Meal prep a batch</strong><small>List what you cooked and split it into serves to log through the week</small></span>
               <Icon name="chevron" size={18} />
             </button>
             <button className="add-row" type="button" onClick={openMenuPick}>
@@ -1918,7 +2088,7 @@ export function App() {
         />
       </Modal>
       <Modal open={modal === 'geminiSetup'} title="Set up Gemini" onClose={() => setModal(null)}>
-        <p className="hint">Estimate with Gemini and Help me pick from a menu use your own Google Gemini API key. It takes a couple of minutes to set up, and the key stays on this device.</p>
+        <p className="hint">Estimate with Gemini, Meal prep a batch and Help me pick from a menu use your own Google Gemini API key. It takes a couple of minutes to set up, and the key stays on this device.</p>
         <ol className="update-list ai-help-list">
           <li>
             Create a key in Google AI Studio at{' '}
@@ -2013,7 +2183,14 @@ export function App() {
           <button className="secondary" type="button" onClick={() => setModal(null)}>Later today</button>
         </div>
       </Modal>
-      {toast && <div key={toast.id} className="toast">{toast.text}</div>}
+      {toast && (
+        <div key={toast.id} className={`toast ${toast.action ? 'has-action' : ''}`} role="status">
+          <span>{toast.text}</span>
+          {toast.action && (
+            <button type="button" className="toast-action" onClick={() => { const action = toast.action; setToast(null); action?.run(); }}>{toast.action.label}</button>
+          )}
+        </div>
+      )}
     </AppShell>
   );
 }
@@ -2247,6 +2424,10 @@ function TrackingView(props: {
   /** Opens search over Today: favourites, recent foods and the food database. */
   onOpenSearch: () => void;
   onLogUsual: (entry: Entry, meal: Meal) => void;
+  /** Meal prep with serves left, cooked by the day shown. */
+  batches: Batch[];
+  /** Logs one serve straight away, with Undo. */
+  onLogBatch: (batch: Batch) => void;
   onOpenTarget: () => void;
   onOpenWeek: () => void;
   onOpenSettings: () => void;
@@ -2438,6 +2619,32 @@ function TrackingView(props: {
         </span>
         <Icon name="chevron" size={16} />
       </button>
+
+      {/* Meal prep on the go: one tap logs a serve, with Undo in the toast. */}
+      {props.selectedDate <= today && props.batches.length > 0 && (
+        <div className="tl-prep" role="group" aria-label="Meal prep">
+          {props.batches.map(batch => {
+            const left = batchServesLeft(batch, state.entries);
+            const each = batchServe(batch);
+            return (
+              <button
+                key={batch.id}
+                type="button"
+                className="tl-prep-row"
+                onClick={() => props.onLogBatch(batch)}
+                aria-label={`Log a serve of ${batch.name}, ${energyText(state, each.calories)}. ${fmtPortion(left)} of ${fmt(batch.servings)} serves left.`}
+              >
+                <span className="tl-manual-icon" aria-hidden="true"><Icon name="prep" size={20} /></span>
+                <span className="tl-manual-text" aria-hidden="true">
+                  <strong>{batch.name}</strong>
+                  <span><ServePips left={left} servings={batch.servings} />{fmtPortion(left)} left · {fmt(energyValue(state, each.calories))} {unit} each</span>
+                </span>
+                <span className="tl-prep-add" aria-hidden="true"><Icon name="plus" size={18} /></span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <button type="button" className="tl-week-row" onClick={props.onOpenWeek} aria-label={`${weekTitle}: ${headline.value} ${headline.label}. ${weekNote}. ${weekPace}. Opens Week.`}>
         <span className="tl-week-left">
@@ -3253,7 +3460,7 @@ function FoodSearchRow({ state, kind, food, meta, onChoose }: { state: AppState;
  * back into it on Cancel. A saved food opens Log food filled in; a database food shows its
  * estimate first, as in Log food's own search.
  */
-function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseFood, onLogNew }: {
+function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseFood, onLogNew, batches, onLogBatch }: {
   open: boolean;
   state: AppState;
   /** Today's search field: where the bar rises from and sinks back to. */
@@ -3263,6 +3470,9 @@ function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseF
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   /** Log food to type in, named after the search. */
   onLogNew: (name: string) => void;
+  /** Meal prep with serves left: listed first, and one tap logs a serve. */
+  batches: Batch[];
+  onLogBatch: (batch: Batch) => void;
 }) {
   const [rendered, setRendered] = useState(open);
   const [query, setQuery] = useState('');
@@ -3421,6 +3631,7 @@ function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseF
   if (!rendered) return null;
 
   const browsing = !trimmedQuery;
+  const prepRows = browsing ? batches : batches.filter(batch => normaliseSearchText(batch.name).includes(normaliseSearchText(trimmedQuery)));
   const pool = browsing ? recentFoods : userResults;
   const favouriteRows = pool.filter(food => food.favourite).slice(0, browsing ? 12 : 8);
   const recentRows = pool.filter(food => !food.favourite).slice(0, browsing ? 12 : 8);
@@ -3428,8 +3639,9 @@ function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseF
   const moreCount = Math.min(databaseMatches.length, 20) - databaseRows.length;
   // Database matches land a moment after the typing, so "no matches" waits for them.
   const waiting = !browsing && databaseQuery !== trimmedQuery;
-  const nothing = !browsing && !waiting && !favouriteRows.length && !recentRows.length && !databaseRows.length;
+  const nothing = !browsing && !waiting && !prepRows.length && !favouriteRows.length && !recentRows.length && !databaseRows.length;
   const summary = browsing || waiting ? '' : nothing ? `No matches for ${trimmedQuery}` : [
+    prepRows.length ? `${prepRows.length} meal prep` : '',
     favouriteRows.length ? `${favouriteRows.length} favourite${favouriteRows.length === 1 ? '' : 's'}` : '',
     recentRows.length ? `${recentRows.length} recent` : '',
     databaseMatches.length ? `${Math.min(databaseMatches.length, 20)} from the food database` : ''
@@ -3500,6 +3712,28 @@ function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseF
             </div>
           </div>
           <div ref={resultsRef} className="food-search-results" onTouchMove={dismissKeyboard}>
+            {prepRows.length > 0 && (
+              <section className="food-search-group">
+                <h2 className="food-search-label">Meal prep · tap to log a serve</h2>
+                <div className="food-search-list">
+                  {prepRows.map(batch => {
+                    const left = batchServesLeft(batch, state.entries);
+                    const each = batchServe(batch);
+                    return (
+                      <button key={batch.id} type="button" className="food-search-row" onClick={() => onLogBatch(batch)}>
+                        <span className="food-search-glyph prep" aria-hidden="true"><Icon name="prep" size={18} /></span>
+                        <span className="food-search-main">
+                          <span className="sr-only">Meal prep, logs a serve: </span>
+                          <span className="food-search-name">{batch.name}</span>
+                          <span className="food-search-sub">{fmtPortion(left)} of {fmt(batch.servings)} left · <b>{fmt(each.protein)}g</b> protein</span>
+                        </span>
+                        <span className="food-search-cal"><span>{fmt(energyValue(state, each.calories))}</span><small>{energyLabel(state)}</small></span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
             {savedSection('Favourites', 'favourite', favouriteRows)}
             {savedSection('Recent', 'recent', recentRows)}
             {databaseRows.length > 0 && (
@@ -3511,7 +3745,7 @@ function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseF
                 </div>
               </section>
             )}
-            {browsing && !recentFoods.length && (
+            {browsing && !recentFoods.length && !prepRows.length && (
               <div className="food-search-empty">
                 <strong>Nothing saved yet</strong>
                 <span>Foods you log are kept here, favourites first. Type a food to search the food database too.</span>
@@ -3644,6 +3878,337 @@ function GeminiEstimateModal({ open, onClose, onEstimate }: { open: boolean; onC
           <button className="secondary" type="button" disabled={loading} onClick={onClose}>Cancel</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** "cooked today", "cooked yesterday", "cooked Mon", or the date once it's a week back. */
+function cookedText(cookedOn: string) {
+  const today = todayKey();
+  if (cookedOn === today) return 'cooked today';
+  if (cookedOn === addDays(today, -1)) return 'cooked yesterday';
+  if (cookedOn > addDays(today, -7)) return `cooked ${new Date(`${cookedOn}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'short' })}`;
+  return `cooked ${shortDate(cookedOn)}`;
+}
+
+/** One pip per serve, filled while it's left, so a batch reads as portions going down. Long batches skip them. */
+function ServePips({ left, servings }: { left: number; servings: number }) {
+  if (servings > 12) return null;
+  const whole = Math.floor(left);
+  return (
+    <span className="prep-pips" aria-hidden="true">
+      {Array.from({ length: servings }, (_, index) => <i key={index} className={index < whole ? 'left' : index === whole && left > whole ? 'half' : ''} />)}
+    </span>
+  );
+}
+
+function ServesStepper({ value, min = 1, onChange, disabled = false }: { value: number; min?: number; onChange: (next: number) => void; disabled?: boolean }) {
+  return (
+    <div className="serves-stepper" role="group" aria-label="Serves">
+      <button type="button" aria-label="One serve fewer" disabled={disabled || value <= min} onClick={() => onChange(value - 1)}>
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+      </button>
+      <output aria-live="polite">{value}</output>
+      <button type="button" aria-label="One serve more" disabled={disabled || value >= MAX_BATCH_SERVINGS} onClick={() => onChange(value + 1)}>
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    </div>
+  );
+}
+
+const ZERO_TOTALS: Totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+type ServeInputs = Record<keyof Totals, string>;
+
+/** One serve's numbers as typed text; blank while the batch has none yet. */
+function serveInputs(total: Totals, servings: number, unit: EnergyUnit): ServeInputs {
+  if (!(total.calories > 0)) return { calories: '', protein: '', carbs: '', fat: '' };
+  const each = (value: number) => roundedText(value / servings, 1);
+  return { calories: energyInputFromKcal(total.calories / servings, unit), protein: each(total.protein), carbs: each(total.carbs), fat: each(total.fat) };
+}
+
+/**
+ * Meal prep: list what went into a batch and how many serves, Gemini estimates the whole batch
+ * ingredient by ingredient, and the review shows one serve. The batch is the fixed thing: changing
+ * the serves re-splits it, and editing one serve's numbers changes the batch to match.
+ */
+function BatchSheet({ open, request, batch, state, onEstimate, onSetupGemini, onSave, onFinish, onClose }: {
+  open: boolean;
+  request: BatchSheetRequest;
+  /** The batch being edited, or the finished one being cooked again. */
+  batch: Batch | null;
+  state: AppState;
+  onEstimate: (recipe: string, servings: number, previous?: string, correction?: string) => Promise<{ raw: string; estimate: BatchEstimate }>;
+  onSetupGemini: () => void;
+  onSave: (input: BatchInput, logNow: boolean) => void;
+  onFinish: (batch: Batch) => void;
+  onClose: () => void;
+}) {
+  const unit = energyUnitValue(state.settings.energyUnit);
+  const hasKey = !!state.settings.geminiApiKey.trim();
+  const editing = request.mode === 'edit';
+  const [step, setStep] = useState<'describe' | 'review'>('describe');
+  const [recipe, setRecipe] = useState('');
+  const [servings, setServings] = useState(DEFAULT_BATCH_SERVINGS);
+  const [name, setName] = useState('');
+  const [total, setTotal] = useState<Totals>(ZERO_TOTALS);
+  const [inputs, setInputs] = useState<ServeInputs>(() => serveInputs(ZERO_TOTALS, 1, unit));
+  const [ingredients, setIngredients] = useState<BatchIngredient[]>([]);
+  const [assumptions, setAssumptions] = useState<string[]>([]);
+  const [confidence, setConfidence] = useState<Batch['confidence']>(null);
+  const [estimateSource, setEstimateSource] = useState<EntryEstimateSource | null>(null);
+  /** Gemini's last reply, so Refine can send a correction against it. */
+  const [reply, setReply] = useState('');
+  const [refineText, setRefineText] = useState('');
+  const [busy, setBusy] = useState<'estimate' | 'refine' | null>(null);
+  const [error, setError] = useState('');
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  // Each opening starts afresh: empty for a new batch, or from the batch being edited or cooked again.
+  useEffect(() => {
+    if (!open) return;
+    const source = request.mode === 'new' ? null : batch;
+    const count = source?.servings || DEFAULT_BATCH_SERVINGS;
+    const nextTotal = source?.total || ZERO_TOTALS;
+    setStep(source ? 'review' : 'describe');
+    setRecipe(source?.recipe || '');
+    setServings(count);
+    setName(source?.name || '');
+    setTotal(nextTotal);
+    setInputs(serveInputs(nextTotal, count, unit));
+    setIngredients(source?.ingredients || []);
+    setAssumptions(source?.assumptions || []);
+    setConfidence(source?.confidence || null);
+    setEstimateSource(source?.estimateSource || null);
+    setReply('');
+    setRefineText('');
+    setBusy(null);
+    setError('');
+  }, [open, request.opened]);
+
+  const used = editing && batch ? batch.servings - batchServesLeft(batch, state.entries) : 0;
+  const left = Math.max(0, Math.round((servings - used) * 100) / 100);
+  // Editing can't split it into fewer serves than are already logged; Finish batch is for that.
+  const minServings = Math.max(1, Math.ceil(used));
+
+  const changeServings = (next: number) => {
+    const count = Math.max(minServings, servingsValue(next));
+    setServings(count);
+    setInputs(serveInputs(total, count, unit));
+  };
+
+  const setServeInput = (key: keyof Totals, value: string) => {
+    setInputs(current => ({ ...current, [key]: value }));
+    const each = key === 'calories' ? energyInputToKcal(value, unit) : n(value);
+    setTotal(current => ({ ...current, [key]: key === 'calories' ? Math.round(each * servings) : Math.round(each * servings * 10) / 10 }));
+    setError('');
+  };
+
+  const applyEstimate = (raw: string, estimate: BatchEstimate) => {
+    setReply(raw);
+    setName(estimate.name);
+    setTotal(estimate.total);
+    setInputs(serveInputs(estimate.total, servings, unit));
+    setIngredients(estimate.ingredients);
+    setAssumptions(estimate.assumptions);
+    setConfidence(estimate.confidence);
+    setEstimateSource('ai');
+    setStep('review');
+  };
+
+  const estimate = async () => {
+    if (!hasKey) return onSetupGemini();
+    if (!recipe.trim()) return setError('List what went in, with amounts.');
+    setBusy('estimate');
+    setError('');
+    try {
+      const result = await onEstimate(recipe, servings);
+      applyEstimate(result.raw, result.estimate);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gemini could not estimate this batch.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const refine = async () => {
+    const correction = refineText.trim();
+    if (!correction || busy) return;
+    setBusy('refine');
+    setError('');
+    try {
+      const result = await onEstimate(recipe, servings, reply, correction);
+      applyEstimate(result.raw, result.estimate);
+      // Kept with the recipe, so cooking it again starts from the corrected version.
+      setRecipe(current => `${current.trim()}\n(Correction: ${correction})`);
+      setRefineText('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gemini could not refine this estimate.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const typeIn = () => {
+    setReply('');
+    setIngredients([]);
+    setAssumptions([]);
+    setConfidence(null);
+    setEstimateSource(null);
+    setTotal(ZERO_TOTALS);
+    setInputs(serveInputs(ZERO_TOTALS, servings, unit));
+    setError('');
+    setStep('review');
+  };
+
+  const save = (logNow: boolean) => {
+    if (!name.trim()) {
+      setError('Name this batch so you can find it again.');
+      nameRef.current?.focus();
+      return;
+    }
+    if (!(total.calories > 0)) return setError(`Add the ${energyUnitLabel(unit)} in one serve.`);
+    onSave({ name: name.trim(), recipe: recipe.trim(), servings, total, ingredients, estimateSource, assumptions, confidence }, logNow);
+  };
+
+  const serve = batchServe({ total, servings });
+  const macroCheckFails = !!estimateSource && macrosDisagree(serve);
+  const counted = sumTotals(ingredients);
+  // Typed-over numbers no longer match Gemini's breakdown, so it says so rather than look wrong.
+  const breakdownEdited = ingredients.length > 0 && Math.abs(counted.calories - total.calories) > Math.max(2, servings);
+  const unitLabel = energyUnitLabel(unit);
+  const title = editing ? 'Edit batch' : request.mode === 'again' ? 'Cook again' : step === 'describe' ? 'Meal prep a batch' : 'Review batch';
+
+  return (
+    <Modal open={open} title={title} onClose={onClose} wide bottomSheet closeDisabled={!!busy}>
+      {step === 'describe' ? (
+        <form className="form batch-sheet" onSubmit={(event: FormEvent) => { event.preventDefault(); estimate(); }}>
+          <p className="hint full">List everything that went in, with amounts. Gemini estimates the whole batch, then Dawni splits it into serves you log one at a time.</p>
+          <Field label="What went in?" full>
+            <textarea
+              className="batch-recipe"
+              disabled={!!busy}
+              value={recipe}
+              rows={6}
+              onChange={event => { setRecipe(event.target.value); setError(''); }}
+              placeholder={'500 g rice (uncooked)\n1 kg beef mince, 4 star\n1 tbsp olive oil\n1 iceberg lettuce\n1/2 cup teriyaki sauce'}
+            />
+          </Field>
+          <div className="batch-serves-row full">
+            <span className="batch-serves-label"><strong>Serves</strong><small>How many portions you split it into</small></span>
+            <ServesStepper value={servings} onChange={changeServings} disabled={!!busy} />
+          </div>
+          {error && <p className="ai-quick-log-error full">{error}</p>}
+          <div className="actions vertical full">
+            <button className="primary" type="submit" disabled={!!busy || (hasKey && !recipe.trim())}>{busy ? 'Estimating…' : hasKey ? 'Estimate batch' : 'Set up Gemini to estimate'}</button>
+            <button className="text-btn" type="button" disabled={!!busy} onClick={typeIn}>Enter the numbers yourself</button>
+          </div>
+        </form>
+      ) : (
+        <form className="form batch-sheet" onSubmit={(event: FormEvent) => { event.preventDefault(); save(false); }}>
+          <div className="field full">
+            <label className="field-caption" htmlFor="batchName">Name</label>
+            <input ref={nameRef} id="batchName" value={name} placeholder="e.g. Beef mince rice bowl" onChange={event => { setName(event.target.value); setError(''); }} />
+          </div>
+          {editing && batch && (
+            <p className="batch-status full"><ServePips left={left} servings={servings} />{fmtPortion(left)} of {fmt(servings)} serves left · {cookedText(batch.cookedOn)}</p>
+          )}
+          <div className="calories-priority full" role="group" aria-label="One serve">
+            <div className="calorie-input-row entry-energy-row">
+              <input id="batchCalories" aria-label={`${unitLabel} in one serve`} inputMode="decimal" value={inputs.calories} placeholder="0" onChange={event => setServeInput('calories', event.target.value)} />
+              <span className="energy-suffix" aria-hidden="true"><strong>{unitLabel}</strong><small>per serve</small></span>
+            </div>
+            <div className="nutrition-grid">
+              <Field label="Fat (g)"><input inputMode="decimal" value={inputs.fat} onChange={event => setServeInput('fat', event.target.value)} /></Field>
+              <Field label="Carbs (g)"><input inputMode="decimal" value={inputs.carbs} onChange={event => setServeInput('carbs', event.target.value)} /></Field>
+              <Field label="Protein (g)"><input inputMode="decimal" value={inputs.protein} onChange={event => setServeInput('protein', event.target.value)} /></Field>
+            </div>
+            <div className="batch-serves-row">
+              <span className="batch-serves-label">
+                <strong>Serves</strong>
+                <small>{total.calories > 0 ? `Whole batch ${energyTextForUnit(total.calories, unit)}` : 'The batch is split evenly'}</small>
+              </span>
+              <ServesStepper value={servings} min={minServings} onChange={changeServings} disabled={!!busy} />
+            </div>
+            {estimateSource && (
+              <div className="estimate-review">
+                <div className="meta-chips estimate-source-row">
+                  <span className="meta-chip source-chip">{estimateSourceLabel(estimateSource)}</span>
+                  {confidence && <span className={`meta-chip confidence-chip confidence-${confidence}`}>{confidence[0].toUpperCase() + confidence.slice(1)} confidence</span>}
+                </div>
+                {assumptions.length > 0 && (
+                  <ul className="estimate-assumptions" aria-label="What Gemini assumed">
+                    {assumptions.map(item => <li key={item}>{item}</li>)}
+                  </ul>
+                )}
+                {macroCheckFails && (
+                  <p className="estimate-warning">Calories and macros don’t quite add up: the macros come to about {energyTextForUnit(energyFromMacros(serve), unit)} a serve. Worth a check.</p>
+                )}
+                {reply && (
+                  <div className="estimate-refine">
+                    <input
+                      aria-label="Correction for Gemini"
+                      value={refineText}
+                      disabled={!!busy}
+                      placeholder="e.g. mince was 5 star"
+                      onChange={event => { setRefineText(event.target.value); setError(''); }}
+                      onKeyDown={event => {
+                        if (event.key !== 'Enter') return;
+                        // Enter would otherwise save the batch.
+                        event.preventDefault();
+                        refine();
+                      }}
+                    />
+                    <button type="button" className="secondary" disabled={!refineText.trim() || !!busy} onClick={refine}>{busy === 'refine' ? 'Refining…' : 'Refine'}</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {ingredients.length > 0 && (
+            <details className="extra-info batch-ingredients full" open={request.mode === 'new'}>
+              <summary>What went in ({ingredients.length})</summary>
+              <div className="extra-info-body">
+                <ul className="batch-ingredient-list">
+                  {ingredients.map((item, index) => (
+                    <li key={`${index}-${item.name}`}>
+                      <span className="batch-ingredient-name">
+                        <b>{item.name}</b>
+                        <small>{[item.amount, `P ${fmt(item.protein)} · C ${fmt(item.carbs)} · F ${fmt(item.fat)}g`].filter(Boolean).join(' · ')}</small>
+                      </span>
+                      <span className="batch-ingredient-cal">{fmt(energyValueForUnit(item.calories, unit))}<small>{unitLabel}</small></span>
+                    </li>
+                  ))}
+                  <li className="batch-ingredient-total">
+                    <span className="batch-ingredient-name"><b>Whole batch</b><small>{`P ${fmt(counted.protein)} · C ${fmt(counted.carbs)} · F ${fmt(counted.fat)}g`}</small></span>
+                    <span className="batch-ingredient-cal">{fmt(energyValueForUnit(counted.calories, unit))}<small>{unitLabel}</small></span>
+                  </li>
+                </ul>
+                {breakdownEdited && <p className="hint">You changed the numbers, so this breakdown no longer adds up to the batch.</p>}
+              </div>
+            </details>
+          )}
+          {!editing && (
+            <div className="entry-alt-links full">
+              <button type="button" className="text-btn" disabled={!!busy} onClick={() => { setError(''); setStep('describe'); }}>{recipe.trim() ? 'Change what went in' : 'Estimate with Gemini instead'}</button>
+            </div>
+          )}
+          {error && <p className="ai-quick-log-error full">{error}</p>}
+          <div className="actions vertical full">
+            {editing ? (
+              <>
+                <button className="primary" type="submit" disabled={!!busy}>Save changes</button>
+                {batch && <button className="text-btn" type="button" disabled={!!busy} onClick={() => onFinish(batch)}>Finish batch</button>}
+                <p className="hint batch-actions-note">Serves you’ve logged keep their numbers. Finish it when the rest is eaten or thrown out.</p>
+              </>
+            ) : (
+              <>
+                <button className="primary" type="submit" disabled={!!busy}>Save {fmt(servings)} serve{servings === 1 ? '' : 's'}</button>
+                <button className="secondary" type="button" disabled={!!busy} onClick={() => save(true)}>Save and log one now</button>
+              </>
+            )}
+          </div>
+        </form>
+      )}
     </Modal>
   );
 }
@@ -4246,7 +4811,8 @@ function EntryModal({
       <label className="field-caption" htmlFor="entryName">Food name</label>
       <div className="name-row">
         <input ref={nameInputRef} id="entryName" value={draft.name} placeholder={isFavourite && !draft.name.trim() ? 'Name your favourite' : `${draft.meal} entry`} onChange={event => update({ name: event.target.value })} />
-        <FavouriteToggle on={isFavourite} onToggle={toggleFavourite} />
+        {/* Meal prep runs out, so a serve of it isn't something to favourite. */}
+        {!draft.batchId && <FavouriteToggle on={isFavourite} onToggle={toggleFavourite} />}
       </div>
     </div>
   );
@@ -4295,6 +4861,7 @@ function EntryModal({
               <span aria-hidden="true">{per100g ? 'g' : draftPortion(draft) === 1 ? 'serving' : 'servings'}</span>
             </div>
           </div>
+          {draft.batchId && <p className="hint batch-entry-hint"><Icon name="prep" size={15} />A serve of meal prep. Servings eaten here count toward what’s left of the batch.</p>}
           {multiplier !== 1 && (
             <div className="meta-chips portion-preview" aria-live="polite">
               <span className="portion-preview-label">Logged total</span>
@@ -4464,7 +5031,16 @@ function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }: { food
   );
 }
 
-function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onToggleFavourite, onManage }: { state: AppState; sub: string; setSub: (sub: string) => void; query: string; setQuery: (q: string) => void; onPrefill: (food: Food) => void; onToggleFavourite: (food: Food) => void; onManage: (food: Food) => void }) {
+/** What Foods' Meal prep list can do with a batch. */
+type MealPrepActions = {
+  onNew: () => void;
+  onLog: (batch: Batch) => void;
+  onManage: (batch: Batch) => void;
+  onCookAgain: (batch: Batch) => void;
+  onRemove: (batch: Batch) => void;
+};
+
+function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onToggleFavourite, onManage, mealPrep }: { state: AppState; sub: string; setSub: (sub: string) => void; query: string; setQuery: (q: string) => void; onPrefill: (food: Food) => void; onToggleFavourite: (food: Food) => void; onManage: (food: Food) => void; mealPrep: MealPrepActions }) {
   // Un-hearting on Favourites leaves the row in place until you switch lists, so a slip is one tap to undo.
   const [unhearted, setUnhearted] = useState<string[]>([]);
   useEffect(() => setUnhearted([]), [sub]);
@@ -4480,11 +5056,12 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onToggleF
       : query.trim()
         ? { title: 'No matches yet.', body: 'Try a different food name.' }
         : { title: 'Nothing here yet.', body: 'Your usual foods will appear here as you reuse them.' };
+  const prep = sub === 'prep';
   return (
     <>
       <header className="page-header has-helper">
         <h1 className="page-title">Foods</h1>
-        <p className="hint page-subtitle library-hint">Tap + to log a food again. Heart the ones you eat often.</p>
+        <p className="hint page-subtitle library-hint">{prep ? 'Cook once, log a serve at a time. A batch clears once it’s eaten, or a week after you cook it.' : 'Tap + to log a food again. Heart the ones you eat often.'}</p>
       </header>
       <div className="page-controls">
         <div className="seg" role="tablist" aria-label="Saved foods">
@@ -4494,9 +5071,13 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onToggleF
           <button className={sub === 'favourites' ? 'active' : ''} onClick={() => setSub('favourites')} type="button" role="tab" aria-selected={sub === 'favourites'}>
             Favourites
           </button>
+          <button className={prep ? 'active' : ''} onClick={() => setSub('prep')} type="button" role="tab" aria-selected={prep}>
+            Meal prep
+          </button>
         </div>
-        <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your usual foods" />
+        {!prep && <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your usual foods" />}
       </div>
+      {prep ? <MealPrepList state={state} actions={mealPrep} /> : (
       <section className={shown.length ? 'list-card' : 'card'}>
         {shown.length ? (
           shown.map(food => <FoodRow key={food.id} state={state} food={food} showUsage={sub !== 'favourites'} onPrefill={onPrefill} onToggleFavourite={toggleFavourite} onManage={onManage} />)
@@ -4507,7 +5088,71 @@ function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, onToggleF
           </div>
         )}
       </section>
+      )}
     </>
+  );
+}
+
+/** Foods → Meal prep: batches on the go, then the last few finished ones to cook again. */
+function MealPrepList({ state, actions }: { state: AppState; actions: MealPrepActions }) {
+  const today = todayKey();
+  const active = activeBatches(state.batches, state.entries, today);
+  const finished = finishedBatches(state.batches, state.entries, today);
+  return (
+    <>
+      <button type="button" className="prep-new" onClick={actions.onNew}>
+        <span className="add-icon" aria-hidden="true"><Icon name="plus" /></span>
+        <span className="add-text"><strong>New batch</strong><small>Split a cook-up into serves</small></span>
+        <Icon name="chevron" size={18} />
+      </button>
+      {active.length ? (
+        <section className="list-card">
+          {active.map(batch => <BatchRow key={batch.id} state={state} batch={batch} onLog={actions.onLog} onManage={actions.onManage} />)}
+        </section>
+      ) : (
+        <div className="empty prep-empty">
+          <strong>No meal prep on the go.</strong>
+          <div>Cooked a batch? List what went in and how many serves. Each serve is then one tap from Today, and the batch clears once it’s eaten.</div>
+        </div>
+      )}
+      {finished.length > 0 && (
+        <details className="extra-info prep-again">
+          <summary>Cook again ({finished.length})</summary>
+          <div className="extra-info-body">
+            {finished.map(batch => (
+              <div key={batch.id} className="prep-again-row">
+                <span className="prep-again-text">
+                  <strong>{batch.name}</strong>
+                  <small>{fmt(batch.servings)} serves · {fmt(energyValue(state, batchServe(batch).calories))} {energyLabel(state)} each · {cookedText(batch.cookedOn)}</small>
+                </span>
+                <button type="button" className="secondary prep-again-btn" onClick={() => actions.onCookAgain(batch)}>Cook again</button>
+                <button type="button" className="prep-again-remove" aria-label={`Remove ${batch.name}`} onClick={() => actions.onRemove(batch)}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </>
+  );
+}
+
+function BatchRow({ state, batch, onLog, onManage }: { state: AppState; batch: Batch; onLog: (batch: Batch) => void; onManage: (batch: Batch) => void }) {
+  const left = batchServesLeft(batch, state.entries);
+  const each = batchServe(batch);
+  return (
+    <div className="food-row prep-row" data-swipe-lock>
+      <span className="prep-row-icon" aria-hidden="true"><Icon name="prep" size={20} /></span>
+      <strong className="prep-row-name">{batch.name}</strong>
+      <button className="food-log-btn" type="button" onClick={() => onLog(batch)} aria-label={`Log a serve of ${batch.name}`}><Icon name="plus" size={20} /></button>
+      <button className="food-manage-btn" type="button" onClick={() => onManage(batch)} aria-label={`Edit ${batch.name}`}><span aria-hidden="true" /></button>
+      {/* The detail lines run under the buttons, so they have the row's full width. */}
+      <div className="food-sub prep-row-left"><ServePips left={left} servings={batch.servings} />{fmtPortion(left)} of {fmt(batch.servings)} left · {cookedText(batch.cookedOn)}</div>
+      <div className="food-sub prep-row-macros">
+        <b>{batch.estimateSource && <><span aria-hidden="true">≈</span><span className="sr-only">About </span></>}{fmt(energyValue(state, each.calories))} {energyLabel(state)}</b> a serve · P {fmt(each.protein)} · C {fmt(each.carbs)} · F {fmt(each.fat)}g
+      </div>
+    </div>
   );
 }
 

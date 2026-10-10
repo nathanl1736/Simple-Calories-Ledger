@@ -149,14 +149,14 @@ export type Usual = { key: string; name: string; count: number; latest: Entry };
 
 /**
  * What you usually have for a meal: the entries logged most often for it over the past few weeks, most recent
- * breaking ties. Rough guesses and unnamed entries don't count. Entries group by saved food when that food still
+ * breaking ties. Rough guesses, unnamed entries and meal prep serves don't count (a batch runs out). Entries group by saved food when that food still
  * exists, otherwise by name, so the same meal logged both ways is one usual.
  */
 export function usualsForMeal(entries: Entry[], meal: Meal, today: string, savedFoodIds: Set<string> = new Set(), days = 28, limit = 3): Usual[] {
   const since = shiftKey(today, -days);
   const groups = new Map<string, Usual>();
   entries.forEach(entry => {
-    if ((entry.meal || 'Snack') !== meal || entry.estimateSource === 'rough' || entry.autoNamed) return;
+    if ((entry.meal || 'Snack') !== meal || entry.estimateSource === 'rough' || entry.autoNamed || entry.batchId) return;
     if (!(entry.date >= since && entry.date < today)) return;
     const name = entry.name.trim();
     if (!name) return;
