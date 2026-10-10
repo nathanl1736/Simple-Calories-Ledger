@@ -70,7 +70,7 @@ export async function fresh(s, cfg) {
 
   await step(s, 'gemini key help', async () => {
     await page.locator('.gemini-settings-card .help-btn').click();
-    await s.sheet('gemini-api-key-help', 'help', 'The ? on the Gemini card: how to get a key, free tier versus paid, privacy.');
+    await s.sheet('gemini-api-key-help', 'sheet', 'The ? on the Gemini card: how to get a key, free tier versus paid, privacy.');
     await s.closeTop();
   });
 
@@ -79,10 +79,10 @@ export async function fresh(s, cfg) {
     await s.page2('settings', 'no-key', 'Settings with no key (the Gemini field is still open for pasting after Open Gemini settings): Goals, Weekly banking, Display, Backup, Gemini, About you for AI, AI estimate helper, Food estimates, Custom food databases, App.');
     await s.audit('settings no key');
     await page.locator('.ai-prompt-card .help-btn').click();
-    await s.sheet('ai-estimate-helper-help', 'help', 'The ? on AI estimate helper: six steps for using any chatbot.');
+    await s.sheet('ai-estimate-helper-how-to', 'sheet', 'The ? on AI estimate helper: six steps for using any chatbot.');
     await s.closeTop();
     await page.locator('.custom-db-card .help-btn').click();
-    await s.sheet('custom-food-database-help', 'help', 'The ? on Custom food databases: JSON format example.');
+    await s.sheet('custom-food-database-help', 'sheet', 'The ? on Custom food databases: JSON format example.');
     await s.closeTop();
     await page.locator('.settings-head .tl-pill').click();
     await s.settle(600);
@@ -561,8 +561,9 @@ export async function interact(s, cfg) {
     await s.settle(300);
     const after = await panelScroll();
     s.registry.problems.notes.push(`Log sheet, heart tapped after scrolling: panel scrollTop ${before.panel} -> ${after.panel}, header top ${before.headTop} -> ${after.headTop} (panel top ${after.panelTop}).`);
+    await s.shot('log-manually', 'heart-tapped-header-nudged', 'Heart tapped after scrolling the sheet: focus scrolled the sheet panel itself by about 34 px, so the title row is pushed up under the sheet edge and the close button is clipped.');
     await s.swipe(0.95);
-    await s.shot('log-manually', 'favourite-and-swipe', 'Heart tapped ("Also saves it to favourites") and the swipe held past the threshold ("Release to log").');
+    await s.shot('log-manually', 'favourite-and-swipe', 'Heart tapped ("Also saves it to favourites") and the swipe held past the threshold ("Release to log"). The sheet header is still nudged up (see the previous shot).');
     await s.releaseSwipe();
     await s.settle(350);
     await s.shot('toast', 'entry-saved', 'Toast "Entry saved" with the favourites note after logging.');
