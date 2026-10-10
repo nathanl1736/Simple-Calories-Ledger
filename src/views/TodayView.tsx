@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { AppState, Batch, DayPart, Entry, Meal } from '../types';
-import { arcSlice, DAY_PART_BAND, DAY_PART_LABEL, dayPartGroups, miniArc, nextMealSlot, restOfWeekPlan, skyFor, sunArc, usualsForMeal } from '../tidelight';
+import { arcSlice, DAY_PART_BAND, DAY_PART_LABEL, dayPartGroups, miniArc, nextMealSlot, skyFor, sunArc, usualsForMeal } from '../tidelight';
 import { estimateSourceLabel } from '../aiEstimate';
 import { batchServe, batchServesLeft } from '../mealPrep';
 import {
@@ -26,14 +26,14 @@ import {
   weekBank,
   weekStartMonday,
   weeklyBankAdjustmentForDate,
-  type BankDay,
-  type WeekBank
+  type BankDay
 } from '../utils';
 import { Icon } from '../ui/icons';
 import { ServePips } from '../ui/controls';
 import { useSettleAnimation } from '../ui/AppShell';
 import { useSky, skyStyle } from '../ui/sky';
-import { bankHeadline, signedEnergyText, aboutEnergyText, BANK_STATUS_TEXT } from './WeekView';
+import { signedEnergyText, BANK_STATUS_TEXT } from './WeekView';
+import { weekViewFor } from '../weekView';
 
 type MacroView = 'left' | 'eaten';
 const MACRO_VIEW_KEY = 'dawni-macro-view';
@@ -46,24 +46,6 @@ const storedMacroView = (): MacroView => {
 };
 
 const WEEKDAY_SHORT = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'short' });
-
-/** "Sat & Sun", "Sun", or "Fri–Sun": who the plan is for. */
-function planDaysLabel(days: { date: string }[]) {
-  if (days.length === 1) return WEEKDAY_SHORT(days[0].date);
-  if (days.length === 2) return `${WEEKDAY_SHORT(days[0].date)} & ${WEEKDAY_SHORT(days[1].date)}`;
-  return `${WEEKDAY_SHORT(days[0].date)}–${WEEKDAY_SHORT(days[days.length - 1].date)}`;
-}
-
-/** One line on what the rest of the week can have, the same plan Week puts into a sentence. */
-function weekPaceLine(state: AppState, week: WeekBank, today: string) {
-  const unit = energyLabel(state);
-  const about = (kcal: number) => aboutEnergyText(state, kcal).replace(` ${unit}`, '');
-  const plan = restOfWeekPlan(week.days, week.banked, today, resolveDayCalorieTarget(state, today).effective);
-  if (plan) return `${planDaysLabel(plan.days)} about ${about(plan.perDay)}${plan.days.length > 1 ? ' each' : ''}`;
-  if (!week.remaining.length) return 'Week finished';
-  if (week.remaining.length === 1 && week.remaining[0].date === today) return week.left >= 0 ? `About ${about(week.left)} left this week` : `About ${about(-week.left)} over this week`;
-  return `${planDaysLabel(week.remaining)} about ${about(week.perDay)}${week.remaining.length > 1 ? ' each' : ''}`;
-}
 
 /** Re-renders each minute and on return to the app, so time-of-day pieces (the Now line, the sky, "Today") keep up. */
 function useMinuteClock() {
@@ -238,6 +220,8 @@ export function TrackingView(props: {
   const glowId = useId();
   const coreId = useId();
   const afterglowId = useId();
+  // A custom target plans this day; the week bank stays on the usual target, and the button says so.
+  const bankTarget = fmt(energyValue(state, baseDayGoal.calories));
   const targetNote = calorieTarget.hasOverride ? ' · custom' : bankAdjustment !== 0 ? ' · with bank' : '';
   const settleRef = useSettleAnimation(props.selectedDate);
   const weekSwipe = useWeekSwipe(props.selectedDate, props.setSelectedDate);
@@ -260,10 +244,12 @@ export function TrackingView(props: {
   const proteinReachable = proteinLeft > 0 && proteinLeft * 4 <= Math.max(0, remaining);
   // A finished day shows what was eaten, not what's "left".
   const showEaten = macroView === 'eaten' || isPast;
-  const proteinBig = `${fmt(showEaten ? props.totals.protein : Math.abs(proteinLeft))}g`;
+  // Past the protein goal is good news, so it reads "goal met · +19g" rather than as an overrun.
+  const proteinPast = !showEaten && proteinLeft < 0;
+  const proteinBig = proteinPast ? `+${fmt(-proteinLeft)}g` : `${fmt(showEaten ? props.totals.protein : Math.abs(proteinLeft))}g`;
   const proteinTail = showEaten
     ? proteinLeft <= 0 ? '· goal met' : 'eaten'
-    : proteinLeft < 0 ? 'past goal' : proteinLeft === 0 ? '· goal met' : proteinReachable ? 'to go' : 'left';
+    : proteinPast ? 'goal met ·' : proteinLeft === 0 ? '· goal met' : proteinReachable ? 'to go' : 'left';
   let proteinSoFar = 0;
   const proteinSegments = ordered.map((entry, index) => {
     const start = proteinSoFar / Math.max(1, goalMacros.protein) * 100;
@@ -273,9 +259,8 @@ export function TrackingView(props: {
   }).filter(segment => segment.width > 0.3 && segment.left < 100);
   const minorMacros: [string, number, number][] = [['Carbs', props.totals.carbs, goalMacros.carbs], ['Fat', props.totals.fat, goalMacros.fat]];
 
-  // What's left for the rest of the week, worded the same way Week words it.
-  const headline = bankHeadline(state, week);
-  const weekPace = weekPaceLine(state, week, today);
+  // The week's balance and plan, from the same model as Week, so both screens show the same numbers.
+  const weekModel = weekViewFor(state, week, today);
   const weekTitle = weekStart === weekStartMonday(today) ? 'This week' : `Week of ${shortDate(weekStart)}`;
   const checkNames = week.toCheck.map(checkDay => WEEKDAY_SHORT(checkDay.date));
   const weekNote = checkNames.length === 1 ? `${checkNames[0]} to check` : checkNames.length ? `${checkNames.length} days to check` : `${week.counted.length} of 7 counted`;
@@ -369,8 +354,9 @@ export function TrackingView(props: {
 
       <div className="tl-feet">
         <span>{fmt(energyValue(state, eaten))} eaten</span>
-        <button type="button" onClick={props.onOpenTarget} disabled={isPast} aria-label={`Target ${energyText(state, goal)}${isPast ? '' : '. Change this day’s target'}`}>
+        <button type="button" onClick={props.onOpenTarget} disabled={isPast} aria-label={`Target ${energyText(state, goal)}${calorieTarget.hasOverride ? `, custom. The week bank uses ${energyText(state, baseDayGoal.calories)}` : ''}${isPast ? '' : '. Change this day’s target'}`}>
           Target {fmt(energyValue(state, goal))}{targetNote}
+          {calorieTarget.hasOverride && <span className="tl-feet-bank"> (week bank uses {bankTarget})</span>}
         </button>
       </div>
 
@@ -415,14 +401,14 @@ export function TrackingView(props: {
         </div>
       )}
 
-      <button type="button" className="tl-week-row" onClick={props.onOpenWeek} aria-label={`${weekTitle}: ${headline.value} ${headline.label}. ${weekNote}. ${weekPace}. Opens Week.`}>
+      <button type="button" className="tl-week-row" onClick={props.onOpenWeek} aria-label={`${weekTitle}: ${weekModel.row.net}. ${weekNote}. ${weekModel.row.pace}. Opens Week.`}>
         <span className="tl-week-left">
           <strong>{weekTitle}</strong>
           <span className={checkNames.length ? 'has-check' : ''}>{checkNames.length > 0 && <i aria-hidden="true" />}{weekNote}</span>
         </span>
         <span className="tl-week-right">
-          <strong>{headline.value} {headline.label}</strong>
-          <span>{weekPace}</span>
+          <strong>{weekModel.row.net}</strong>
+          <span>{weekModel.row.pace}</span>
         </span>
         <Icon name="chevron" size={16} />
       </button>
@@ -435,7 +421,7 @@ export function TrackingView(props: {
       >
         <span className="tl-macro protein" aria-hidden="true">
           <span className="tl-macro-label"><b>Protein</b> of {fmt(goalMacros.protein)}g</span>
-          <span className="tl-macro-value"><strong>{proteinBig}</strong><span>{proteinTail}</span></span>
+          <span className="tl-macro-value">{proteinPast ? <><span className="lead">{proteinTail}</span><strong>{proteinBig}</strong></> : <><strong>{proteinBig}</strong><span>{proteinTail}</span></>}</span>
           <span className="tl-macro-bar">{proteinSegments.map(segment => <i key={segment.key} style={{ left: `${segment.left}%`, width: `${segment.width}%` }} />)}</span>
         </span>
         {minorMacros.map(([name, value, target]) => {
