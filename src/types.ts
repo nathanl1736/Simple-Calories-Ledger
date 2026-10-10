@@ -1,4 +1,6 @@
 export type Meal = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack' | 'Drink';
+/** Where an entry sits in its day on Today. Breakfast, lunch and dinner imply theirs; a snack or drink carries its own. */
+export type DayPart = 'morning' | 'afternoon' | 'evening';
 export type EnergyUnit = 'kcal' | 'kj';
 export type TrackingMode = 'Cutting' | 'Maintaining' | 'Bulking';
 export type ThemePreference = 'system' | 'dark' | 'light';
@@ -43,6 +45,8 @@ export type Entry = {
   fat: number;
   portion?: number;
   meal?: Meal;
+  /** When in the day a snack or drink was had. Not when it was logged: logging breakfast at 1pm still puts it in the morning. */
+  part?: DayPart;
   /** Set when the numbers came from AI, so the log can say so. */
   estimateSource?: EntryEstimateSource | null;
   notes?: string;

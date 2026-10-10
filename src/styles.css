@@ -1829,41 +1829,49 @@ textarea { min-height: 78px; resize: vertical; }
 .tl-macro-bar.minor i { left: 0; border-radius: 2px; background: var(--macro-minor); }
 .tl-macro-bar.minor.over::after { content: ""; position: absolute; right: -1px; top: -1px; width: 6px; height: 6px; border-radius: 50%; background: var(--over-mark); }
 
-/* The day line: each entry carries its own slice of the arc. */
+/* The day line: morning, afternoon and evening, each entry carrying its own slice of the arc.
+   No clock times: when something was logged isn't when it was eaten. */
 .tl-dayline { position: relative; margin-top: 18px; }
-.tl-row { position: relative; display: grid; grid-template-columns: 44px 36px minmax(0, 1fr) auto; align-items: start; width: 100%; min-height: 56px; padding: 6px 0 8px; border-radius: 16px; background: none; color: var(--ink); text-align: left; }
+.tl-part + .tl-part { margin-top: 6px; }
+.tl-part-head { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; min-height: 36px; margin: 0; padding: 0 0 2px; font-size: 15px; line-height: 20px; font-weight: 600; letter-spacing: -.23px; color: var(--color-text-soft); }
+.tl-part-head::before { content: ""; position: absolute; left: 17px; top: 18px; width: 2px; height: 100%; background: var(--spine); }
+.tl-part-sun { grid-column: 1; justify-self: center; position: relative; display: grid; place-items: center; width: 32px; height: 22px; border-radius: 8px; background: var(--bg); }
+.tl-part-sun svg { overflow: visible; }
+.tl-part-path { fill: none; stroke: var(--dot); stroke-width: 1.6; stroke-linecap: round; stroke-dasharray: 0 3.4; }
+.tl-part-name { grid-column: 2; padding-left: 8px; }
+.tl-part-cal { grid-column: 3; padding-left: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-row { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: start; width: 100%; min-height: 56px; padding: 6px 0 8px; border-radius: 16px; background: none; color: var(--ink); text-align: left; }
 .tl-row:active { transform: none; opacity: 1; background: color-mix(in srgb, var(--ink) 5%, transparent); }
-.tl-row::before { content: ""; position: absolute; left: 61px; top: 16px; width: 2px; height: 100%; background: var(--spine); }
+.tl-row::before { content: ""; position: absolute; left: 17px; top: 16px; width: 2px; height: 100%; background: var(--spine); }
 .tl-row.to-end::before { height: calc(100% + 4px); background: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.4px) 0 0 / 2px 8px repeat-y; }
-.tl-time { grid-column: 1; text-align: right; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tl-time small { display: block; font-size: 12px; line-height: 16px; }
-.tl-glyph { grid-column: 2; justify-self: center; position: relative; display: grid; place-items: center; width: 32px; height: 22px; margin-top: -1px; border-radius: 8px; background: var(--bg); }
+.tl-glyph { grid-column: 1; justify-self: center; position: relative; display: grid; place-items: center; width: 32px; height: 22px; margin-top: -1px; border-radius: 8px; background: var(--bg); }
 .tl-glyph img { width: 28px; height: 28px; margin-top: 4px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 3px var(--bg); }
 .tl-glyph-track { fill: none; stroke: var(--track); stroke-width: 2; stroke-linecap: round; }
 .tl-glyph-lit { fill: none; stroke-width: 3; stroke-linecap: round; }
 .tl-glyph-over { fill: var(--over-mark); }
-.tl-row-main { grid-column: 3; display: grid; min-width: 0; padding-left: 8px; }
+.tl-row-main { grid-column: 2; display: grid; min-width: 0; padding-left: 8px; }
 .tl-row-name { font-size: 17px; line-height: 22px; letter-spacing: -.43px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-row-sub { font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-row-sub b { font-weight: 600; color: var(--color-text-soft); }
-.tl-row-cal { grid-column: 4; display: grid; justify-items: end; padding-left: 12px; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -.43px; font-variant-numeric: tabular-nums; }
+.tl-row-cal { grid-column: 3; display: grid; justify-items: end; padding-left: 12px; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -.43px; font-variant-numeric: tabular-nums; }
 .tl-row-cal small { font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: -.23px; color: var(--muted); }
 .tl-menu { width: 196px; min-width: 0; }
-.tl-empty { margin: 4px 0 10px 88px; font-size: 15px; line-height: 20px; color: var(--muted); }
-.tl-now { position: relative; display: grid; grid-template-columns: 44px 36px minmax(0, 1fr); align-items: center; min-height: 52px; padding: 0 0 12px; }
-.tl-now::before { content: ""; position: absolute; left: 61px; top: 18px; width: 2px; height: calc(100% - 6px); background: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.4px) 0 0 / 2px 8px repeat-y; }
-.tl-time.now { min-height: 36px; padding: 0; background: none; color: var(--color-accent-text); font-weight: 600; }
-.tl-node { grid-column: 2; justify-self: center; position: relative; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: var(--bg); box-shadow: 0 0 0 3px var(--bg); }
+.tl-empty { margin: 4px 0 10px 44px; font-size: 15px; line-height: 20px; color: var(--muted); }
+.tl-now { position: relative; display: grid; grid-template-columns: 36px auto minmax(0, 1fr); align-items: center; min-height: 52px; padding: 0 0 12px; }
+.tl-now::before { content: ""; position: absolute; left: 17px; top: 18px; width: 2px; height: calc(100% - 6px); background: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.4px) 0 0 / 2px 8px repeat-y; }
+.tl-now-label { grid-column: 2; min-height: 44px; padding: 0 0 0 8px; background: none; color: var(--color-accent-text); font-size: 15px; line-height: 20px; font-weight: 600; letter-spacing: -.23px; }
+.tl-now-label:active { transform: none; opacity: .6; }
+.tl-node { grid-column: 1; justify-self: center; position: relative; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: var(--bg); box-shadow: 0 0 0 3px var(--bg); }
 .tl-node.now { border: 2px solid var(--accent); background: radial-gradient(circle, var(--accent) 0 2px, var(--bg) 2.5px); }
-.tl-chips { grid-column: 3; display: flex; gap: 8px; min-width: 0; margin-right: calc(-1 * var(--app-pad)); padding: 0 var(--app-pad) 0 8px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.tl-chips { grid-column: 3; display: flex; gap: 8px; min-width: 0; margin-right: calc(-1 * var(--app-pad)); padding: 0 var(--app-pad) 0 10px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .tl-chips::-webkit-scrollbar { display: none; }
 .tl-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px 0 12px; border-radius: 18px; background: var(--card); color: var(--ink); font-size: 15px; line-height: 20px; letter-spacing: -.23px; white-space: nowrap; }
 .tl-chip .icon { color: var(--color-accent-text); }
 .tl-chip b { font-weight: 600; }
 .tl-chip span { color: var(--muted); font-variant-numeric: tabular-nums; }
-.tl-end { position: relative; display: grid; grid-template-columns: 44px 36px minmax(0, 1fr); align-items: start; padding: 2px 0 8px; }
+.tl-end { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: start; padding: 2px 0 8px; }
 .tl-node.end { margin-top: 3px; border: 2px solid var(--muted); }
-.tl-end .day-status { grid-column: 3; margin: 0; padding: 0 0 0 8px; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.tl-end .day-status { grid-column: 2; margin: 0; padding: 0 0 0 8px; border: 0; border-radius: 0; background: none; box-shadow: none; }
 .tl-end .day-status.check { background: none; }
 .tl-end .day-status-dot { display: none; }
 .tl-end .day-status-head { font-size: 15px; line-height: 20px; }
@@ -2063,3 +2071,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .food-search-empty { display: grid; gap: 4px; margin: 14px 16px 0; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--muted); }
 .food-search-empty strong { overflow-wrap: anywhere; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -.43px; color: var(--ink); }
 .food-search-note { margin: 12px 16px 0; font-size: 13px; line-height: 18px; color: var(--muted); }
+
+/* ================================================================
+   Parts of the day (2.7.8): Today's day line groups food into
+   morning, afternoon and evening instead of the time it was logged.
+   A snack or drink is asked when; the meals already say.
+   ================================================================ */
+.entry-part { margin: 10px 0 0; padding: 3px; border-radius: var(--radius-pill); animation: entry-part-in 160ms ease-out; }
+.entry-part button { min-height: 40px; border-radius: var(--radius-pill); font-size: 15px; letter-spacing: -.23px; }
+@keyframes entry-part-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .entry-part { animation: none; } }

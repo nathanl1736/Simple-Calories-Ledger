@@ -1,7 +1,7 @@
 ﻿import { CSSProperties, FormEvent, ReactNode, type MouseEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { createPortal, flushSync } from 'react-dom';
-import type { AppState, DailyGoalSnapshot, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference, TrackingMode } from './types';
+import type { AppState, DailyGoalSnapshot, DayPart, EnergyUnit, Entry, EntryEstimateSource, Food, Meal, Settings, ThemePreference, TrackingMode } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
 import { compressImage, downloadBlob, SHARP_PHOTO_OPTIONS } from './image';
@@ -12,7 +12,7 @@ import { databaseItemToFood, loadFoodDatabaseWithStatus, refreshFoodEstimateData
 import { flattenEnabledCustomDatabaseItems, parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { nameHasWordStarting, normaliseSearchText, scoreFoodSearch, tokeniseQuery } from './foodSearch';
 import { linkedFood, recordFoodUse, type FavouriteChange } from './favourites';
-import { arcSlice, eatenMinutes, miniArc, nextMealSlot, restOfWeekPlan, skyBackground, skyBand, skyFor, sunArc, tideBalance, usualsForMeal, weekStory, type Sky, type SkyBand } from './tidelight';
+import { arcSlice, DAY_PART_BAND, DAY_PART_LABEL, DAY_PARTS, dayPartAt, dayPartGroups, entryDayPart, mealDayPart, miniArc, nextMealSlot, restOfWeekPlan, skyBackground, skyBand, skyFor, sunArc, tideBalance, usualsForMeal, weekStory, type Sky, type SkyBand } from './tidelight';
 import { AI_ESTIMATE_DISCLAIMER, AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import {
   buildEstimateRequest,
@@ -120,6 +120,8 @@ type EntryDraft = {
   sourceFoodId: string;
   name: string;
   meal: Meal;
+  /** Where it goes in the day. Follows breakfast, lunch and dinner; picked for a snack or drink. */
+  part: DayPart;
   unitMode: 'serving' | '100g';
   brand: string;
   servingLabel: string;
@@ -146,11 +148,30 @@ type EntryDraft = {
 /** The last Gemini estimate request, kept so Refine can send a correction with the same photos. */
 type EstimateSession = { description: string; photos: string[]; meal: Meal; reply: string };
 
+function dayPartNow(): DayPart {
+  const now = new Date();
+  return dayPartAt(now.getHours() * 60 + now.getMinutes());
+}
+
+/**
+ * The meal and part of the day just logged. Logging a day's food in one go, the next thing usually
+ * belongs with the last, so for a few minutes Log food starts there instead of guessing from the clock.
+ */
+let lastLogged: { meal: Meal; part: DayPart; at: number } | null = null;
+const RECENT_LOG_MS = 10 * 60 * 1000;
+const recentLog = () => lastLogged && Date.now() - lastLogged.at < RECENT_LOG_MS ? lastLogged : null;
+
+/** The meal Log food starts on: the one just logged, while logging several things in a row, or else the clock's guess. */
+function defaultMealForLogging(): Meal {
+  return recentLog()?.meal || defaultMealForCurrentTime();
+}
+
 const blankEntryDraft = (meal: Meal = 'Snack', entryEnergyUnit: EnergyUnit = 'kcal'): EntryDraft => ({
   editingId: '',
   sourceFoodId: '',
   name: '',
   meal,
+  part: mealDayPart(meal) ?? recentLog()?.part ?? dayPartNow(),
   unitMode: 'serving',
   brand: '',
   servingLabel: '',
@@ -1082,7 +1103,7 @@ export function App() {
   };
 
   /** Log food for typing a food in. `name` comes from a search that found nothing. */
-  const openEntry = (meal: Meal = defaultMealForCurrentTime(), name = '') => {
+  const openEntry = (meal: Meal = defaultMealForLogging(), name = '') => {
     // Now, in the tap: Log food's calories box doesn't exist yet and iOS only opens the keyboard for focus during a tap.
     holdKeyboard('decimal');
     setEntryDraft({ ...blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)), name });
@@ -1103,6 +1124,7 @@ export function App() {
       sourceFoodId: entry.sourceFoodId || '',
       name: entry.name,
       meal: entry.meal || 'Snack',
+      part: entryDayPart(entry),
       unitMode: entryUnitModeValue(entry.unitMode),
       brand: sourceFood?.brand || '',
       servingLabel: sourceFood?.servingLabel || '',
@@ -1148,6 +1170,7 @@ export function App() {
       carbs: n(entryDraft.carbs),
       fat: n(entryDraft.fat),
       meal: entryDraft.meal,
+      part: mealDayPart(entryDraft.meal) ? undefined : entryDraft.part,
       estimateSource: entryDraft.estimateSource,
       notes: entryDraft.notes.trim(),
       photo: entryDraft.photo,
@@ -1202,9 +1225,10 @@ export function App() {
       }
       favouriteChange = touchFoodAfterLog(draft, entry);
     });
+    if (!entryDraft.editingId) lastLogged = { meal: entry.meal || 'Snack', part: entryDayPart(entry), at: Date.now() };
     const saved = entryDraft.editingId ? 'Entry updated' : 'Entry saved';
     notify(favouriteChange ? `${saved} · ${favouriteChange === 'added' ? 'added to' : 'removed from'} favourites` : saved);
-    if (keepOpen) setEntryDraft(blankEntryDraft(entryDraft.meal, energyUnitValue(state.settings.energyUnit)));
+    if (keepOpen) setEntryDraft({ ...blankEntryDraft(entryDraft.meal, energyUnitValue(state.settings.energyUnit)), part: entryDraft.part });
     else setModal(null);
   };
 
@@ -1212,7 +1236,9 @@ export function App() {
     const destination = todayKey();
     await updateState(draft => {
       const { photo: _photo, ...entryWithoutPhoto } = entry;
-      const copy = normalizeEntry({ ...entryWithoutPhoto, id: uid(), date: destination, photo: null, createdAt: Date.now(), updatedAt: Date.now() });
+      // A snack or drink keeps the part of the day it showed in, even one saved before parts were asked.
+      const part = mealDayPart(entry.meal) ? undefined : entryDayPart(entry);
+      const copy = normalizeEntry({ ...entryWithoutPhoto, id: uid(), date: destination, part, photo: null, createdAt: Date.now(), updatedAt: Date.now() });
       draft.entries.push(copy);
     });
     notify('Entry repeated to today');
@@ -1259,7 +1285,7 @@ export function App() {
   const prefillFood = (food: Food) => {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
     setEntryDraft({
-      ...blankEntryDraft(defaultMealForCurrentTime(), entryEnergyUnit),
+      ...blankEntryDraft(defaultMealForLogging(), entryEnergyUnit),
       sourceFoodId: food.source ? '' : food.id,
       name: food.name,
       unitMode: entryUnitModeValue(food.unitMode),
@@ -1342,14 +1368,14 @@ export function App() {
       const raw = await navigator.clipboard.readText();
       const trimmed = raw.trim();
       if (!trimmed) return notify('Clipboard is empty.');
-      const parsed = parseAiQuickLog(trimmed, defaultMealForCurrentTime());
+      const parsed = parseAiQuickLog(trimmed, defaultMealForLogging());
       if (parsed) {
         setAiQuickLogSeedText('');
         prefillAiQuickLog(parsed);
         return;
       }
       notify('Couldn\u2019t read that format. You can fix it below.');
-      setAiQuickLogMeal(defaultMealForCurrentTime());
+      setAiQuickLogMeal(defaultMealForLogging());
       setAiQuickLogSeedText(raw);
       setModal('aiQuickLog');
     } catch {
@@ -1410,7 +1436,7 @@ export function App() {
           estimateSource: fromLabel ? 'label' : 'ai',
           estimateDetails: { confidence: estimate.confidence, assumptions: estimate.assumptions }
         };
-        return keepChoices ? { ...next, meal: current.meal, photo: current.photo, favourite: current.favourite } : next;
+        return keepChoices ? { ...next, meal: current.meal, part: current.part, photo: current.photo, favourite: current.favourite } : next;
       });
       setEntryOpenMode('prefill');
       setModal('entry');
@@ -1419,7 +1445,7 @@ export function App() {
 
   /** Asks Gemini; with `correction`, refines the last estimate using the same photos. */
   const runGeminiEstimate = async (description: string, photos: string[], correction?: string) => {
-    const meal = correction && estimateSession ? estimateSession.meal : defaultMealForCurrentTime();
+    const meal = correction && estimateSession ? estimateSession.meal : defaultMealForLogging();
     const raw = await requestMealEstimate({
       apiKey: state.settings.geminiApiKey,
       userText: buildEstimateRequest({
@@ -1773,7 +1799,7 @@ export function App() {
         onClose={() => setModal(current => (current === 'foodSearch' ? null : current))}
         onChoose={prefillFood}
         onSaveDatabaseFood={saveDatabaseFood}
-        onLogNew={name => openEntry(defaultMealForCurrentTime(), name)}
+        onLogNew={name => openEntry(defaultMealForLogging(), name)}
       />
       <FoodModal
         food={activeFood}
@@ -1888,7 +1914,7 @@ export function App() {
         <RoughMealPanel
           key={selectedDate}
           state={state}
-          defaultMeal={selectedDate === todayKey() ? defaultMealForCurrentTime() : 'Dinner'}
+          defaultMeal={selectedDate === todayKey() ? defaultMealForLogging() : 'Dinner'}
           onLog={logRoughMeal}
         />
       </Modal>
@@ -2261,11 +2287,10 @@ function TrackingView(props: {
     }
   }
   const heroSize = heroNumber.length <= 3 ? 'size-3' : heroNumber.length <= 5 ? 'size-5' : 'size-6';
-  // In the order eaten: an entry added to its day afterwards sits at a typical time for its meal.
-  const ordered = props.entries
-    .map(entry => ({ entry, ...eatenMinutes(entry) }))
-    .sort((a, b) => a.minutes - b.minutes || (a.entry.createdAt || 0) - (b.entry.createdAt || 0));
-  const arc = sunArc(ordered.map(item => item.entry.calories), goal);
+  // In the order eaten, by part of the day rather than the clock: breakfast logged at 1pm still sits in the morning.
+  const parts = dayPartGroups(props.entries);
+  const ordered = parts.flatMap(group => group.entries);
+  const arc = sunArc(ordered.map(entry => entry.calories), goal);
   const glowId = useId();
   const coreId = useId();
   const afterglowId = useId();
@@ -2293,7 +2318,7 @@ function TrackingView(props: {
   const proteinBig = showEaten || proteinLeft <= 0 || !proteinReachable ? `${fmt(props.totals.protein)}g` : `${fmt(proteinLeft)}g`;
   const proteinTail = proteinLeft <= 0 ? ' · goal met' : showEaten || !proteinReachable ? ' eaten' : ' to go';
   let proteinSoFar = 0;
-  const proteinSegments = ordered.map(({ entry }, index) => {
+  const proteinSegments = ordered.map((entry, index) => {
     const start = proteinSoFar / Math.max(1, goalMacros.protein) * 100;
     proteinSoFar += entry.protein;
     const end = Math.min(100, proteinSoFar / Math.max(1, goalMacros.protein) * 100);
@@ -2314,15 +2339,16 @@ function TrackingView(props: {
   const usuals = nextMeal ? usualsForMeal(state.entries, nextMeal, today, new Set(state.foods.map(food => food.id))) : [];
 
   let calSoFar = 0;
-  let lastHalf = '';
-  const rows = ordered.map(({ entry, minutes, late }) => {
-    const before = calSoFar;
-    calSoFar += entry.calories;
-    const half = minutes < 12 * 60 ? 'am' : 'pm';
-    const showHalf = !late && half !== lastHalf;
-    if (!late) lastHalf = half;
-    return { entry, minutes, late, before, after: calSoFar, half: showHalf ? half : '' };
-  });
+  const sections = parts.map(group => ({
+    part: group.part,
+    calories: group.entries.reduce((acc, entry) => acc + entry.calories, 0),
+    rows: group.entries.map(entry => {
+      const before = calSoFar;
+      calSoFar += entry.calories;
+      return { entry, before, after: calSoFar };
+    })
+  }));
+  const lastEntryId = ordered[ordered.length - 1]?.id;
 
   return (
     <div className="tl-screen today-screen view-transition" ref={settleRef}>
@@ -2453,32 +2479,39 @@ function TrackingView(props: {
       </button>
 
       <section className="tl-dayline" aria-label="Day line">
-        {rows.map((row, index) => (
-          <DayLineRow
-            key={row.entry.id}
-            state={state}
-            entry={row.entry}
-            before={row.before}
-            after={row.after}
-            target={goal}
-            minutes={row.minutes}
-            late={row.late}
-            half={row.half}
-            dark={sky.dark}
-            toEnd={index === rows.length - 1 && !usuals.length}
-            onEdit={props.onEditEntry}
-            onRepeat={props.onRepeatEntry}
-            onDelete={props.onDeleteEntry}
-            onPhoto={props.onPhotoEntry}
-          />
+        {sections.map(section => (
+          <div key={section.part} className="tl-part">
+            <h2 className="tl-part-head">
+              <PartSun part={section.part} dark={sky.dark} />
+              <span className="tl-part-name">{DAY_PART_LABEL[section.part]}</span>
+              <span className="tl-part-cal">{fmt(energyValue(state, section.calories))} {unit}</span>
+            </h2>
+            {section.rows.map(row => (
+              <DayLineRow
+                key={row.entry.id}
+                state={state}
+                entry={row.entry}
+                before={row.before}
+                after={row.after}
+                target={goal}
+                part={section.part}
+                dark={sky.dark}
+                toEnd={row.entry.id === lastEntryId && !usuals.length}
+                onEdit={props.onEditEntry}
+                onRepeat={props.onRepeatEntry}
+                onDelete={props.onDeleteEntry}
+                onPhoto={props.onPhotoEntry}
+              />
+            ))}
+          </div>
         ))}
-        {!rows.length && !usuals.length && (
+        {!ordered.length && !usuals.length && (
           <p className="tl-empty">{isToday ? 'Nothing logged yet. Tap + to log food.' : isPast ? 'Nothing logged on this day.' : 'This day hasn’t started yet.'}</p>
         )}
         {usuals.length > 0 && nextMeal && (
           <div className="tl-now">
-            <button type="button" className="tl-time now" onClick={() => props.onOpenEntry(nextMeal)}>Now</button>
             <span className="tl-node now" aria-hidden="true" />
+            <button type="button" className="tl-now-label" onClick={() => props.onOpenEntry(nextMeal)} aria-label={`Log ${nextMeal.toLowerCase()}`}>Now</button>
             <div className="tl-chips" role="group" aria-label={`${nextMeal} usuals`}>
               {usuals.map(usual => (
                 <button key={usual.key} type="button" className="tl-chip" onClick={() => props.onLogUsual(usual.latest, nextMeal)} aria-label={`Log ${usual.name} for ${nextMeal.toLowerCase()}, ${energyText(state, usual.latest.calories)}`}>
@@ -2506,21 +2539,30 @@ function TrackingView(props: {
   );
 }
 
-function clockText(minutes: number) {
-  return `${Math.floor(minutes / 60) % 12 || 12}:${String(minutes % 60).padStart(2, '0')}`;
+/** Where the sun sits over each part's heading: low in the east for morning, high for afternoon, low in the west for evening. */
+const PART_SUN: Record<DayPart, { x: number; y: number }> = { morning: { x: 5.3, y: 10 }, afternoon: { x: 14, y: 5 }, evening: { x: 22.7, y: 10 } };
+
+/** A part of the day's mark on the day line: the sun on its path, in that part's sky colour. */
+function PartSun({ part, dark }: { part: DayPart; dark: boolean }) {
+  const sun = PART_SUN[part];
+  return (
+    <span className="tl-part-sun" aria-hidden="true">
+      <svg width="28" height="18" viewBox="0 0 28 18">
+        <path className="tl-part-path" d="M4 15 A10 10 0 0 1 24 15" />
+        <circle cx={sun.x} cy={sun.y} r="3.2" fill="#F7B547" stroke={skyFor(DAY_PART_BAND[part], dark).arc} strokeWidth="1.2" />
+      </svg>
+    </span>
+  );
 }
 
-/** One entry on the day line: time, its own slice of the day's arc, what it was and its protein. Tap to edit; touch and hold (or right-click) for more. */
-function DayLineRow({ state, entry, before, after, target, minutes, late, half, dark, toEnd, onEdit, onRepeat, onDelete, onPhoto }: {
+/** One entry on the day line: its own slice of the day's arc, what it was and its protein. Tap to edit; touch and hold (or right-click) for more. */
+function DayLineRow({ state, entry, before, after, target, part, dark, toEnd, onEdit, onRepeat, onDelete, onPhoto }: {
   state: AppState;
   entry: Entry;
   before: number;
   after: number;
   target: number;
-  minutes: number;
-  /** Added to its day afterwards, so there's no real time to show. */
-  late: boolean;
-  half: string;
+  part: DayPart;
   dark: boolean;
   toEnd: boolean;
   onEdit: (entry: Entry) => void;
@@ -2535,13 +2577,12 @@ function DayLineRow({ state, entry, before, after, target, minutes, late, half, 
   const rowRef = useRef<HTMLButtonElement>(null);
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
   const slice = arcSlice(before, after, target);
-  const arcColour = skyFor(skyBand(minutes / 60), dark).arc;
+  const arcColour = skyFor(DAY_PART_BAND[part], dark).arc;
   const rough = entry.estimateSource === 'rough';
   const portion = entryUnitModeValue(entry.unitMode) === '100g'
     ? `${fmtGram(entry.portion)}g`
     : entry.portion && entry.portion !== 1 ? `${fmtPortion(entry.portion)} servings` : '';
   const estimate = entry.estimateSource && !rough ? estimateSourceLabel(entry.estimateSource) : '';
-  const time = late ? '' : clockText(minutes);
   const openMenu = (x: number, y: number, fromPress: boolean) => {
     const width = 196;
     const height = 200;
@@ -2601,7 +2642,7 @@ function DayLineRow({ state, entry, before, after, target, minutes, late, half, 
         className={`tl-row ${toEnd ? 'to-end' : ''}`}
         aria-haspopup="menu"
         aria-expanded={!!menu}
-        aria-label={`${time ? `${time} ${half || (minutes < 720 ? 'am' : 'pm')}, ` : ''}${entry.name}, ${entry.meal || 'Snack'}, ${rough ? 'about ' : ''}${energyText(state, entry.calories)}, ${fmt(entry.protein)} grams protein. Touch and hold for more.`}
+        aria-label={`${entry.name}, ${entry.meal || 'Snack'}, ${rough ? 'about ' : ''}${energyText(state, entry.calories)}, ${fmt(entry.protein)} grams protein. Touch and hold for more.`}
         onPointerDown={event => {
           const x = event.clientX;
           const y = event.clientY;
@@ -2632,7 +2673,6 @@ function DayLineRow({ state, entry, before, after, target, minutes, late, half, 
           onEdit(entry);
         }}
       >
-        <span className="tl-time">{time}{time && half && <small>{half}</small>}</span>
         <span className="tl-glyph" aria-hidden="true">
           {entry.photo
             ? <img src={entry.photo} alt="" />
@@ -4310,7 +4350,19 @@ function EntryModal({
           )}
         </div>
 
-        <Field label="Meal" full><div className="meal-chip-row">{MEALS.map(meal => <button key={meal} type="button" className={`meal-chip ${draft.meal === meal ? 'active' : ''}`} onClick={() => update({ meal })}>{meal}</button>)}</div></Field>
+        {/* Not a <label>: a tap between chips would pick the first one. */}
+        <div className="field full">
+          <span>Meal</span>
+          <div className="meal-chip-row" role="group" aria-label="Meal">
+            {MEALS.map(meal => <button key={meal} type="button" className={`meal-chip ${draft.meal === meal ? 'active' : ''}`} aria-pressed={draft.meal === meal} onClick={() => update({ meal, part: mealDayPart(meal) ?? draft.part })}>{meal}</button>)}
+          </div>
+          {/* Breakfast, lunch and dinner already say when; a snack or drink is asked, so logging it later doesn't move it. */}
+          {!mealDayPart(draft.meal) && (
+            <div className="seg entry-part" role="group" aria-label={`When was this ${draft.meal.toLowerCase()}?`}>
+              {DAY_PARTS.map(part => <button key={part} type="button" className={draft.part === part ? 'active' : ''} aria-pressed={draft.part === part} onClick={() => update({ part })}>{DAY_PART_LABEL[part]}</button>)}
+            </div>
+          )}
+        </div>
         {!reviewing && nameField}
         {!reviewing && !draft.editingId && <SavedFoodPicker state={state} foods={foods} onChoose={chooseFood} onSaveDatabaseFood={onSaveDatabaseFood} compact />}
         {!reviewing && !draft.editingId && (

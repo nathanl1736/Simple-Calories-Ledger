@@ -1,7 +1,7 @@
 // Tidelight (2.7): the sky that follows the clock, the sun arc that follows what's eaten,
 // and the week maths the new Today and Week screens put into words. Pure functions only,
 // so tests can load this file straight into Node.
-import type { Entry, Meal } from './types';
+import type { DayPart, Entry, Meal } from './types';
 
 export type SkyBand = 'dawn' | 'day' | 'dusk' | 'night';
 
@@ -237,12 +237,63 @@ export function tideBalance(days: PlanDay[]) {
   return points;
 }
 
-/** When an entry was eaten, in minutes after midnight: the time it was logged, or for an entry added to its day afterwards, a typical time for its meal. */
-export function eatenMinutes(entry: Pick<Entry, 'createdAt' | 'date' | 'meal'>) {
+export const DAY_PARTS: DayPart[] = ['morning', 'afternoon', 'evening'];
+export const DAY_PART_LABEL: Record<DayPart, string> = { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening' };
+/** Each part's sky, for the colour of its arc: dawn light in the morning, day after noon, dusk in the evening. */
+export const DAY_PART_BAND: Record<DayPart, SkyBand> = { morning: 'dawn', afternoon: 'day', evening: 'dusk' };
+
+export function dayPartValue(value: unknown): DayPart | undefined {
+  return DAY_PARTS.includes(value as DayPart) ? value as DayPart : undefined;
+}
+
+/** The part of the day a clock time falls in: morning until noon, afternoon until 5pm, then evening. */
+export function dayPartAt(minutes: number): DayPart {
+  if (minutes < 12 * 60) return 'morning';
+  if (minutes < 17 * 60) return 'afternoon';
+  return 'evening';
+}
+
+/** Breakfast, lunch and dinner say when they were eaten. Snacks and drinks don't, so they carry a part of their own. */
+export function mealDayPart(meal: Meal | undefined): DayPart | null {
+  if (meal === 'Breakfast') return 'morning';
+  if (meal === 'Lunch') return 'afternoon';
+  if (meal === 'Dinner') return 'evening';
+  return null;
+}
+
+/**
+ * Where an entry sits in its day: by its meal, or for a snack or drink, the part picked when logging it. A snack or
+ * drink saved before parts existed goes by when it was logged, if that was on its own day, or else a typical part
+ * (drinks in the morning, snacks in the afternoon).
+ */
+export function entryDayPart(entry: Pick<Entry, 'createdAt' | 'date' | 'meal' | 'part'>): DayPart {
+  const fixed = mealDayPart(entry.meal);
+  if (fixed) return fixed;
+  const picked = dayPartValue(entry.part);
+  if (picked) return picked;
   const at = new Date(entry.createdAt || 0);
   const pad = (value: number) => String(value).padStart(2, '0');
   const loggedOn = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-  if (entry.createdAt && loggedOn === entry.date) return { minutes: at.getHours() * 60 + at.getMinutes(), late: false };
-  const anchor: Record<Meal, number> = { Breakfast: 8 * 60, Lunch: 12 * 60 + 30, Dinner: 19 * 60, Snack: 15 * 60, Drink: 10 * 60 };
-  return { minutes: anchor[entry.meal || 'Snack'], late: true };
+  if (entry.createdAt && loggedOn === entry.date) return dayPartAt(at.getHours() * 60 + at.getMinutes());
+  return entry.meal === 'Drink' ? 'morning' : 'afternoon';
+}
+
+/** A day's entries in the order eaten: morning, afternoon, then evening, and within each part the order they were logged. */
+export function inDayOrder<T extends Pick<Entry, 'createdAt' | 'date' | 'meal' | 'part'>>(entries: T[]): T[] {
+  return entries
+    .map(entry => ({ entry, part: DAY_PARTS.indexOf(entryDayPart(entry)) }))
+    .sort((a, b) => a.part - b.part || (a.entry.createdAt || 0) - (b.entry.createdAt || 0))
+    .map(item => item.entry);
+}
+
+/** The day line's sections: each part that has something in it, in order. */
+export function dayPartGroups<T extends Pick<Entry, 'createdAt' | 'date' | 'meal' | 'part'>>(entries: T[]) {
+  const groups: { part: DayPart; entries: T[] }[] = [];
+  inDayOrder(entries).forEach(entry => {
+    const part = entryDayPart(entry);
+    const last = groups[groups.length - 1];
+    if (last?.part === part) last.entries.push(entry);
+    else groups.push({ part, entries: [entry] });
+  });
+  return groups;
 }
