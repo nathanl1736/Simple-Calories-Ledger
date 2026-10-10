@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AppState, Meal } from '../types';
 import { energyInputToKcal, energyText, energyUnitLabel, energyUnitValue, MEALS } from '../utils';
+import { scrollChipIntoView } from '../ui/controls';
 
 const ROUGH_MEAL_SIZES: { size: string; kcal: number; hint: string }[] = [
   { size: 'Light', kcal: 500, hint: 'Salad, sushi, a poke bowl' },
@@ -13,12 +14,18 @@ const ROUGH_MEAL_SIZES: { size: string; kcal: number; hint: string }[] = [
 export function RoughMealPanel({ state, defaultMeal, onLog }: { state: AppState; defaultMeal: Meal; onLog: (meal: Meal, kcal: number, size: string | null) => void }) {
   const [meal, setMeal] = useState<Meal>(defaultMeal);
   const [typed, setTyped] = useState('');
+  const mealRowRef = useRef<HTMLDivElement>(null);
+  const shownMeal = useRef(false);
+  useEffect(() => {
+    scrollChipIntoView(mealRowRef.current, shownMeal.current);
+    shownMeal.current = true;
+  }, [meal]);
   const unit = energyUnitValue(state.settings.energyUnit);
   const typedKcal = energyInputToKcal(typed, unit);
   return (
     <div className="rough-meal">
       <p className="hint">Ate out, or forgot to log it? Pick the closest size. It logs calories only, marked as a rough guess, and you can edit it later.</p>
-      <div className="chips rough-meal-meals" role="group" aria-label="Meal">
+      <div ref={mealRowRef} className="chips rough-meal-meals" role="group" aria-label="Meal">
         {MEALS.map(item => (
           <button key={item} type="button" className={`chip ${item === meal ? 'active' : ''}`} aria-pressed={item === meal} onClick={() => setMeal(item)}>{item}</button>
         ))}

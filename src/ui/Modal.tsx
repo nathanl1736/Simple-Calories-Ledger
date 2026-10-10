@@ -137,7 +137,11 @@ export function afterModalScrollLock(fn: () => void) {
   window.addEventListener(MODAL_SCROLL_LOCK_RELEASED_EVENT, onReleased);
 }
 
-export function Modal({ open, title, children, onClose, wide = false, className = '', bottomSheet = false, closeDisabled = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string; bottomSheet?: boolean; closeDisabled?: boolean }) {
+/**
+ * A sheet. Every sheet can always be closed (X, scrim, swipe down, Esc): one waiting on Gemini
+ * lets its request carry on and says when it's done, rather than holding the person there.
+ */
+export function Modal({ open, title, children, onClose, wide = false, className = '', bottomSheet = false }: { open: boolean; title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string; bottomSheet?: boolean }) {
   const [rendered, setRendered] = useState(open);
   const [closing, setClosing] = useState(false);
   // `entered` drives the CSS transition for bottom-sheet open/close.
@@ -150,8 +154,6 @@ export function Modal({ open, title, children, onClose, wide = false, className 
   onCloseRef.current = onClose;
   const renderedRef = useRef(rendered);
   renderedRef.current = rendered;
-  const closeDisabledRef = useRef(closeDisabled);
-  closeDisabledRef.current = closeDisabled;
   const panelRef = useRef<HTMLElement>(null);
   const CLOSE_MS = bottomSheet ? 320 : 180;
 
@@ -162,8 +164,7 @@ export function Modal({ open, title, children, onClose, wide = false, className 
   }, [rendered]);
 
   // Single close gate — all dismiss paths funnel here.
-  const requestClose = useCallback((force = false) => {
-    if (closeDisabled && !force) return;
+  const requestClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
     cancelAnimationFrame(rafRef.current!);
@@ -177,7 +178,7 @@ export function Modal({ open, title, children, onClose, wide = false, className 
       closingRef.current = false;
       onCloseRef.current();
     }, CLOSE_MS);
-  }, [CLOSE_MS, closeDisabled]);
+  }, [CLOSE_MS]);
 
   // Swipe down to close, like an iOS sheet: from the handle/title bar, or from the
   // content once it is scrolled to the top. Native listeners, because React's
@@ -207,11 +208,10 @@ export function Modal({ open, title, children, onClose, wide = false, className 
       const target = event.target instanceof Element ? event.target : null;
       eligible = !!target
         && event.touches.length === 1
-        && !closeDisabledRef.current
         && !closingRef.current
         && isTopmost()
-        // Typing, sliders and swipe-to-confirm keep their own gestures.
-        && !target.closest('input, textarea, select, [contenteditable="true"], .swipe-confirm')
+        // Typing and sliders keep their own gestures.
+        && !target.closest('input, textarea, select, [contenteditable="true"]')
         && (!!target.closest('.modal-head') || !modalCanScroll(target, 'up'));
       startX = event.touches[0]?.clientX ?? 0;
       startY = event.touches[0]?.clientY ?? 0;
@@ -314,7 +314,7 @@ export function Modal({ open, title, children, onClose, wide = false, className 
     // call onClose a moment later and shut whichever modal opened meanwhile,
     // which is how the launch-time backup reminder vanished before it was seen.
     if (!renderedRef.current || closingRef.current) return;
-    requestClose(true);
+    requestClose();
   }, [open, requestClose, bottomSheet]);
 
   if (!rendered) return null;
@@ -333,7 +333,7 @@ export function Modal({ open, title, children, onClose, wide = false, className 
       <section ref={panelRef} className={panelClass} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="close" type="button" onClick={() => requestClose()} aria-label="Close" disabled={closeDisabled}><span aria-hidden="true" /></button>
+          <button className="close" type="button" onClick={() => requestClose()} aria-label="Close"><span aria-hidden="true" /></button>
         </div>
         <div className="modal-body">{children}</div>
       </section>

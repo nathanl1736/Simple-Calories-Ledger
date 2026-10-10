@@ -48,16 +48,16 @@ function FoodSearchRow({ state, kind, food, meta, onChoose }: { state: AppState;
 }
 
 /**
- * Search on Today: everything logged before, favourites first, and the food database, each
- * result marked by where it comes from. The bar rises out of Today's search field and sinks
- * back into it on Cancel. A saved food opens Log food filled in; a database food shows its
- * estimate first, as in Log food's own search.
+ * Search foods: everything logged before, favourites first, and the food database, each
+ * result marked by where it comes from. Opened from Log food it fades in; given an `anchorRef`
+ * field, the bar rises out of it and sinks back into it on Cancel. A saved food opens Log food
+ * filled in; a database food shows its estimate first, as in Log food's own search.
  */
 export function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDatabaseFood, onLogNew, batches, onLogBatch }: {
   open: boolean;
   state: AppState;
-  /** Today's search field: where the bar rises from and sinks back to. */
-  anchorRef: React.RefObject<HTMLElement | null>;
+  /** A search field the bar rises from and sinks back to, if it was opened from one. */
+  anchorRef?: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   onChoose: (food: Food) => void;
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
@@ -120,7 +120,7 @@ export function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDa
     const bar = barRef.current;
     const input = inputRef.current;
     if (!open || !rendered || !root || !bar || !input) return;
-    const anchor = anchorRef.current;
+    const anchor = anchorRef?.current;
     // Today's field becomes the bar, so it isn't left showing underneath.
     if (anchor) anchor.style.visibility = 'hidden';
     // The keyboard came up on a stand-in during the tap; the box takes it over once it's in place.
@@ -168,7 +168,7 @@ export function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDa
     const bar = barRef.current;
     if (open || !rendered || !root || !bar) return;
     inputRef.current?.blur();
-    const anchor = anchorRef.current;
+    const anchor = anchorRef?.current;
     const back = settleBack.current && !!anchor && !prefersReducedMotion();
     settleBack.current = false;
     const from = midway.current;

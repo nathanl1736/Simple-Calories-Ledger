@@ -108,7 +108,7 @@ export class Session {
   }
 
   async sparkle() {
-    await this.page.locator('button[aria-label="Log with AI"]').click();
+    await this.page.locator('.tabbar-wrap button.log-button').click();
     await this.waitFor('[role=dialog]');
     await this.settle(500);
   }

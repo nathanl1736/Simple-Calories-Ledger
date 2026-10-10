@@ -21,7 +21,7 @@ import {
 import { type EntryOpenMode, type EntryDraft } from '../appTypes';
 import { KEYBOARD_STAND_IN, takeKeyboardFromStandIn, Modal } from '../ui/Modal';
 import { Icon } from '../ui/icons';
-import { FavouriteToggle, MacroChips, Field } from '../ui/controls';
+import { FavouriteToggle, MacroChips, Field, scrollChipIntoView } from '../ui/controls';
 import { roundedText, databaseSourceChip, databaseServingText } from '../ui/format';
 import { useFoodSearch } from './useFoodSearch';
 
@@ -61,67 +61,6 @@ function switchDraftBasis(draft: EntryDraft, next: EntryDraft['unitMode']): Part
   // the grams are set to log the same total until the real amount is typed.
   if (!servingGrams) return { unitMode: next, portion: roundedText(servings * 100, 1) };
   return { unitMode: next, portion: roundedText(servings * servingGrams, 1), ...scale(100 / servingGrams) };
-}
-
-function SwipeConfirm({ label, confirmLabel, className = '', onConfirm }: { label: string; confirmLabel?: string; className?: string; onConfirm: () => void }) {
-  const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const startX = useRef(0);
-
-  const updateProgress = (clientX: number) => {
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const usable = Math.max(1, rect.width - 62);
-    const next = Math.max(0, Math.min(1, (clientX - startX.current) / usable));
-    setProgress(next);
-  };
-  const reset = () => {
-    setDragging(false);
-    setProgress(0);
-  };
-  const finish = () => {
-    if (progress >= 0.82) {
-      setProgress(1);
-      window.setTimeout(() => {
-        onConfirm();
-        reset();
-      }, 120);
-    } else {
-      reset();
-    }
-  };
-
-  return (
-    <div
-      ref={wrapRef}
-      className={`swipe-confirm ${dragging ? 'dragging' : ''} ${className}`}
-      data-swipe-lock
-      role="button"
-      tabIndex={0}
-      aria-label={label}
-      onKeyDown={event => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onConfirm();
-        }
-      }}
-      onPointerDown={event => {
-        startX.current = event.clientX;
-        setProgress(0);
-        setDragging(true);
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={event => dragging && updateProgress(event.clientX)}
-      onPointerUp={finish}
-      onPointerCancel={reset}
-      style={{ '--swipe': `${progress * 100}%` } as React.CSSProperties}
-    >
-      <span className="swipe-confirm-fill" />
-      <span className="swipe-confirm-handle" aria-hidden="true" />
-      <span className="swipe-confirm-label">{progress >= 0.82 ? (confirmLabel || 'Release to confirm') : label}</span>
-    </div>
-  );
 }
 
 function readableTag(tag: string) {
@@ -195,7 +134,21 @@ function SavedFoodPicker({ state, foods, onChoose, onSaveDatabaseFood, compact =
   });
   return (
     <section className={`quick-picker ${compact ? 'compact' : ''}`}>
-      <input type="search" placeholder="Search saved foods" value={query} onChange={event => setQuery(event.target.value)} autoCapitalize="none" autoCorrect="off" enterKeyHint="search" />
+      <input
+        type="search"
+        placeholder="Search saved foods"
+        value={query}
+        onChange={event => setQuery(event.target.value)}
+        onKeyDown={event => {
+          // Search, not log: Enter here would otherwise submit Log food.
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          event.currentTarget.blur();
+        }}
+        autoCapitalize="none"
+        autoCorrect="off"
+        enterKeyHint="search"
+      />
       {trimmedQuery ? (
         <>
           {userResults.length ? (
@@ -310,7 +263,9 @@ export function EntryModal({
   const [refineText, setRefineText] = useState('');
   const [refining, setRefining] = useState(false);
   const [refineError, setRefineError] = useState('');
+  const [estimateOpen, setEstimateOpen] = useState(false);
   const caloriesPanelRef = useRef<HTMLDivElement>(null);
+  const mealRowRef = useRef<HTMLDivElement>(null);
   const caloriesInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const update = (patch: Partial<EntryDraft>) => setDraft(current => ({ ...current, ...patch }));
@@ -386,6 +341,20 @@ export function EntryModal({
     return () => cancelAnimationFrame(frame);
   }, [open, openMode]);
 
+  // What Gemini assumed starts open unless it was sure; a label, menu or rough size shows its check.
+  useEffect(() => {
+    if (!open) return;
+    setEstimateOpen(draft.estimateDetails ? draft.estimateDetails.confidence !== 'high' : !!draft.estimateSource && draft.estimateSource !== 'ai');
+  }, [open, draft.estimateDetails]);
+
+  // One line of meal chips that scrolls sideways, with the chosen one in view.
+  useEffect(() => {
+    if (open) scrollChipIntoView(mealRowRef.current, false);
+  }, [open]);
+  useEffect(() => {
+    scrollChipIntoView(mealRowRef.current, true);
+  }, [draft.meal]);
+
   useEffect(() => {
     if (open) return;
     setRefineText('');
@@ -427,9 +396,14 @@ export function EntryModal({
     : remaining < 0
       ? `${energyTextForUnit(-remaining, displayUnit)} over${day.bulking ? ' target' : ''} ${dayWord}`
       : `${energyTextForUnit(remaining, displayUnit)} ${day.bulking ? 'to go' : 'left'} ${dayWord}`;
-  const swipeLabel = draft.editingId
-    ? hasCalories ? `Swipe to save ${loggedText}` : 'Swipe to save entry'
-    : hasCalories ? `Swipe to log ${loggedText}` : 'Swipe to log food';
+  // A tap saves, like every other button: logging is the most frequent thing here, and Undo follows it.
+  const primaryLabel = draft.editingId ? 'Save' : hasCalories ? `Log ${loggedText}` : 'Log food';
+  const confidenceText = draft.estimateDetails ? ` · ${draft.estimateDetails.confidence} confidence` : '';
+  const estimateCheck = draft.estimateSource === 'label'
+    ? 'Read from the label photo. Check it matches the pack and the amount you ate.'
+    : draft.estimateSource === 'rough'
+      ? 'A rough size for a meal that was hard to track. Change the number if you find out more.'
+      : draft.estimateSource === 'menu' ? 'Energy printed on the menu; macros are estimated.' : '';
   // The heart shows the saved food this entry belongs to, and only changes it once tapped.
   const savedFavourite = !!linkedFood(foods, draft.sourceFoodId, draft.name)?.favourite;
   const isFavourite = draft.favourite ?? savedFavourite;
@@ -504,23 +478,24 @@ export function EntryModal({
           )}
           {draft.estimateSource && (
             <div className="estimate-review">
-              <div className="meta-chips estimate-source-row">
-                <span className="meta-chip source-chip">{estimateSourceLabel(draft.estimateSource)}</span>
-                {draft.estimateDetails && <span className={`meta-chip confidence-chip confidence-${draft.estimateDetails.confidence}`}>{draft.estimateDetails.confidence[0].toUpperCase() + draft.estimateDetails.confidence.slice(1)} confidence</span>}
-                <button type="button" className="link-btn" onClick={() => update({ estimateSource: null, estimateDetails: null })}>Not an estimate</button>
-              </div>
-              {/* The Estimated chip already says it's a guess; labels and menus need the specific check. */}
-              {draft.estimateSource !== 'ai' && (
-                <p className="hint estimate-hint">{draft.estimateSource === 'label'
-                  ? 'Read from the label photo. Check it matches the pack and the amount you ate.'
-                  : draft.estimateSource === 'rough'
-                    ? 'A rough size for a meal that was hard to track. Change the number if you find out more.'
-                    : 'Energy printed on the menu; macros are estimated.'}</p>
-              )}
-              {!!draft.estimateDetails?.assumptions.length && (
-                <ul className="estimate-assumptions" aria-label="What Gemini assumed">
-                  {draft.estimateDetails.assumptions.map(item => <li key={item}>{item}</li>)}
-                </ul>
+              {/* One line says what this is and how sure; the details fold away once it's sure. */}
+              <button type="button" className="estimate-head" aria-expanded={estimateOpen} onClick={() => setEstimateOpen(current => !current)}>
+                <span><strong>{estimateSourceLabel(draft.estimateSource)}</strong>{confidenceText}</span>
+                <Icon name="chevron" size={16} />
+              </button>
+              {estimateOpen && (
+                <div className="estimate-details">
+                  {estimateCheck && <p className="hint estimate-hint">{estimateCheck}</p>}
+                  {!!draft.estimateDetails?.assumptions.length && (
+                    <>
+                      <p className="estimate-assumptions-title">What Gemini assumed</p>
+                      <ul className="estimate-assumptions" aria-label="What Gemini assumed">
+                        {draft.estimateDetails.assumptions.map(item => <li key={item}>{item}</li>)}
+                      </ul>
+                    </>
+                  )}
+                  <button type="button" className="link-btn" onClick={() => update({ estimateSource: null, estimateDetails: null })}>Not an estimate</button>
+                </div>
               )}
               {macroCheckFails && (
                 <p className="estimate-warning">Calories and macros don’t quite add up: the macros come to about {energyTextForUnit(energyFromMacros(perUnit), draft.entryEnergyUnit)}. Worth a check, unless it contains alcohol.</p>
@@ -543,7 +518,7 @@ export function EntryModal({
                   <button type="button" className="secondary" disabled={!refineText.trim() || refining} onClick={refine}>{refining ? 'Refining…' : 'Refine'}</button>
                 </div>
               )}
-              {refineError && <p className="ai-quick-log-error">{refineError}</p>}
+              {refineError && <p className="ai-quick-log-error" role="alert">{refineError}</p>}
             </div>
           )}
         </div>
@@ -551,7 +526,7 @@ export function EntryModal({
         {/* Not a <label>: a tap between chips would pick the first one. */}
         <div className="field full">
           <span>Meal</span>
-          <div className="meal-chip-row" role="group" aria-label="Meal">
+          <div ref={mealRowRef} className="meal-chip-row" role="group" aria-label="Meal">
             {MEALS.map(meal => <button key={meal} type="button" className={`meal-chip ${draft.meal === meal ? 'active' : ''}`} aria-pressed={draft.meal === meal} onClick={() => update({ meal, part: mealDayPart(meal) ?? draft.part })}>{meal}</button>)}
           </div>
           {/* Breakfast, lunch and dinner already say when; a snack or drink is asked, so logging it later doesn't move it. */}
@@ -569,21 +544,24 @@ export function EntryModal({
           </div>
         )}
         <div className="photo-picker full">
-          <button type="button" className="photo-picker-label" onClick={onPickPhoto}>
-            <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{draft.photo ? 'Meal photo attached' : 'Add meal photo'}</strong><small>{draft.photo ? 'Tap to replace the photo' : 'Optional journal photo, compressed before saving'}</small></span>
-          </button>
-          {draft.photo && <div className="photo-picker-preview show"><img src={draft.photo} alt="Selected meal preview" /></div>}
+          <div className="photo-picker-head">
+            <button type="button" className="photo-picker-label" onClick={onPickPhoto}>
+              <span className="photo-picker-icon" aria-hidden="true"><span className="empty-photo-icon" /></span><span><strong>{draft.photo ? 'Meal photo' : 'Add meal photo'}</strong><small>{draft.photo ? 'For your journal. Tap to replace it' : 'Optional journal photo, compressed before saving'}</small></span>
+            </button>
+            {draft.photo && <button type="button" className="text-btn photo-picker-remove" onClick={() => update({ photo: null })}>Remove</button>}
+          </div>
+          {draft.photo && <div className="photo-picker-preview show"><img src={draft.photo} alt="Meal photo for the journal" /></div>}
         </div>
 
         <div className="entry-form-extras">
           <Field label="Notes" full><textarea value={draft.notes} onChange={event => update({ notes: event.target.value })} /></Field>
         </div>
 
-        {/* What saving does, at the point of saving. ✕ and swipe down still close the sheet. */}
+        {/* What saving does, at the point of saving. ✕ and swipe down still close the sheet; Enter in a field saves too. */}
         <div className="actions full">
           {dayLine && <p className={`entry-day-impact ${remaining < 0 ? 'over' : ''}`}>{hasCalories && 'After this: '}<strong>{dayLine}</strong></p>}
           {favouriteNote && <p className={`entry-fav-note ${draft.favourite ? 'on' : ''}`}><Icon name="heart" size={14} filled={!!draft.favourite} />{favouriteNote}</p>}
-          <SwipeConfirm label={swipeLabel} confirmLabel={draft.editingId ? 'Release to save' : 'Release to log'} className="entry-swipe" onConfirm={() => onSave(false)} />
+          <button className="primary entry-save" type="submit">{primaryLabel}</button>
           {!reviewing && !draft.editingId && <button className="secondary" type="button" onClick={() => { focusCaloriesForNext(); onSave(true); }}>Save and add another</button>}
           {draft.editingId && (
             <div className="entry-alt-links">

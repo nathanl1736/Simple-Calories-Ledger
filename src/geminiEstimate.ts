@@ -2,6 +2,7 @@ import { ESTIMATE_SCHEMA, GEMINI_ESTIMATE_PROMPT, JSON_RETRY_NOTE } from './aiEs
 import { BATCH_ESTIMATE_PROMPT, BATCH_SCHEMA } from './mealPrep';
 import { MENU_PICK_PROMPT, MENU_PICK_SCHEMA } from './menuPick';
 import { readValue, saveValue } from './storage';
+import { withTimeout } from './requestTimeout';
 
 /**
  * Model selection is dynamic: we ask the key which models it can actually use
@@ -35,6 +36,12 @@ const MAX_MODEL_ATTEMPTS = 8;
 const MAX_TOTAL_ATTEMPTS = 16;
 /** Caps the Test key call so a paid model costs a fraction of a cent. */
 const PING_MAX_OUTPUT_TOKENS = 16;
+/**
+ * Every Gemini request, model cascade and retries included, gives up after this long,
+ * so a stalled call never leaves anyone waiting on a sheet.
+ */
+export const GEMINI_TIMEOUT_MS = 45_000;
+export const GEMINI_TIMEOUT_MESSAGE = 'Gemini is taking too long. Try again, or type it in.';
 
 type GeminiTextPart = { text: string };
 type GeminiInlinePart = { inlineData: { mimeType: string; data: string } };
@@ -118,6 +125,35 @@ function geminiError(message: string, status = 0, detail = ''): GeminiError {
   err.status = status;
   if (detail && detail !== message) err.detail = detail;
   return err;
+}
+
+/** The request ran past GEMINI_TIMEOUT_MS. */
+export function isGeminiTimeout(err: unknown) {
+  return err instanceof Error && err.name === 'TimeoutError';
+}
+
+/** The request was cancelled by the person (or by a newer request replacing it). */
+export function isGeminiAbort(err: unknown) {
+  return err instanceof Error && err.name === 'AbortError';
+}
+
+/** 45 s, unless a test sets `globalThis.__dawniGeminiTimeoutMs` to try the timeout without the wait. */
+function geminiTimeoutMs() {
+  const override = (globalThis as { __dawniGeminiTimeoutMs?: unknown }).__dawniGeminiTimeoutMs;
+  return typeof override === 'number' && override > 0 ? override : GEMINI_TIMEOUT_MS;
+}
+
+/** Runs one whole Gemini request under the timeout, cancelled with `signal` (a visible Cancel). */
+function withGeminiTimeout<T>(signal: AbortSignal | undefined, run: (signal: AbortSignal) => Promise<T>) {
+  return withTimeout(run, {
+    timeoutMs: geminiTimeoutMs(),
+    signal,
+    onTimeout: () => {
+      const err = geminiError(GEMINI_TIMEOUT_MESSAGE);
+      err.name = 'TimeoutError';
+      return err;
+    }
+  });
 }
 
 function isQuotaFailure(status: number, message: string) {
@@ -649,7 +685,11 @@ async function walkModels<T>(
  * answers. On a free key the Pro rejections cost nothing and the Flash call
  * uses one free request; on a paid key it's one capped call to the best model.
  */
-export async function probeGeminiKey(apiKey: string, signal?: AbortSignal): Promise<GeminiKeyCheck> {
+export function probeGeminiKey(apiKey: string, signal?: AbortSignal): Promise<GeminiKeyCheck> {
+  return withGeminiTimeout(signal, inner => probeGeminiKeyNow(apiKey, inner));
+}
+
+async function probeGeminiKeyNow(apiKey: string, signal: AbortSignal): Promise<GeminiKeyCheck> {
   const key = apiKey.trim();
   if (!key) throw geminiError('Add a Gemini API key first.');
   const ranked = rankModelIds(await listGenerateContentModelIds(key, signal));
@@ -688,9 +728,13 @@ export async function probeGeminiKey(apiKey: string, signal?: AbortSignal): Prom
 /**
  * Runs a JSON request against the best model the key can use: the last model
  * that worked first, then every candidate from `models.list` minus the ones
- * the key's plan turned down, then known ids.
+ * the key's plan turned down, then known ids. The whole walk shares one timeout.
  */
-async function requestGeminiJson(apiKey: string, call: GeminiCall) {
+function requestGeminiJson(apiKey: string, call: GeminiCall) {
+  return withGeminiTimeout(call.signal, signal => requestGeminiJsonNow(apiKey, { ...call, signal }));
+}
+
+async function requestGeminiJsonNow(apiKey: string, call: GeminiCall) {
   const key = apiKey.trim();
   if (!key) throw geminiError('Add a Gemini API key in Settings first.');
 
