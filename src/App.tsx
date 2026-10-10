@@ -855,7 +855,7 @@ function TabGlyph({ tab }: { tab: Tab }) {
   return <svg className="icon" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3v6a2 2 0 0 0 4 0V3M9 9v12" /><path d="M17 3c-2 2-2 7 0 9v9" /></g></svg>;
 }
 
-function AppShell({ tab, setTab, onLog, children }: { tab: Tab; setTab: (tab: Tab) => void; onLog: () => void; children: ReactNode }) {
+function AppShell({ tab, setTab, onLogWithAi, children }: { tab: Tab; setTab: (tab: Tab) => void; onLogWithAi: () => void; children: ReactNode }) {
   const [navHidden, setNavHidden] = useState(false);
 
   useEffect(() => {
@@ -909,8 +909,8 @@ function AppShell({ tab, setTab, onLog, children }: { tab: Tab; setTab: (tab: Ta
           ))}
         </nav>
         {tab !== 'settings' && (
-          <button className="log-button" type="button" aria-label="Log food" onClick={onLog}>
-            <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>
+          <button className="log-button" type="button" aria-label="Log with AI" onClick={onLogWithAi}>
+            <Icon name="sparkle" size={28} filled />
           </button>
         )}
       </div>
@@ -1096,10 +1096,10 @@ export function App() {
     date: selectedDate
   }), [entries, entryDraft.editingId, state, selectedDate]);
 
-  /** The + beside the tab bar: Log food for the day shown on Today, or for today from any other tab. */
-  const logFromTabBar = () => {
+  /** The sparkle beside the tab bar: Log with AI for the day shown on Today, or for today from any other tab. */
+  const logWithAiFromTabBar = () => {
     if (tab !== 'tracking') setTab('tracking');
-    openEntry();
+    setModal('addFood');
   };
 
   /** Log food for typing a food in. `name` comes from a search that found nothing. */
@@ -1560,7 +1560,7 @@ export function App() {
   }
 
   return (
-    <AppShell tab={tab} setTab={setTab} onLog={logFromTabBar}>
+    <AppShell tab={tab} setTab={setTab} onLogWithAi={logWithAiFromTabBar}>
       {tab === 'tracking' && (
         <TrackingView
           state={state}
@@ -1587,7 +1587,6 @@ export function App() {
           onRoughMeal={() => setModal('roughMeal')}
           searchFieldRef={searchFieldRef}
           onOpenSearch={openFoodSearch}
-          onOpenAi={() => setModal('addFood')}
           onLogUsual={logUsual}
           onOpenTarget={() => setModal('dayTarget')}
           onOpenWeek={() => openWeek(selectedDate)}
@@ -1929,7 +1928,7 @@ export function App() {
           <li>Paste it into Settings → Gemini and tap Save.</li>
           <li>Dawni checks the key and shows which Gemini model it will use.</li>
         </ol>
-        <div className="help-callout">No key? Tap Log with AI on Today, then Copy prompt and Paste estimate. That works with any AI chatbot.</div>
+        <div className="help-callout">No key? Tap the sparkle button beside the tabs, then Copy prompt and Paste estimate. That works with any AI chatbot.</div>
         <div className="actions vertical">
           <button className="primary" type="button" onClick={() => openSettingsSection('geminiSection')}>Open Gemini settings</button>
           <button className="secondary" type="button" onClick={() => setModal(null)}>Not now</button>
@@ -1941,7 +1940,7 @@ export function App() {
           <li>Paste it into your AI chatbot.</li>
           <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
           <li>Copy the returned JSON (it must include unitMode: per serving or per 100g, with calories matching that choice so nothing double-counts).</li>
-          <li>Tap Log with AI on Today, then Paste estimate.</li>
+          <li>Tap the sparkle button beside the tabs, then Paste estimate.</li>
           <li>Review the Log Food form, then save normally.</li>
         </ol>
       </Modal>
@@ -2247,8 +2246,6 @@ function TrackingView(props: {
   searchFieldRef: React.Ref<HTMLButtonElement>;
   /** Opens search over Today: favourites, recent foods and the food database. */
   onOpenSearch: () => void;
-  /** Opens Log with AI: Estimate with Gemini, Help me pick from a menu, or another chatbot. */
-  onOpenAi: () => void;
   onLogUsual: (entry: Entry, meal: Meal) => void;
   onOpenTarget: () => void;
   onOpenWeek: () => void;
@@ -2432,11 +2429,12 @@ function TrackingView(props: {
         <span>Search foods</span>
       </button>
 
-      <button type="button" className="tl-ai-row" onClick={props.onOpenAi}>
-        <span className="tl-ai-icon" aria-hidden="true"><Icon name="sparkle" size={22} /></span>
-        <span className="tl-ai-text">
-          <strong>Log with AI</strong>
-          <span>Describe, snap, or pick from a menu</span>
+      {/* Typing a food in. Log with AI is the sparkle beside the tab bar, where a thumb lands first. */}
+      <button type="button" className="tl-manual-row" onClick={() => props.onOpenEntry()}>
+        <span className="tl-manual-icon" aria-hidden="true"><Icon name="edit" size={20} /></span>
+        <span className="tl-manual-text">
+          <strong>Log manually</strong>
+          <span>Type in the calories and macros</span>
         </span>
         <Icon name="chevron" size={16} />
       </button>
@@ -2506,7 +2504,7 @@ function TrackingView(props: {
           </div>
         ))}
         {!ordered.length && !usuals.length && (
-          <p className="tl-empty">{isToday ? 'Nothing logged yet. Tap + to log food.' : isPast ? 'Nothing logged on this day.' : 'This day hasn’t started yet.'}</p>
+          <p className="tl-empty">{isToday ? <>Nothing logged yet. Tap <Icon name="sparkle" size={15} filled /> to log with AI.</> : isPast ? 'Nothing logged on this day.' : 'This day hasn’t started yet.'}</p>
         )}
         {usuals.length > 0 && nextMeal && (
           <div className="tl-now">
