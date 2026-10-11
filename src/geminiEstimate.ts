@@ -1,6 +1,6 @@
 import { ESTIMATE_SCHEMA, GEMINI_ESTIMATE_PROMPT, JSON_RETRY_NOTE } from './aiEstimate';
 import { BATCH_ESTIMATE_PROMPT, BATCH_SCHEMA } from './mealPrep';
-import { MENU_PICK_PROMPT, MENU_PICK_SCHEMA } from './menuPick';
+import { SUGGEST_PROMPT, SUGGEST_SCHEMA } from './suggest';
 import { readValue, saveValue } from './storage';
 import { withTimeout } from './requestTimeout';
 
@@ -836,28 +836,30 @@ export async function requestBatchEstimate({
   });
 }
 
-/** Asks Gemini to choose from photographed menu pages; `userText` carries the day's numbers. */
-export async function requestMenuPick({
+/**
+ * Asks Gemini what to eat: from menu photos, a named venue, what's at home, or just the day's numbers.
+ * `userText` is built by `buildSuggestRequest`; photos are optional, since words alone are enough.
+ */
+export async function requestSuggestion({
   apiKey,
   userText,
-  imageDataUrls,
+  imageDataUrls = [],
   accept,
   signal
 }: {
   apiKey: string;
   userText: string;
-  imageDataUrls: string[];
+  imageDataUrls?: string[];
   accept?: (text: string) => boolean;
   signal?: AbortSignal;
 }) {
-  if (!imageDataUrls.length) throw geminiError('Add at least one photo of the menu.');
   return requestGeminiJson(apiKey, {
-    systemPrompt: MENU_PICK_PROMPT,
+    systemPrompt: SUGGEST_PROMPT,
     userText,
     imageParts: imageDataUrls.map(inlineImagePart),
-    responseSchema: MENU_PICK_SCHEMA,
+    responseSchema: SUGGEST_SCHEMA,
     accept,
     signal,
-    fallbackError: 'Gemini could not suggest anything from this menu.'
+    fallbackError: 'Gemini could not suggest anything just now.'
   });
 }

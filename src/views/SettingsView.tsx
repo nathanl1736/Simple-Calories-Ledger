@@ -43,7 +43,7 @@ function GeminiKeyStatus({ hasKey, check, saved }: { hasKey: boolean; check: Gem
       </div>
     );
   }
-  if (!hasKey) return <p className="hint gemini-status">Not set up. Add a key to use Estimate and Help me pick from a menu.</p>;
+  if (!hasKey) return <p className="hint gemini-status">Not set up. Add a key to use Estimate and What should I eat?</p>;
   if (saved) {
     return (
       <p className="hint gemini-status">
@@ -175,7 +175,7 @@ export function SettingsView(props: {
             <button className="help-btn" type="button" onClick={props.onGeminiApiKeyHelp}>?</button>
           </div>
         </div>
-        <p className="hint">Use your own Gemini API key for Estimate and Help me pick from a menu. A free key from Google AI Studio works. The key stays on this device and is included in backups.</p>
+        <p className="hint">Use your own Gemini API key for Estimate and What should I eat? A free key from Google AI Studio works. The key stays on this device and is included in backups.</p>
         <Field label="Gemini API key" full>
           <input
             type="password"
@@ -199,7 +199,7 @@ export function SettingsView(props: {
       </section>
       <section className="card ai-preferences-card">
         <h2>About you, for AI</h2>
-        <p className="hint">Sent with every Gemini estimate and menu pick, and added to the copied chatbot prompt. Keep it short. It stays on this phone.</p>
+        <p className="hint">Sent with every Gemini estimate and suggestion, and added to the copied chatbot prompt. Keep it short. It stays on this phone.</p>
         <Field label="What Gemini should always know" full>
           <textarea
             value={preferencesDraft}

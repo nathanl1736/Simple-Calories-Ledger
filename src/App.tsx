@@ -14,12 +14,12 @@ import { pruneOneOffEstimates, recordFoodUse, type FavouriteChange } from './fav
 import { dayPartAt, entryDayPart, mealDayPart, usualsForMeal } from './tidelight';
 import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import { buildEstimateRequest, estimateNotes, estimateSourceValue, parseGeminiEstimate, type GeminiEstimate } from './aiEstimate';
-import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstimate } from './geminiEstimate';
+import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstimate, requestSuggestion } from './geminiEstimate';
 import { usualChips, type UsualChip } from './logUsuals';
 import { removeEntry, restoreEntry, revertFoodUse, type RemovedEntry } from './undo';
-import { estimatingLabel, logSheetTitle } from './estimateJob';
+import { estimatingLabel, logSheetTitle, suggestSheetTitle } from './estimateJob';
 import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, parseBatchEstimate, pruneBatches } from './mealPrep';
-import { type MenuPickItem } from './menuPick';
+import { buildSuggestContext, buildSuggestRequest, isSuggestFresh, loadLastSuggest, mealBudget, parseSuggest, saveLastSuggest, suggestNotesLead, type SuggestItem, type SuggestSession } from './suggest';
 import {
   applyDayCalorieOverride,
   dayEntries,
@@ -48,7 +48,7 @@ import {
   weekBank,
   weekStartMonday
 } from './utils';
-import { type Tab, type EntryOpenMode, type JournalDayViewMode, type JournalLabelMode, type EntryDraft, type BatchInput, type BatchSheetRequest, type EstimateJob, type LogDraft } from './appTypes';
+import { type Tab, type EntryOpenMode, type JournalDayViewMode, type JournalLabelMode, type EntryDraft, type BatchInput, type BatchSheetRequest, type EstimateJob, type LogDraft, type LogMode } from './appTypes';
 import { modalScrollLockCount, holdKeyboard, afterModalScrollLock, Modal } from './ui/Modal';
 import { OpenSettingsContext } from './ui/SettingsButton';
 import { TABS, AppShell } from './ui/AppShell';
@@ -63,13 +63,12 @@ import { FoodSearch } from './sheets/FoodSearch';
 import { LogSheet } from './sheets/LogSheet';
 import { GeminiKeyHelp } from './sheets/ConnectGemini';
 import { BatchSheet } from './sheets/BatchSheet';
-import { MenuPickModal } from './sheets/MenuPickModal';
 import { AiQuickLogModal } from './sheets/AiQuickLogModal';
 import { FoodModal } from './sheets/FoodModal';
 import { RoughMealPanel } from './sheets/RoughMeal';
 import { DayCalorieGoalPanel } from './sheets/DayTarget';
 
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'menuPick' | 'customDbHelp' | 'log' | 'dayTarget' | 'roughMeal' | 'foodSearch' | 'batch' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'customDbHelp' | 'log' | 'dayTarget' | 'roughMeal' | 'foodSearch' | 'batch' | null;
 type SetTabOptions = { date?: string; resetScroll?: boolean };
 
 function storedTab(value: string | null): Tab {
@@ -193,6 +192,15 @@ export function App() {
   const [logDraft, setLogDraft] = useState<LogDraft>({ text: '', photos: [] });
   /** The meal the Log sheet's usuals are for and log to. */
   const [logMeal, setLogMeal] = useState<Meal>('Snack');
+  /** Log food, or its Suggest mode ("What should I eat?"). */
+  const [logMode, setLogMode] = useState<LogMode>('log');
+  /** What Suggest mode was asked, kept like the composer's draft so closing the sheet loses nothing. */
+  const [suggestDraft, setSuggestDraft] = useState<LogDraft>({ text: '', photos: [] });
+  const [suggestMeal, setSuggestMeal] = useState<Meal>(() => defaultMealForCurrentTime());
+  /** The last suggestion; shown while it is for the day on Today and under three hours old. */
+  const [suggestSession, setSuggestSession] = useState<SuggestSession | null>(null);
+  /** Suggest mode shows the suggestion, or the form to ask again. */
+  const [suggestView, setSuggestView] = useState<'result' | 'compose'>('result');
   const [estimateJob, setEstimateJob] = useState<EstimateJob | null>(null);
   /** The meal prep sheet is waiting on Gemini, for the pill while it's closed. */
   const [batchBusy, setBatchBusy] = useState(false);
@@ -211,6 +219,9 @@ export function App() {
   modalRef.current = modal;
   const estimateJobRef = useRef(estimateJob);
   estimateJobRef.current = estimateJob;
+  const suggestSessionRef = useRef(suggestSession);
+  suggestSessionRef.current = suggestSession;
+  const activeSuggestion = isSuggestFresh(suggestSession, selectedDate) ? suggestSession : null;
   const estimateAbort = useRef<AbortController | null>(null);
   /** Bumped by each estimate and by Cancel, so a reply to an older one is ignored. */
   const estimateSeq = useRef(0);
@@ -249,6 +260,22 @@ export function App() {
       applyThemePreference(next.settings.theme || DEFAULT.settings.theme);
     });
   }, []);
+
+  // Bring back a recent suggestion if the app was closed while ordering.
+  useEffect(() => {
+    let cancelled = false;
+    loadLastSuggest(selectedDate)
+      .then(saved => {
+        if (cancelled || !saved) return;
+        if (isSuggestFresh(suggestSessionRef.current, selectedDate)) return;
+        setSuggestSession(saved);
+        setSuggestView('result');
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate]);
 
   useEffect(() => {
     // Until the saved settings load, keep what index.html applied rather than flashing the defaults.
@@ -381,8 +408,20 @@ export function App() {
    * Log food, over whichever tab is showing: the sparkle, the Now line, the first-run card and Journal
    * open it. It logs to the day shown on Today, and its title names that day when it isn't today.
    */
-  const openLogSheet = (meal: Meal = defaultMealForLogging()) => {
-    setLogMeal(meal);
+  const openLogSheet = (meal?: Meal, mode: LogMode = 'log') => {
+    setLogMeal(meal ?? defaultMealForLogging());
+    // A request still running keeps its own mode, so the sheet shows it.
+    const running = estimateJobRef.current?.status === 'running' ? estimateJobRef.current : null;
+    setLogMode(running ? running.kind === 'suggest' ? 'suggest' : 'log' : mode);
+    // Suggest follows the clock for a fresh visit; the Now line picks its own meal; a suggestion
+    // already on the way or on screen keeps its meal.
+    if (mode === 'suggest' && meal) {
+      setSuggestMeal(meal);
+      // Asking about another meal than the suggestion on screen starts a new one.
+      if (activeSuggestion && activeSuggestion.meal !== meal) setSuggestView('compose');
+    } else if (!(running?.kind === 'suggest' || activeSuggestion) && !suggestDraft.text.trim() && !suggestDraft.photos.length) {
+      setSuggestMeal(defaultMealForCurrentTime());
+    }
     setModal('log');
   };
 
@@ -746,15 +785,13 @@ export function App() {
     }
   };
 
-  /** Suggest, for now the menu helper. With no key the Log sheet connects one first. */
-  const openMenuPick = () => setModal('menuPick');
-
   /** Saves a key connected from a Connect card. */
   const saveGeminiKey = (key: string) => updateLatest(draft => {
     draft.settings.geminiApiKey = key.trim();
   });
 
-  const prefillMenuPick = (item: MenuPickItem, meal: Meal) => {
+  /** Log this, from a suggestion: the review sheet, filled in. The energy is "from menu" only when it was printed or published. */
+  const prefillSuggestion = (item: SuggestItem, meal: Meal, venue: string) => {
     const entryEnergyUnit = energyUnitValue(state.settings.energyUnit);
     // Refine re-asks the last Gemini estimate, so an earlier one must not replace this pick.
     setEstimateSession(null);
@@ -762,12 +799,13 @@ export function App() {
       setEntryDraft({
         ...blankEntryDraft(meal, entryEnergyUnit),
         name: item.name,
+        servingLabel: item.portion,
         calories: draftEnergyText(item.calories, entryEnergyUnit),
         protein: draftNumberText(item.protein),
         carbs: draftNumberText(item.carbs),
         fat: draftNumberText(item.fat),
-        notes: estimateNotes(item.fromMenu ? 'Energy printed on the menu.' : 'Estimated from a menu photo.', item.assumptions, item.confidence),
-        estimateSource: item.fromMenu ? 'menu' : 'ai',
+        notes: estimateNotes(suggestNotesLead(item, meal, venue), item.assumptions, item.confidence),
+        estimateSource: item.printedEnergy ? 'menu' : 'ai',
         estimateDetails: { confidence: item.confidence, assumptions: item.assumptions }
       });
       setEntryOpenMode('prefill');
@@ -872,7 +910,7 @@ export function App() {
     estimateAbort.current = controller;
     const id = ++estimateSeq.current;
     const meal = logMeal;
-    setEstimateJob({ id, status: 'running', description, photos, meal, startedAt: performance.now() });
+    setEstimateJob({ id, kind: 'estimate', status: 'running', description, photos, meal, startedAt: performance.now() });
     try {
       const { raw, parsed } = await runGeminiEstimate(description, photos, undefined, meal, controller.signal);
       if (estimateSeq.current !== id) return;
@@ -891,6 +929,83 @@ export function App() {
       setEstimateJob(current => (current?.id === id ? { ...current, status: 'failed', error, timedOut: isGeminiTimeout(err) } : current));
       if (modalRef.current !== 'log') notify(error, 8000, { label: 'Try again', run: () => openLogSheet(meal) });
     }
+  };
+
+  /** The toast's View: the sheet in Suggest mode, on the suggestion. */
+  const viewSuggestion = () => {
+    setLogMode('suggest');
+    setSuggestView('result');
+    setModal('log');
+  };
+
+  /**
+   * Suggest from the Log sheet, the same way: the pill, Cancel and the 45 s timeout. A suggestion that
+   * lands is kept (three hours, this day) and shown in the sheet; if the sheet was closed a toast
+   * offers View. Photos are optional, since words alone are enough.
+   */
+  const startSuggest = async () => {
+    const text = suggestDraft.text.trim();
+    const photos = suggestDraft.photos;
+    if (!text && !photos.length) return;
+    estimateAbort.current?.abort();
+    const controller = new AbortController();
+    estimateAbort.current = controller;
+    const id = ++estimateSeq.current;
+    const meal = suggestMeal;
+    const date = selectedDate;
+    setEstimateJob({ id, kind: 'suggest', status: 'running', description: text, photos, meal, startedAt: performance.now() });
+    try {
+      // The latest settings and day: a key connected a moment ago is already in use.
+      const latest = latestState.current;
+      const context = buildSuggestContext(latest, date, meal);
+      const budget = mealBudget(context, meal);
+      const raw = await requestSuggestion({
+        apiKey: latest.settings.geminiApiKey,
+        userText: buildSuggestRequest({ context, meal, budget, text, preferences: latest.settings.aiPreferences, photoCount: photos.length }),
+        imageDataUrls: photos,
+        accept: reply => !!parseSuggest(reply, photos.length > 0),
+        signal: controller.signal
+      });
+      if (estimateSeq.current !== id) return;
+      estimateAbort.current = null;
+      const result = parseSuggest(raw, photos.length > 0);
+      if (!result) throw new Error('Gemini replied in a format Dawni couldn’t read. Try again.');
+      if (!result.pick) throw new Error(result.note || 'Gemini couldn’t read a menu in these photos. Try a closer, well-lit photo of the menu text.');
+      const session: SuggestSession = {
+        version: 1,
+        date,
+        createdAt: Date.now(),
+        meal,
+        remainingAtRequest: budget.remaining,
+        proteinLeftAtRequest: Math.max(0, context.proteinTarget - context.eaten.protein),
+        result
+      };
+      setSuggestSession(session);
+      setSuggestView('result');
+      setEstimateJob(null);
+      void saveLastSuggest(session);
+      if (modalRef.current !== 'log') notify('Your suggestion is ready', 8000, { label: 'View', run: viewSuggestion });
+    } catch (err) {
+      if (estimateSeq.current !== id) return;
+      estimateAbort.current = null;
+      if (isGeminiAbort(err)) {
+        setEstimateJob(null);
+        return;
+      }
+      const error = err instanceof Error && err.message ? err.message : 'Gemini could not suggest anything just now.';
+      setSuggestView('compose');
+      setEstimateJob(current => (current?.id === id ? { ...current, status: 'failed', error, timedOut: isGeminiTimeout(err) } : current));
+      if (modalRef.current !== 'log') notify(error, 8000, { label: 'Try again', run: () => openLogSheet(meal, 'suggest') });
+    }
+  };
+
+  /** Start a new suggestion: forget the last one and what was asked. */
+  const startOverSuggest = () => {
+    setSuggestSession(null);
+    setSuggestDraft({ text: '', photos: [] });
+    setSuggestMeal(defaultMealForCurrentTime());
+    setSuggestView('compose');
+    void saveLastSuggest(null);
   };
 
   /** Cancel on the estimating card: stops the request, and the composer comes back as it was. */
@@ -1064,10 +1179,13 @@ export function App() {
     : [];
   // While Gemini works on something whose sheet was closed: a slim pill above the tab bar, on every tab.
   const estimating = estimateJob?.status === 'running' && modal !== 'log';
-  const pillLabel = estimating && estimateJob ? estimatingLabel(estimateJob.meal) : batchBusy && modal !== 'batch' ? 'Estimating the batch…' : '';
+  const pillLabel = estimating && estimateJob ? estimatingLabel(estimateJob.meal, estimateJob.kind) : batchBusy && modal !== 'batch' ? 'Estimating the batch…' : '';
   const pill = pillLabel ? (
     <div className="log-pill-wrap" role="status">
-      <button type="button" className="log-pill" aria-label={`${pillLabel} Open to see it.`} onClick={() => setModal(estimating ? 'log' : 'batch')}>
+      <button type="button" className="log-pill" aria-label={`${pillLabel} Open to see it.`} onClick={() => {
+        if (estimating && estimateJob) setLogMode(estimateJob.kind === 'suggest' ? 'suggest' : 'log');
+        setModal(estimating ? 'log' : 'batch');
+      }}>
         <span className="log-spinner" aria-hidden="true" />
         <span>{pillLabel}</span>
       </button>
@@ -1128,7 +1246,8 @@ export function App() {
           setSelectedDate={setSelectedDate}
           entries={entries}
           totals={totals}
-          onOpenLog={openLogSheet}
+          onOpenLog={meal => openLogSheet(meal)}
+          onSuggest={meal => openLogSheet(meal, 'suggest')}
           onEditEntry={editEntry}
           onRepeatEntry={repeatEntry}
           onDeleteEntry={deleteEntry}
@@ -1333,10 +1452,26 @@ export function App() {
       <LogSheet
         open={modal === 'log'}
         title={logSheetTitle(selectedDate, todayKey())}
+        suggestTitle={suggestSheetTitle(selectedDate, todayKey())}
         state={state}
+        mode={logMode}
+        onMode={setLogMode}
         meal={logMeal}
         draft={logDraft}
         setDraft={setLogDraft}
+        suggest={{
+          date: selectedDate,
+          meal: suggestMeal,
+          onMeal: setSuggestMeal,
+          draft: suggestDraft,
+          setDraft: setSuggestDraft,
+          session: activeSuggestion,
+          view: suggestView,
+          onChange: () => setSuggestView('compose'),
+          onStartOver: startOverSuggest,
+          onLog: item => activeSuggestion && prefillSuggestion(item, activeSuggestion.meal, activeSuggestion.result.venue),
+          onRun: startSuggest
+        }}
         job={estimateJob}
         chips={logChips}
         // Its own close only: Estimate, a chip or another way may already have opened the next sheet.
@@ -1351,7 +1486,6 @@ export function App() {
         onSearch={openFoodSearch}
         onRoughMeal={() => setModal('roughMeal')}
         onBatch={() => openBatchSheet('new')}
-        onSuggest={openMenuPick}
         onPasteEstimate={pasteAiQuickLogFromClipboard}
         onSaveKey={saveGeminiKey}
       />
@@ -1465,16 +1599,6 @@ export function App() {
         onFinish={finishBatch}
         // Save hands over to a toast, so only close what is still this one.
         onClose={() => setModal(current => (current === 'batch' ? null : current))}
-      />
-      <MenuPickModal
-        open={modal === 'menuPick'}
-        state={state}
-        date={selectedDate}
-        apiKey={state.settings.geminiApiKey}
-        // Same handoff as above: Log this opens Log Food, which must not be closed again.
-        onClose={() => setModal(current => (current === 'menuPick' ? null : current))}
-        onLog={prefillMenuPick}
-        onBackgroundNotice={message => notify(message, 4000)}
       />
       <Modal open={modal === 'dayTarget'} title={selectedDate === todayKey() ? 'Today\u2019s target' : `Target for ${readable(selectedDate)}`} onClose={() => setModal(null)} bottomSheet>
         <DayCalorieGoalPanel

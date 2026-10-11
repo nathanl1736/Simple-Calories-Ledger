@@ -19,6 +19,24 @@ export async function compressImage(file?: File | null, options: JpegOptions = {
 }
 
 /**
+ * Re-encodes several photos, one at a time: full-size phone photos decoded together can exhaust memory.
+ * A photo that can't be read is counted in `failed` rather than ending the rest.
+ */
+export async function compressImages(files: File[], options: JpegOptions = {}) {
+  const photos: string[] = [];
+  let failed = 0;
+  for (const file of files) {
+    try {
+      const photo = await compressImage(file, options);
+      if (photo) photos.push(photo);
+    } catch {
+      failed += 1;
+    }
+  }
+  return { photos, failed };
+}
+
+/**
  * Re-encodes a photo already in memory, e.g. the sharp copy sent to Gemini becoming the
  * entry's journal photo, which uses the journal's size and quality (the defaults).
  */

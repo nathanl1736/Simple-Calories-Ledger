@@ -1,15 +1,17 @@
 import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppState, Meal } from '../types';
 import { MAX_ESTIMATE_PHOTOS } from '../aiEstimate';
-import { compressImage, SHARP_PHOTO_OPTIONS } from '../image';
+import { compressImages, SHARP_PHOTO_OPTIONS } from '../image';
 import { geminiModelLabel, readGeminiKeyStatus } from '../geminiEstimate';
-import { elapsedText } from '../estimateJob';
+import { elapsedText, estimatingLabel } from '../estimateJob';
 import { type UsualChip } from '../logUsuals';
 import { energyLabel, energyValue, fmt, fmtPortion } from '../utils';
-import { type EstimateJob, type LogDraft } from '../appTypes';
+import { type EstimateJob, type LogDraft, type LogMode } from '../appTypes';
 import { Modal } from '../ui/Modal';
 import { Icon, type IconName } from '../ui/icons';
 import { ConnectGeminiCard } from './ConnectGemini';
+import { MAX_SUGGEST_PHOTOS } from '../suggest';
+import { SuggestComposer, SuggestResult, type SuggestProps } from './SuggestSheet';
 
 /** The composer's textarea grows from two lines to five, then scrolls. */
 const COMPOSER_MIN_PX = 72;
@@ -18,17 +20,26 @@ const LONG_PRESS_MS = 450;
 
 /**
  * Log food: one sheet, a composer rather than a menu. Describe or photograph what was eaten and
- * Estimate; or tap a usual to log it at once; or pick another way below. Opened by the sparkle on
- * any tab, the Now line, the first-run card and Journal. What it logs goes to the day shown on Today.
+ * Estimate; or tap a usual to log it at once; or pick another way below. Its Suggest mode asks what
+ * to eat instead: where you're going or what's at home, and Gemini fits it to the day and the week.
+ * Opened by the sparkle on any tab, the Now line, the first-run card and Journal. What it logs goes
+ * to the day shown on Today.
  */
 export function LogSheet(props: {
   open: boolean;
+  /** "Log food", or which day it is for when that isn't today. */
   title: string;
+  /** The title in Suggest mode. */
+  suggestTitle: string;
   state: AppState;
+  mode: LogMode;
+  onMode: (mode: LogMode) => void;
   /** The meal a usual logs to, and the usuals shown. */
   meal: Meal;
   draft: LogDraft;
   setDraft: (update: (draft: LogDraft) => LogDraft) => void;
+  /** What Suggest mode asks and shows. */
+  suggest: SuggestProps;
   job: EstimateJob | null;
   chips: UsualChip[];
   onClose: () => void;
@@ -44,7 +55,6 @@ export function LogSheet(props: {
   onSearch: () => void;
   onRoughMeal: () => void;
   onBatch: () => void;
-  onSuggest: () => void;
   onPasteEstimate: () => void;
   onSaveKey: (key: string) => Promise<void>;
 }) {
@@ -60,12 +70,17 @@ export function LogSheet(props: {
   const textRef = useRef<HTMLTextAreaElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
-  const running = job?.status === 'running';
-  const ready = job?.status === 'ready';
-  const failed = job?.status === 'failed';
+  const suggesting = props.mode === 'suggest';
+  // A request belongs to the mode that asked it; the other mode sees the sheet as if nothing were running.
+  const jobHere = job && (job.kind === 'suggest') === suggesting ? job : null;
+  const running = jobHere?.status === 'running';
+  const ready = jobHere?.status === 'ready';
+  const failed = jobHere?.status === 'failed';
+  // One request at a time: while one runs, the sheet stays in its mode.
+  const lockedTo: LogMode | null = job?.status === 'running' ? (job.kind === 'suggest' ? 'suggest' : 'log') : null;
   const unit = energyLabel(state);
 
-  // Each opening starts in Log mode with the chips logging on tap.
+  // Each opening starts with the chips logging on tap.
   useEffect(() => {
     if (!open) return;
     setConnectFor(null);
@@ -76,7 +91,7 @@ export function LogSheet(props: {
   // On a desktop the text box takes the cursor straight away. Not on a phone: the keyboard would
   // cover the usuals, which are one tap from logged.
   useEffect(() => {
-    if (!open || running || ready || typeof matchMedia !== 'function' || !matchMedia('(pointer: fine)').matches) return;
+    if (!open || suggesting || running || ready || typeof matchMedia !== 'function' || !matchMedia('(pointer: fine)').matches) return;
     const timer = window.setTimeout(() => textRef.current?.focus({ preventScroll: true }), 340);
     return () => window.clearTimeout(timer);
   }, [open]);
@@ -105,12 +120,18 @@ export function LogSheet(props: {
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.max(COMPOSER_MIN_PX, Math.min(COMPOSER_MAX_PX, el.scrollHeight + 2))}px`;
-  }, [draft.text, open, connectFor, job?.status]);
+  }, [draft.text, open, connectFor, job?.status, suggesting]);
 
   const editDraft = (update: (current: LogDraft) => LogDraft) => {
     // Changing what's asked starts afresh, so the button goes back to Estimate.
     if (failed) props.onDismissJob();
     props.setDraft(update);
+  };
+
+  const switchMode = (next: LogMode) => {
+    if (next === props.mode || lockedTo) return;
+    setConnectFor(null);
+    props.onMode(next);
   };
 
   const addPhotos = async (files: FileList | null) => {
@@ -119,17 +140,9 @@ export function LogSheet(props: {
     if (!list.length) return;
     setPhotoError('');
     setAddingPhotos(true);
-    const added: string[] = [];
-    // One at a time: full-size phone photos decoded together can exhaust memory.
-    for (const file of list) {
-      try {
-        const photo = await compressImage(file, SHARP_PHOTO_OPTIONS);
-        if (photo) added.push(photo);
-      } catch {
-        setPhotoError('One photo couldn’t be read. Try taking it again.');
-      }
-    }
-    editDraft(current => ({ ...current, photos: [...current.photos, ...added].slice(0, MAX_ESTIMATE_PHOTOS) }));
+    const { photos, failed: unreadable } = await compressImages(list, SHARP_PHOTO_OPTIONS);
+    if (unreadable) setPhotoError('One photo couldn’t be read. Try taking it again.');
+    editDraft(current => ({ ...current, photos: [...current.photos, ...photos].slice(0, MAX_ESTIMATE_PHOTOS) }));
     setAddingPhotos(false);
   };
 
@@ -148,7 +161,7 @@ export function LogSheet(props: {
   };
   const suggest = () => {
     if (!hasKey) return setConnectFor('suggest');
-    props.onSuggest();
+    props.suggest.onRun();
   };
 
   // Chips: a tap logs; touch and hold (or right-click, or More) opens the review sheet first.
@@ -202,7 +215,8 @@ export function LogSheet(props: {
     ? <img className="log-status-thumb" src={photos[0]} alt="" />
     : <span className="log-status-glyph" aria-hidden="true"><Icon name="sparkle" size={22} filled /></span>;
 
-  const elapsed = running && job ? elapsedText(now - job.startedAt) : '';
+  const elapsed = running && jobHere ? elapsedText(now - jobHere.startedAt) : '';
+  const showResult = suggesting && !!props.suggest.session && props.suggest.view === 'result';
 
   let top: ReactNode;
   if (connectFor) {
@@ -214,19 +228,19 @@ export function LogSheet(props: {
         onConnected={() => {
           const next = connectFor;
           setConnectFor(null);
-          if (next === 'suggest') props.onSuggest();
+          if (next === 'suggest') props.suggest.onRun();
           else props.onEstimate();
         }}
       />
     );
-  } else if (running && job) {
+  } else if (running && jobHere) {
     top = (
-      <section className="log-status" aria-label="Estimating">
+      <section className="log-status" aria-label={suggesting ? 'Finding ideas' : 'Estimating'}>
         <div className="log-status-main">
-          {thumb(job.photos)}
+          {thumb(jobHere.photos)}
           <div className="log-status-text" aria-live="polite">
-            <strong><span className="log-spinner" aria-hidden="true" />Estimating…</strong>
-            {job.description && <span className="log-status-desc">{job.description}</span>}
+            <strong><span className="log-spinner" aria-hidden="true" />{estimatingLabel(null, jobHere.kind)}</strong>
+            {jobHere.description && <span className="log-status-desc">{jobHere.description}</span>}
             {elapsed && <span className="log-status-elapsed">{elapsed}</span>}
           </div>
           <button type="button" className="text-btn log-status-cancel" onClick={props.onCancelEstimate}>Cancel</button>
@@ -234,14 +248,14 @@ export function LogSheet(props: {
         <p className="hint log-status-note">You can close this. Dawni will let you know when it’s ready.</p>
       </section>
     );
-  } else if (ready && job) {
+  } else if (ready && jobHere) {
     top = (
       <section className="log-status is-ready" aria-label="Your estimate is ready">
         <div className="log-status-main">
-          {thumb(job.photos)}
+          {thumb(jobHere.photos)}
           <div className="log-status-text">
             <strong>Your estimate is ready</strong>
-            {job.description && <span className="log-status-desc">{job.description}</span>}
+            {jobHere.description && <span className="log-status-desc">{jobHere.description}</span>}
           </div>
         </div>
         <div className="log-status-actions">
@@ -249,6 +263,21 @@ export function LogSheet(props: {
           <button type="button" className="text-btn" onClick={props.onDismissJob}>Start again</button>
         </div>
       </section>
+    );
+  } else if (showResult && props.suggest.session) {
+    top = <SuggestResult state={state} session={props.suggest.session} props={props.suggest} />;
+  } else if (suggesting) {
+    top = (
+      <SuggestComposer
+        open={open}
+        state={state}
+        props={props.suggest}
+        error={failed ? jobHere?.error || '' : ''}
+        timedOut={!!(failed && jobHere?.timedOut)}
+        onTypeIn={typeIn}
+        onDismissError={() => { if (failed) props.onDismissJob(); }}
+        onRun={suggest}
+      />
     );
   } else {
     top = (
@@ -280,8 +309,8 @@ export function LogSheet(props: {
         )}
         {(failed || photoError) && (
           <div className="log-error" role="alert">
-            <p>{failed ? job?.error : photoError}</p>
-            {failed && job?.timedOut && <button type="button" className="secondary" onClick={typeIn}>Type it in</button>}
+            <p>{failed ? jobHere?.error : photoError}</p>
+            {failed && jobHere?.timedOut && <button type="button" className="secondary" onClick={typeIn}>Type it in</button>}
           </div>
         )}
         <div className="log-toolbar">
@@ -305,16 +334,16 @@ export function LogSheet(props: {
   }
 
   return (
-    <Modal open={open} title={props.title} onClose={props.onClose} bottomSheet className="log-sheet">
+    <Modal open={open} title={suggesting ? props.suggestTitle : props.title} onClose={props.onClose} bottomSheet className="log-sheet">
       <div className="log-body">
         <div className="seg log-mode" role="group" aria-label="Log or suggest">
-          <button type="button" className="active" aria-pressed="true">Log</button>
-          <button type="button" aria-pressed="false" onClick={suggest}>Suggest</button>
+          <button type="button" className={suggesting ? '' : 'active'} aria-pressed={!suggesting} disabled={lockedTo === 'suggest'} onClick={() => switchMode('log')}>Log</button>
+          <button type="button" className={suggesting ? 'active' : ''} aria-pressed={suggesting} disabled={lockedTo === 'log'} onClick={() => switchMode('suggest')}>Suggest</button>
         </div>
 
         {top}
 
-        {!running && !ready && !connectFor && props.chips.length > 0 && (
+        {!suggesting && !running && !ready && !connectFor && props.chips.length > 0 && (
           <section className="log-usuals" aria-label={`Usuals for ${props.meal.toLowerCase()}`}>
             <div className="log-section-head">
               <span>{checking ? 'Tap one to check it before logging' : `Usuals for ${props.meal.toLowerCase()}`}</span>
@@ -348,32 +377,40 @@ export function LogSheet(props: {
           </section>
         )}
 
-        <section className="log-ways-section" aria-label="Other ways to log">
-          <div className="log-section-head"><span>Other ways</span></div>
-          <div className="log-ways">
-            {way('edit', 'Type it in', typeIn)}
-            {way('search', 'Search foods', props.onSearch)}
-            {way('approx', 'Rough meal', props.onRoughMeal)}
-            {way('prep', 'Meal prep a batch', props.onBatch)}
-          </div>
-        </section>
+        {!suggesting && (
+          <section className="log-ways-section" aria-label="Other ways to log">
+            <div className="log-section-head"><span>Other ways</span></div>
+            <div className="log-ways">
+              {way('edit', 'Type it in', typeIn)}
+              {way('search', 'Search foods', props.onSearch)}
+              {way('approx', 'Rough meal', props.onRoughMeal)}
+              {way('prep', 'Meal prep a batch', props.onBatch)}
+            </div>
+          </section>
+        )}
 
         <footer className="log-foot">
           <div className="log-foot-row">
-            <p>Estimates can be wrong. You check the numbers before anything is saved.</p>
+            <p>{suggesting ? 'Suggestions are a starting point. You check the numbers before anything is saved.' : 'Estimates can be wrong. You check the numbers before anything is saved.'}</p>
             {hasKey && <p className="log-model">{model || 'Gemini'} · your key</p>}
           </div>
           <div className="log-foot-links">
-            <button type="button" className="link-btn" onClick={props.onPasteEstimate}>Paste an estimate from another chatbot</button>
+            {!suggesting && <button type="button" className="link-btn" onClick={props.onPasteEstimate}>Paste an estimate from another chatbot</button>}
             <button type="button" className="link-btn" aria-expanded={tipsOpen} onClick={() => setTipsOpen(current => !current)}>Tips</button>
           </div>
-          {tipsOpen && (
+          {tipsOpen && (suggesting ? (
+            <ul className="log-tips">
+              <li>Eating out: name the place (“Macca’s”, “a Thai place”) or photograph the menu. Hold your phone flat over it in good light so the small print is readable, and include dish descriptions and sides if you can. Up to {MAX_SUGGEST_PHOTOS} photos.</li>
+              <li>At home: say what’s in the fridge and how much time you have.</li>
+              <li>Not sure? Just ask. Dawni suggests something that fits what’s left today and how the week is going.</li>
+            </ul>
+          ) : (
             <ul className="log-tips">
               <li>Packaged food: photograph the nutrition panel flat and close, plus the front. Say how much you ate (e.g. 150 g, half the tub).</li>
               <li>Home cooking: list ingredients and amounts, including oil, butter and sauces, and how many serves it made.</li>
               <li>Meals out: a photo from above plus a short description works best.</li>
             </ul>
-          )}
+          ))}
         </footer>
       </div>
     </Modal>

@@ -128,6 +128,19 @@ await step('Mocked Gemini estimate reaches the review sheet', async () => {
   await s.closeAll();
 });
 
+await step('Suggest: a typed venue reaches a result with Log this', async () => {
+  await sparkle().click();
+  await visible(s.dialog());
+  await s.dialog().locator('.log-mode').getByRole('button', { name: 'Suggest', exact: true }).click();
+  await visible(s.dialog().getByText('What should I eat?', { exact: true }));
+  await s.dialog().locator('textarea').first().fill('Going to Macca’s for lunch');
+  await s.dialog().locator('button.log-estimate').click();
+  await visible(s.dialog().locator('.suggest-card'), 15000);
+  await visible(s.dialog().getByRole('button', { name: 'Log this' }));
+  await shot('suggest');
+  await s.closeAll();
+});
+
 await step('Long-press on an entry opens its menu', async () => {
   await s.scrollTo('[aria-label="Day line"]');
   const row = page.locator('[aria-label="Day line"] .tl-row, [aria-label="Day line"] [role=button]').first();

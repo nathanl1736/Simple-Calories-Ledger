@@ -21,7 +21,7 @@ export function GeminiKeyHelp() {
         <li>Free tier: Gemini Flash models with daily limits, which is plenty for logging meals. Pro models need a paid plan, where Google asks you to prepay credit (at least US$5).</li>
         <li>Once billing is linked to a key&apos;s Google project, every request on it is charged, even ones the free tier would have covered. To keep a free key, create it in a project without billing.</li>
         <li>The check is free on a free key. On a paid key it&apos;s one tiny request to the best model, a fraction of a cent.</li>
-        <li>Dawni only uses the key when you tap Estimate or Help me pick from a menu. The key is stored locally in this browser and is included in exported backups.</li>
+        <li>Dawni only uses the key when you tap Estimate or Suggest. The key is stored locally in this browser and is included in exported backups.</li>
       </ol>
       <div className="help-callout">Dawni picks the best model your key&apos;s plan allows, so it keeps working as Google releases new models. If one model is busy or not in your plan, it moves to the next. Upgraded to a paid plan? Tap Test key in Settings and Dawni switches to the better model straight away.</div>
     </>

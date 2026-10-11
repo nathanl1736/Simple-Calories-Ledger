@@ -160,6 +160,8 @@ export function TrackingView(props: {
   totals: ReturnType<typeof sum>;
   /** Opens Log food, for the meal given or the clock's. */
   onOpenLog: (meal?: Meal) => void;
+  /** Opens Log food in Suggest mode ("What should I eat?") for that meal. */
+  onSuggest: (meal: Meal) => void;
   onEditEntry: (entry: Entry) => void;
   onRepeatEntry: (entry: Entry) => void;
   onDeleteEntry: (id: string) => void;
@@ -449,7 +451,7 @@ export function TrackingView(props: {
                 target={goal}
                 part={section.part}
                 dark={sky.dark}
-                toEnd={row.entry.id === lastEntryId && !usuals.length}
+                toEnd={row.entry.id === lastEntryId && !nextMeal}
                 onEdit={props.onEditEntry}
                 onRepeat={props.onRepeatEntry}
                 onDelete={props.onDeleteEntry}
@@ -461,12 +463,15 @@ export function TrackingView(props: {
         {!ordered.length && !usuals.length && !(firstRun && isToday) && (
           <p className="tl-empty">{isToday ? <>Nothing logged yet. Tap <Icon name="sparkle" size={15} filled /> to log food.</> : isPast ? 'Nothing logged on this day.' : 'This day hasn’t started yet.'}</p>
         )}
-        {usuals.length > 0 && nextMeal && (
+        {nextMeal && (
           <div className="tl-now">
             <span className="tl-node now" aria-hidden="true" />
             <button type="button" className="tl-now-label" onClick={() => props.onOpenLog(nextMeal)} aria-label={`Log ${nextMeal.toLowerCase()}`}>Now</button>
-            {/* One tap logs a usual, with Undo; Now opens Log food for anything else. */}
-            <div className="tl-chips" role="group" aria-label={`${nextMeal} usuals`}>
+            {/* What should I eat? leads while there's room for the meal; one tap logs a usual, with Undo; Now opens Log food for anything else. */}
+            <div className="tl-chips" role="group" aria-label={`${nextMeal} ideas and usuals`}>
+              <button type="button" className="tl-chip tl-chip-suggest" onClick={() => props.onSuggest(nextMeal)}>
+                <Icon name="sparkle" size={14} filled /><b>What should I eat?</b>
+              </button>
               {usuals.map(usual => (
                 <button key={usual.key} type="button" className="tl-chip" onClick={() => props.onLogUsual(usual.latest, nextMeal)} aria-label={`Log ${usual.name} for ${nextMeal.toLowerCase()}, ${energyText(state, usual.latest.calories)}`}>
                   <Icon name="plus" size={14} /><b>{usual.name}</b><span>{fmt(energyValue(state, usual.latest.calories))}</span>
