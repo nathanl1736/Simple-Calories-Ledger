@@ -1037,62 +1037,6 @@ textarea { min-height: 78px; resize: vertical; }
   background: var(--color-photo-preview-bg);
 }
 .help-callout { background: var(--color-surface-soft); border: 1px solid var(--line); border-radius: 16px; padding: 12px; margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.45; }
-/* Help me pick from a menu */
-.menu-pick-modal, .menu-pick-result { display: grid; gap: 14px; }
-.menu-pick-intro { margin: 0; }
-.menu-pick-section { display: grid; gap: 8px; }
-.menu-pick-section .section { margin: 0; }
-.menu-pick-meal-hint, .menu-photo-tip { margin: 0; }
-.menu-pick-today { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; background: var(--color-surface-soft); border: 1px solid var(--color-border-soft); border-radius: var(--radius-card); padding: 10px; }
-.menu-pick-stat { min-width: 0; display: grid; gap: 3px; border-radius: 13px; padding: 9px 10px; background: color-mix(in srgb, var(--card) 72%, transparent); }
-.menu-pick-stat span { color: var(--muted); font-size: 13px; font-weight: var(--weight-label); letter-spacing: 0; text-transform: none; }
-.menu-pick-stat strong { font-size: 18px; line-height: 1.1; font-weight: var(--weight-bold); overflow-wrap: anywhere; }
-.menu-pick-stat small { color: var(--muted); font-size: 11.5px; font-weight: var(--weight-medium); line-height: 1.3; }
-.menu-pick-budget { grid-column: 1 / -1; margin: 2px 2px 0; color: var(--color-text-soft); font-size: var(--type-helper); line-height: 1.45; }
-.menu-pick-budget strong { color: var(--color-accent-text); }
-.menu-photo-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.menu-photo, .menu-photo-add { position: relative; aspect-ratio: 3 / 4; border-radius: 14px; overflow: hidden; }
-.menu-photo { background: var(--color-surface-raised); border: 1px solid var(--line); }
-.menu-photo img { width: 100%; height: 100%; object-fit: cover; }
-.menu-photo-remove { position: absolute; top: 4px; right: 4px; width: 30px; height: 30px; border-radius: var(--radius-pill); background: var(--color-photo-overlay); color: #fff; display: grid; place-items: center; }
-.menu-photo-remove span::before, .menu-photo-remove span::after { content: ""; position: absolute; left: 50%; top: 50%; width: 12px; height: 2px; border-radius: 999px; background: currentColor; }
-.menu-photo-remove span::before { transform: translate(-50%, -50%) rotate(45deg); }
-.menu-photo-remove span::after { transform: translate(-50%, -50%) rotate(-45deg); }
-.menu-photo-add { display: grid; place-items: center; align-content: center; gap: 6px; padding: 6px; background: var(--color-surface-soft); border: 1px dashed var(--line); color: var(--color-accent-text); font-size: 12px; font-weight: var(--weight-strong); line-height: 1.15; text-align: center; }
-.menu-photo-grid:has(.menu-photo-add:only-child) { grid-template-columns: 1fr; }
-.menu-photo-add:only-child { aspect-ratio: auto; min-height: 92px; grid-auto-flow: column; gap: 12px; font-size: var(--type-button); }
-.menu-pick-note { min-height: 70px; }
-.menu-pick-how .extra-info-body { grid-template-columns: 1fr; }
-.menu-pick-how-list { margin: 0; padding-left: 18px; color: var(--color-text-soft); font-size: var(--type-helper); line-height: 1.5; }
-.menu-pick-how .hint { margin: 0; }
-.menu-pick-loading { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; align-items: start; background: color-mix(in srgb, var(--accent) 8%, var(--color-surface-soft)); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: 16px; padding: 12px; }
-.menu-pick-loading p { margin: 3px 0 0; }
-.menu-pick-loading .hint { font-size: 12.5px; line-height: 1.35; }
-.menu-pick-spinner { width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 24%, transparent); border-top-color: var(--color-accent-text); animation: menuPickSpin .9s linear infinite; }
-@keyframes menuPickSpin { to { transform: rotate(360deg); } }
-.menu-pick-notice { margin-top: 0; }
-.menu-pick-result-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.menu-pick-result-head .section { margin: 0; }
-.menu-pick-card { display: grid; gap: 10px; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 9%, var(--color-surface-soft)), var(--color-surface-soft)); border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line)); border-radius: 20px; padding: 14px; }
-.menu-pick-card h3 { margin: 0; font-size: 22px; line-height: 1.15; font-weight: var(--weight-bold); overflow-wrap: anywhere; }
-.menu-pick-nutrition { grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr)); gap: 6px; }
-.menu-pick-nutrition div { padding: 9px 8px; }
-.menu-pick-nutrition strong { font-size: 16px; }
-.menu-pick-fit { margin: 0; color: var(--color-accent-text); font-size: var(--type-helper); font-weight: var(--weight-label); line-height: 1.4; }
-.menu-pick-reason, .menu-pick-tip { margin: 0; color: var(--color-text-soft); font-size: var(--type-body); line-height: 1.45; }
-.menu-pick-tip strong { color: var(--ink); }
-.menu-pick-log { width: 100%; }
-.menu-pick-alt-list { display: grid; background: var(--card); border: 1px solid var(--surface-border); border-radius: var(--radius-card); overflow: hidden; }
-.menu-pick-alt { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px; }
-.menu-pick-alt + .menu-pick-alt { border-top: 1px solid var(--color-border-soft); }
-.menu-pick-alt-main { display: grid; gap: 6px; min-width: 0; }
-.menu-pick-alt-main strong { font-size: 15px; line-height: 1.2; font-weight: var(--weight-bold); overflow-wrap: anywhere; }
-.menu-pick-alt-main small { color: var(--muted); font-size: 12.5px; font-weight: var(--weight-medium); line-height: 1.35; }
-.menu-pick-alt-log { min-height: 40px; padding: 0 14px; }
-.menu-pick-summary { margin-top: 0; }
-.menu-pick-summary strong { color: var(--ink); }
-.menu-pick-summary p { margin: 4px 0 0; }
-.menu-pick-caveat, .menu-pick-disclaimer { margin: 0; }
 /* Reviewing an AI estimate in Log Food */
 .estimate-review { display: grid; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: var(--color-surface-soft); border: 1px solid var(--color-border-soft); }
 .estimate-review .estimate-source-row { margin: 0; align-items: center; }
@@ -1107,7 +1051,6 @@ textarea { min-height: 78px; resize: vertical; }
 .estimate-refine .secondary { min-height: 48px; }
 /* Sits inside the calories panel, whose inputs use the big number style. */
 .calories-priority .estimate-refine input { min-height: 48px; padding: 10px 12px; font-size: 16px; font-weight: var(--weight-medium); letter-spacing: 0; text-align: left; }
-.menu-pick-card .estimate-assumptions, .menu-pick-card .estimate-warning { margin: 0; }
 .gemini-status { margin: 10px 0 0; }
 .gemini-status.is-ok { display: grid; gap: 4px; }
 .gemini-status > .hint { margin: 0; }
@@ -1990,8 +1933,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .daybox.today.daybox-quiet, .daybox.today.daybox-photo { border-color: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
 .journal-date-title, .date-pill.can-reset, .month-title.can-reset, .week-title.can-reset { background: var(--card); border-color: transparent; }
 
-/* AI and menu cards: plain inset panels, no accent wash. */
-.share-card, .menu-pick-card, .menu-pick-loading, .consistency-pill.today { background: var(--tl-inset); border-color: transparent; }
+/* AI and share cards: plain inset panels, no accent wash. */
+.share-card, .consistency-pill.today { background: var(--tl-inset); border-color: transparent; }
 .date-pill, .month-title, .week-title { background: var(--card); border-color: transparent; }
 .extra-info, .quick-picker, .photo-picker { background: var(--tl-inset); border-color: transparent; }
 .quick-picker input, .extra-info input, .extra-info textarea, .extra-info select { background: var(--card); }
@@ -2208,7 +2151,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .log-status-actions { display: flex; align-items: center; gap: 14px; }
 .log-status-actions .primary { flex: 1; border-radius: 24px; font-size: 16px; }
 .log-status-actions .text-btn { min-height: 44px; font-size: 15px; }
-.log-spinner { display: inline-block; flex: none; width: 15px; height: 15px; margin-right: 8px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent); border-top-color: var(--color-accent-text); animation: menuPickSpin .9s linear infinite; }
+.log-spinner { display: inline-block; flex: none; width: 15px; height: 15px; margin-right: 8px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent); border-top-color: var(--color-accent-text); animation: logSpin .9s linear infinite; }
+@keyframes logSpin { to { transform: rotate(360deg); } }
 
 /* Usuals: one row that scrolls sideways. A tap logs; hold (or More) to check first. */
 .log-chips { display: flex; gap: 8px; margin: 0 -16px; padding: 0 16px 2px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
@@ -2283,3 +2227,52 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .meal-chip-row, .rough-meal-meals { position: relative; flex-wrap: nowrap; gap: 10px; margin: 0 -16px; padding: 0 16px 2px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .meal-chip-row::-webkit-scrollbar, .rough-meal-meals::-webkit-scrollbar { display: none; }
 .meal-chip, .rough-meal-meals .chip { flex: none; min-height: 44px; }
+
+/* ===== 3.0 Suggest (chunk 3) ===== */
+/* What should I eat?: the Log sheet's Suggest mode, its result, and its chip on Today's Now line. */
+.suggest-composer .suggest-text { min-height: 96px; }
+.log-note { padding: 2px 4px; }
+.log-note p { margin: 0; color: var(--muted); font-size: 14px; line-height: 19px; }
+.suggest-meal { display: grid; gap: 8px; }
+.suggest-meal .log-section-head { margin-bottom: 0; }
+.suggest-hint { margin: 0 4px; }
+.suggest-budget { margin: 2px 4px 0; color: var(--color-text-soft); font-size: 15px; line-height: 20px; letter-spacing: -.23px; }
+.suggest-budget strong { color: var(--color-accent-text); font-weight: var(--weight-semibold); }
+.suggest-how .extra-info-body { grid-template-columns: 1fr; }
+.suggest-how-list { margin: 0; padding-left: 18px; color: var(--color-text-soft); font-size: var(--type-helper); line-height: 1.5; }
+.suggest-how-list li + li { margin-top: 3px; }
+.suggest-how-list q { quotes: "\201C" "\201D"; color: var(--ink); overflow-wrap: anywhere; }
+.suggest-how .hint { margin: 0; }
+
+.suggest-result { display: grid; gap: 14px; }
+.suggest-result-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.suggest-result-head .section { margin: 0; }
+.suggest-card { display: grid; gap: 10px; padding: 14px; border-radius: 22px; background: var(--tl-inset); }
+.suggest-card h3 { margin: 0; font-size: 22px; line-height: 1.15; font-weight: var(--weight-bold); overflow-wrap: anywhere; }
+.suggest-portion { margin: -4px 0 0; color: var(--muted); font-size: 15px; line-height: 20px; letter-spacing: -.23px; }
+.suggest-nutrition { grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr)); gap: 6px; }
+.suggest-nutrition div { padding: 9px 8px; }
+.suggest-nutrition strong { font-size: 16px; }
+.suggest-fit { margin: 0; color: var(--color-accent-text); font-size: var(--type-helper); font-weight: var(--weight-label); line-height: 1.4; }
+.suggest-reason, .suggest-tip { margin: 0; color: var(--color-text-soft); font-size: var(--type-body); line-height: 1.45; }
+.suggest-tip strong { color: var(--ink); }
+.suggest-card .estimate-assumptions, .suggest-card .estimate-warning { margin: 0; }
+.suggest-log { width: 100%; }
+.suggest-section { display: grid; gap: 8px; }
+.suggest-section .section { margin: 0; }
+.suggest-alt-list { display: grid; overflow: hidden; border-radius: 22px; background: var(--tl-inset); }
+.suggest-alt { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px; }
+.suggest-alt + .suggest-alt { border-top: .5px solid var(--line); }
+.suggest-alt-main { display: grid; gap: 6px; min-width: 0; }
+.suggest-alt-main strong { font-size: 15px; line-height: 1.2; font-weight: var(--weight-bold); overflow-wrap: anywhere; }
+.suggest-alt-main small { color: var(--muted); font-size: 12.5px; font-weight: var(--weight-medium); line-height: 1.35; }
+.suggest-alt-log { min-height: 44px; padding: 0 16px; background: var(--card); }
+.suggest-summary { margin-top: 0; }
+.suggest-summary strong { color: var(--ink); }
+.suggest-summary p { margin: 4px 0 0; }
+.suggest-caveat, .suggest-disclaimer { margin: 0; }
+.suggest-actions { display: grid; gap: 8px; }
+
+/* The first chip on Today's Now line: a way in that isn't a food. */
+.tl-chip-suggest { background: var(--accent-tint); }
+.tl-chip-suggest b { color: var(--color-accent-text); }

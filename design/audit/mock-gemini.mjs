@@ -2,8 +2,10 @@
 //
 // The app (src/geminiEstimate.ts) first lists models, ranks them, then calls generateContent on the best one.
 // installGeminiMock() answers both, and picks the reply that matches the request: the user text of the request
-// starts with ESTIMATE REQUEST, BATCH ESTIMATE REQUEST or MENU PICK REQUEST (src/aiEstimate.ts, mealPrep.ts,
-// menuPick.ts); Test key sends "Reply with the word OK.".
+// starts with ESTIMATE REQUEST, BATCH ESTIMATE REQUEST or SUGGEST REQUEST (src/aiEstimate.ts, mealPrep.ts,
+// suggest.ts; the old MENU PICK REQUEST header still routes to a suggestion); Test key sends "Reply with the
+// word OK.". A suggestion reply is picked from what the user said: menu photos attached give the menu result,
+// Macca's (or another chain) the venue result, cooking or the fridge the home result, anything else a general one.
 //
 // controller.mode:
 //   ok          everything works, on the best model (Gemini 2.5 Pro)
@@ -25,7 +27,7 @@ const MODELS = [
   { name: 'models/text-embedding-004', displayName: 'Text Embedding 004', supportedGenerationMethods: ['embedContent'] }
 ];
 
-/* ---- payloads that match ESTIMATE_SCHEMA, BATCH_SCHEMA and MENU_PICK_SCHEMA ---- */
+/* ---- payloads that match ESTIMATE_SCHEMA, BATCH_SCHEMA and SUGGEST_SCHEMA ---- */
 
 export const ESTIMATE_BOWL = {
   source: 'estimate', name: 'Chicken burrito bowl', meal: 'Lunch', basis: 'serving', servingsEaten: 1, servingDescription: '1 bowl', servingGrams: 0, gramsEaten: 0,
@@ -64,19 +66,71 @@ export const BATCH_RESULT = {
 const MINCE_5STAR = MINCE.map(i => i.name.startsWith('Beef') ? { ...i, name: 'Beef mince, 5 star', calories: 1150, fat: 35 } : i);
 export const BATCH_REFINED = { ...BATCH_RESULT, ingredients: MINCE_5STAR, total: sum(MINCE_5STAR), assumptions: ['Rice weighed uncooked', 'Mince is 5 star, not drained'], confidence: 'high' };
 
+/** A menu photo was sent: dishes from the menu, one with its energy printed on it. */
 export const MENU_RESULT = {
   menuReadable: true,
+  venue: '',
   pick: {
-    name: 'Grilled chicken Caesar salad (dressing on the side)', calories: 520, protein: 46, carbs: 22, fat: 28,
-    reason: 'High in protein and fits what is left for lunch.', tip: 'Ask for the dressing on the side.', fromMenu: false,
+    name: 'Grilled chicken Caesar salad (dressing on the side)', portion: '1 regular salad, dressing on the side', calories: 520, protein: 46, carbs: 22, fat: 28,
+    reason: 'High in protein and fits what is left for lunch.', tip: 'Ask for the dressing on the side.', source: 'menu', printedEnergy: false,
     assumptions: ['Regular serve', 'Bacon and parmesan included'], confidence: 'medium'
   },
   alternatives: [
-    { name: 'Salmon poke bowl', calories: 480, protein: 34, carbs: 52, fat: 14, reason: 'A lighter option with plenty of protein.', tip: '', fromMenu: true, assumptions: [], confidence: 'high' },
-    { name: 'Beef burrito bowl', calories: 640, protein: 40, carbs: 60, fat: 24, reason: 'More filling if lunch is your biggest meal.', tip: 'Skip the sour cream.', fromMenu: false, assumptions: ['Large serve of rice'], confidence: 'medium' }
+    { name: 'Salmon poke bowl', portion: '1 bowl', calories: 480, protein: 34, carbs: 52, fat: 14, reason: 'A lighter option with plenty of protein.', tip: '', source: 'menu', printedEnergy: true, assumptions: [], confidence: 'high' },
+    { name: 'Beef burrito bowl', portion: '1 bowl, no sour cream', calories: 640, protein: 40, carbs: 60, fat: 24, reason: 'More filling if lunch is your biggest meal.', tip: 'Skip the sour cream.', source: 'menu', printedEnergy: false, assumptions: ['Large serve of rice'], confidence: 'medium' }
   ],
   summary: 'You have about 710 Cal and 75 g of protein left today, so a protein-led lunch keeps dinner flexible.',
   note: 'The menu photo was a little dark, so portion sizes are estimates.'
+};
+
+/** "Going to Macca's": real items the chain is known for, with the energy it publishes. */
+export const SUGGEST_VENUE = {
+  menuReadable: true,
+  venue: 'Macca’s',
+  pick: {
+    name: 'McChicken', portion: '1 burger', calories: 410, protein: 22, carbs: 40, fat: 17,
+    reason: 'Fits your lunch range and keeps dinner open.', tip: 'Skip the mayo for about 80 Cal less.', source: 'venue', printedEnergy: true,
+    assumptions: ['Published energy for a regular McChicken'], confidence: 'high'
+  },
+  alternatives: [
+    { name: 'Chicken McNuggets (6 piece)', portion: '6 pieces, no sauce', calories: 290, protein: 16, carbs: 17, fat: 18, reason: 'A lighter pick if you want something small.', tip: 'Tomato sauce adds less than the creamy ones.', source: 'venue', printedEnergy: true, assumptions: ['Published energy, sauce not counted'], confidence: 'high' },
+    { name: 'Quarter Pounder with Cheese', portion: '1 burger', calories: 520, protein: 30, carbs: 38, fat: 28, reason: 'More filling and higher in protein.', tip: '', source: 'venue', printedEnergy: true, assumptions: ['Published energy for a regular burger'], confidence: 'high' }
+  ],
+  summary: 'You have about 710 Cal and 75 g of protein left today and the week is a little ahead, so a regular burger fits without squeezing dinner.',
+  note: 'These are the figures Macca’s publishes for the regular size.'
+};
+
+/** "Cooking at home, have chicken thighs and rice": a dish to cook, with a short method. */
+export const SUGGEST_HOME = {
+  menuReadable: true,
+  venue: '',
+  pick: {
+    name: 'Chicken thigh and rice bowl', portion: '1 bowl: 2 thighs, 3/4 cup cooked rice, greens', calories: 560, protein: 44, carbs: 52, fat: 18,
+    reason: 'High in protein and uses what you already have.', tip: 'Pan-fry seasoned thighs 6 minutes a side. Steam the rice, add greens and a squeeze of lemon.',
+    source: 'home', printedEnergy: false, assumptions: ['Skinless thighs', '1 tsp of oil to cook'], confidence: 'medium'
+  },
+  alternatives: [
+    { name: 'Chicken fried rice', portion: '1 bowl with an egg and frozen veg', calories: 610, protein: 38, carbs: 66, fat: 20, reason: 'Good for leftover rice.', tip: '', source: 'home', printedEnergy: false, assumptions: ['2 tsp of oil'], confidence: 'medium' },
+    { name: 'Lemon chicken and rice soup', portion: '1 large bowl', calories: 430, protein: 36, carbs: 42, fat: 12, reason: 'Lighter and still filling.', tip: '', source: 'home', printedEnergy: false, assumptions: ['Home-made stock'], confidence: 'medium' }
+  ],
+  summary: 'You have about 710 Cal and 75 g of protein left today, so a protein-led dinner at home keeps the week on track.',
+  note: ''
+};
+
+/** Anything else ("What should I eat?"). */
+export const SUGGEST_GENERAL = {
+  menuReadable: true,
+  venue: '',
+  pick: {
+    name: 'Chicken and avocado wrap', portion: '1 wrap with salad', calories: 480, protein: 36, carbs: 40, fat: 20,
+    reason: 'Quick, filling and high in protein.', tip: 'Add extra salad instead of sauce.', source: 'general', printedEnergy: false,
+    assumptions: ['Wholemeal wrap', 'Half an avocado'], confidence: 'medium'
+  },
+  alternatives: [
+    { name: 'Greek yoghurt, berries and nuts', portion: '1 bowl', calories: 320, protein: 28, carbs: 26, fat: 12, reason: 'A lighter option with plenty of protein.', tip: '', source: 'general', printedEnergy: false, assumptions: [], confidence: 'medium' }
+  ],
+  summary: 'You have about 710 Cal and 75 g of protein left today, so a protein-led lunch keeps dinner flexible.',
+  note: ''
 };
 
 /* ---- the route handler ---- */
@@ -116,7 +170,7 @@ export async function installGeminiMock(context, controller = createGeminiContro
     const photos = (body?.contents?.[0]?.parts || []).filter(part => part.inlineData).length;
     const kind = /Reply with the word OK/.test(userText) ? 'ping'
       : /^BATCH ESTIMATE REQUEST/m.test(userText) || /meal prep for Dawni/.test(system) ? 'batch'
-        : /^MENU PICK REQUEST/m.test(userText) || /menu helper in Dawni/.test(system) ? 'menu'
+        : /^(SUGGEST|MENU PICK) REQUEST/m.test(userText) || /"What should I eat\?" helper in Dawni|menu helper in Dawni/.test(system) ? 'suggest'
           : 'estimate';
     const refine = /Correction from the user:/.test(userText);
     controller.log.push({ kind: `generate:${kind}`, model, mode: controller.mode, photos, refine });
@@ -131,17 +185,26 @@ export async function installGeminiMock(context, controller = createGeminiContro
       default: break;
     }
 
-    const text = payloadText(kind, { refine, photos, mode: controller.mode });
+    const text = payloadText(kind, { refine, photos, mode: controller.mode, userText });
     return reply(200, { candidates: [{ content: { parts: [{ text }], role: 'model' }, finishReason: 'STOP' }] });
   });
   return controller;
 }
 
-function payloadText(kind, { refine, photos, mode }) {
+/** The suggestion that fits what was asked: photos, a named chain, cooking at home, or anything else. */
+function suggestionFor(userText, photos) {
+  if (photos > 0) return MENU_RESULT;
+  const said = (userText.match(/^What the user said: (.*)$/m) || [])[1] || '';
+  if (/macca|mcdonald|subway|kfc|hungry jack/i.test(said)) return SUGGEST_VENUE;
+  if (/cook|fridge|home|make/i.test(said)) return SUGGEST_HOME;
+  return SUGGEST_GENERAL;
+}
+
+function payloadText(kind, { refine, photos, mode, userText }) {
   if (kind === 'ping') return 'OK';
   if (mode === 'unreadable') return 'Sorry, I could not work that one out. Could you tell me a bit more about what was in it?';
   if (kind === 'batch') return JSON.stringify(refine ? BATCH_REFINED : BATCH_RESULT);
-  if (kind === 'menu') return JSON.stringify(MENU_RESULT);
+  if (kind === 'suggest') return JSON.stringify(suggestionFor(userText, photos));
   if (refine) return JSON.stringify(ESTIMATE_BOWL_SMALL);
   return JSON.stringify(photos > 0 ? ESTIMATE_LABEL : ESTIMATE_BOWL);
 }

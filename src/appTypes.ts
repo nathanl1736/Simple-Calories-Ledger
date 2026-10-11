@@ -47,13 +47,18 @@ export type BatchSheetRequest = { mode: 'new' | 'edit' | 'again'; batchId: strin
 /** What's typed and photographed in the Log sheet's composer. Kept by the app, so it survives closing the sheet. */
 export type LogDraft = { text: string; photos: string[] };
 
+/** The Log sheet's two modes: describe what was eaten, or ask what to eat. */
+export type LogMode = 'log' | 'suggest';
+
 /**
- * An estimate asked of Gemini from the Log sheet. It carries on when the sheet is closed:
- * `running` shows the pill above the tab bar, `ready` waits for Review, `failed` keeps what
- * went wrong for the sheet to show next to Try again.
+ * A request to Gemini from the Log sheet: an estimate of what was eaten, or a suggestion of what to
+ * eat. It carries on when the sheet is closed: `running` shows the pill above the tab bar, `ready`
+ * (an estimate) waits for Review, `failed` keeps what went wrong for the sheet to show next to Try
+ * again. A suggestion that lands is kept as the app's last suggestion instead, so it has no `ready`.
  */
 export type EstimateJob = {
   id: number;
+  kind: 'estimate' | 'suggest';
   status: 'running' | 'ready' | 'failed';
   description: string;
   photos: string[];
