@@ -29,7 +29,7 @@ If you are a Claude session picking this up (Fable, Opus or Sonnet), this file i
 | Chunk 0: split `App.tsx` into files, zero behaviour change | done and merged (c843a02); verified: 150/150 declarations moved once, tsc, 88 tests, build, `design/audit/smoke.mjs` |
 | Chunk 1: Log sheet + estimate flow + tap-to-save + inline key connect (Opus) | done and merged with chunk 2; 127 tests; smoke OK light+dark; screenshots in design/build/chunk1/ |
 | Chunk 2: `weekView.ts` + Week screen + Today week row (Opus) | done and merged (6c8a104); 106 tests; owner's Saturday reconciles (163 to even out, Sunday about 1,287 = 1,450 − 163); screenshots in design/build/chunk2/; `weekViewFor(...).promptLine` ready for chunk 3 |
-| Chunk 3: Suggest mode (Sonnet) | running (resumed after a usage-limit stop) |
+| Chunk 3: Suggest mode (Sonnet) | done and merged; 148 tests; smoke has a Suggest step; screenshots in design/build/chunk3/ |
 | Chunk 4: Motion (Sonnet, parallel with 3) | running (resumed after a usage-limit stop) |
 | Chunk 5: a11y/polish, version 3.0.0.0, release notes (Sonnet) | after 3+4 (PDD v0.2 already done, 420590b) |
 | Verify with re-captured screenshots; fix; PR; CI; merge; confirm Pages deploy | last |
