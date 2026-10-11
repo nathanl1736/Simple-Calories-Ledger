@@ -3,25 +3,27 @@ Calories Tracker Product Design Document
 
 App Name: Dawni: Weekly Calorie Tracker
 Subtitle: A calm, local-first calorie tracking companion for sustainable weekly consistency
-Document version: 0.1
+Document version: 0.2
 Created: 2026-04-30
-Product stage: PWA-to-Capacitor planning
+Updated: 2026-10-10 (v0.2: AI-first logging with the user's own Gemini key; Week view model rebuilt)
+Product stage: PWA (3.0), Capacitor planning
 
 1. Executive Summary
-This product is not trying to become the most advanced AI calorie tracker. Its stronger identity is a calm, practical, local-first calorie tracking companion that helps users build a sustainable lifestyle through weekly planning, repeatable routines, and low-stress progress feedback.
-The app should make users feel in control even when individual days are imperfect. Its strongest differentiator is not food-recognition technology. It is the ability to help users understand their week, reuse common routines, protect their data, and avoid the guilt cycle that many tracking apps create.
-DecisionDirectionPrimary positioningA sustainable lifestyle companion for calorie and macro tracking.Core differentiatorWeekly flexibility: calorie banking, weekly budget, adherence, and routine reuse.Free product promiseA complete manual calorie/macro tracker that is useful without payment.Pro product promisePlanning, speed, backup confidence, native convenience, and reflection tools.What to avoidOverpromising AI accuracy, selling unreliable data, or locking basic tracking behind payment.
+Dawni is a calm, practical, local-first calorie tracking companion that helps users build a sustainable lifestyle through weekly planning, repeatable routines, and low-stress progress feedback. Since v0.2 it is AI-first, not AI-dependent: the default way to log is to describe or photograph what you ate and let the user's own Gemini key estimate it, while typing numbers in, saved foods, favourites and meal prep stay one tap away. Because the key is bring-your-own, there is no hosted AI cost and no account.
+The app should make users feel in control even when individual days are imperfect. AI makes logging fast; it is not the differentiator. The differentiator is helping users understand their week, reuse common routines, protect their data, and avoid the guilt cycle that many tracking apps create. Every estimate is labelled, shows its assumptions, and is edited by the user before it is saved.
+DecisionDirectionPrimary positioningA sustainable lifestyle companion for calorie and macro tracking, where logging a meal takes a sentence or a photo.Core differentiatorWeekly flexibility: calorie banking, weekly budget, adherence, and routine reuse.Default loggingDescribe or photograph food; Gemini (your own key) estimates it; you review and log. Manual entry is always one tap away.Free product promiseA complete calorie/macro tracker, AI and manual, that is useful without payment.Pro product promisePlanning, speed, backup confidence, native convenience, and reflection tools.What to avoidOverpromising AI accuracy, hiding the AI's assumptions, selling unreliable data, or locking basic tracking behind payment.
 2. Product Vision
 Build a simple, local-first calorie tracker that helps people stay consistent across real-life weeks rather than chase perfect daily tracking.
 2.1 One-sentence product promise
-Track your food, reuse your routines, manage your weekly calorie bank, and build a lifestyle that survives real days out.
+Say what you ate, reuse your routines, manage your weekly calorie bank, and build a lifestyle that survives real days out.
 2.2 Product identity
-This app isThis app is notA calm calorie ledgerA medical nutrition appA sustainable weekly planning toolA strict daily punishment/streak appA local-first personal trackerA social fitness networkA practical routine builderA flashy AI-first noveltyA transparent estimatorA fake-precision nutrition authority2.3 Product north star
+This app isThis app is notA calm calorie ledgerA medical nutrition appA sustainable weekly planning toolA strict daily punishment/streak appA local-first personal trackerA social fitness networkA practical routine builderAn AI that hides its guessesA transparent estimatorA fake-precision nutrition authority2.3 Product north star
 The user should be able to open the app and quickly answer:
 • What have I eaten today?
 • How much room do I have left today?
 • Am I still on track this week?
 • What routine meal can I log quickly?
+• What should I eat next to stay on track?
 • Is my data safe?
 
 3. Target User
@@ -41,17 +43,17 @@ The app can assume the user:
 The app should not assume the user:
 • Wants a strict diet coach.
 • Wants social comparison.
-• Wants subscription-heavy AI features.
+• Wants subscription-heavy AI features (Dawni uses the user's own free Gemini key instead).
 • Trusts unverified barcode or food database results.
 
 4. Design Principles
-PrincipleMeaningReduce anxietyTracking should answer “am I okay?” without shame language.Weekly consistency over daily perfectionThe app should make banking and weekly averages easy to understand.Core tracking stays freeManual calorie/macro tracking should not be crippled.No fake precisionEstimated data should be clearly labelled and editable.Local-first trustUsers should feel they own their data and can back it up.Pro must save time or improve planningPaid features should feel useful, not randomly withheld.Avoid dependency trapsDo not launch paid features that require unreliable data sources or ongoing AI cost.4.1 Decision filter for new features
+PrincipleMeaningReduce anxietyTracking should answer “am I okay?” without shame language.Weekly consistency over daily perfectionThe app should make banking and weekly averages easy to understand.Core tracking stays freeManual calorie/macro tracking should not be crippled.No fake precisionEstimated data should be clearly labelled and editable.Local-first trustUsers should feel they own their data and can back it up.Pro must save time or improve planningPaid features should feel useful, not randomly withheld.Avoid dependency trapsDo not launch paid features that require unreliable data sources or ongoing AI cost. AI runs on the user's own key, and every AI path has a manual equivalent.Never lock the user outNo sheet that cannot be closed, no network call without a timeout, no save that needs a gesture when a tap would do.4.1 Decision filter for new features
 Before building a feature, ask:
 1. Does this help the user track, reuse, plan, reflect, or protect their data?
 2. Is the output deterministic and explainable?
 3. Does this reduce friction or reduce anxiety?
 4. Does this create a support burden or hidden cost?
-5. Would this still be useful without AI or a backend?
+5. Does it still work without a Gemini key or a backend (a manual path one tap away)?
 If the answer is mostly no, defer it.
 
 5. Emotional Tone and UX Language
@@ -65,11 +67,12 @@ Use this toneAvoid this toneCalm, practical, reassuringPunitive, alarmist, ob
 
 6. Core User Loop
 1. Open app and check today’s remaining calories/protein.
-2. Log food manually, from saved foods, or from a reusable meal/template.
+2. Describe or photograph food and review Gemini's estimate; or tap a usual, search saved foods, or type the numbers in.
 3. See today’s progress without shame language.
 4. Use weekly bank/projection to understand the bigger picture.
 5. Complete the day or leave it editable.
 6. Reflect through stats, journal, photos, or weekly adherence.
+6a. When there is room left, ask "What should I eat?" with a venue, what is in the fridge, or a menu photo.
 7. Back up/export data when prompted or through auto-backup/native sharing.
 6.1 Daily loop
 The daily loop is about logging quickly and keeping the day understandable.
@@ -87,8 +90,8 @@ The weekly loop is the product’s strongest differentiator.
 • Make practical adjustments instead of overcorrecting.
 
 7. Feature Pillars
-PillarScopeTrackDaily calorie/macro tracking, meal categories, edit/delete, per-serving/per-100g, kcal/kJ.ReuseRecent foods, favourites, saved foods, meal templates, copy day, quick-add presets.PlanCalories Bank, weekly budget, projected week, adherence score, cutting/maintaining/bulking success rules.ReflectStats, photo journal, meal cards, collage, progress summary, completed-day averages.ProtectLocal-first storage, export/import, auto latest backup, restore preview, backup reminders.7.1 Track
-The Track pillar is the core free product. It should always be reliable, fast, and understandable. It includes manual logging, macro tracking, meal grouping, date navigation, unit support, and editing.
+PillarScopeTrackAI estimate from text or photos (the default), manual entry, daily calorie/macro tracking, meal categories, edit/delete, per-serving/per-100g, kcal/kJ.ReuseRecent foods, favourites, saved foods, meal templates, copy day, quick-add presets.PlanCalories Bank, weekly budget, projected week, adherence score, cutting/maintaining/bulking success rules. "What should I eat?" suggestions that know the day and the week.ReflectStats, photo journal, meal cards, collage, progress summary, completed-day averages.ProtectLocal-first storage, export/import, auto latest backup, restore preview, backup reminders.7.1 Track
+The Track pillar is the core free product. It should always be reliable, fast, and understandable. Logging starts from one composer: describe or photograph the food, review the estimate (confidence and assumptions shown, Refine available), and log with one tap. Manual logging, macro tracking, meal grouping, date navigation, unit support, and editing are all part of Track.
 7.2 Reuse
 The Reuse pillar reduces friction. The more often a user tracks, the more value they get from saved foods, favourites, templates, copy day, and quick-add presets.
 7.3 Plan
@@ -96,7 +99,7 @@ The Plan pillar gives the app its identity. The goal is to help users manage rea
 7.4 Reflect
 The Reflect pillar turns logged data into personal insight. It should help users notice patterns, celebrate consistency, and export/share progress if they want to.
 7.5 Protect
-The Protect pillar builds trust. Because the app is local-first, backup clarity is a product feature, not a technical afterthought.
+The Protect pillar builds trust. Because the app is local-first, backup clarity is a product feature, not a technical afterthought. The Gemini key and the "About you" text stay on the device; they are sent only to Google with each request and are included in backups.
 
 8. Free vs Pro Strategy
 The free tier should feel like a complete tracker. Pro should upgrade planning, speed, reflection, and backup confidence.
@@ -109,7 +112,7 @@ Suggested Pro message:
 Upgrade to Pro to plan your week, reuse meals faster, protect your data, and turn your logs into useful progress insight.
 
 9. Current App Audit
-FeatureDecisionNotesDaily trackingKeepPolish UI consistency and reduce friction.Macro trackingKeepMake protein progress especially clear.Saved foods/favourites/recentKeepImprove reuse pathways and template conversion.Built-in estimate databaseKeep cautiouslyKeep clearly labelled as estimates; avoid paid accuracy claims.Custom food database importSimplifyUseful for power users, but may be too complex for first App Store MVP.AI Quick LogRepositionTreat as BYO assistant/helper parser, not guaranteed paid intelligence.Photos/journalEnhance laterBasic photos free; collage/cards can be Pro.StatsReframeMove from generic charts to weekly lifestyle/planning feedback.Backup/exportStrengthenLocal-first trust needs obvious backup status and restore preview.Update checkerKeep freeReliability/maintenance feature, not a paid feature.9.1 Highest-value UX improvements
+FeatureDecisionNotesDaily trackingKeepPolish UI consistency and reduce friction.Macro trackingKeepMake protein progress especially clear.Saved foods/favourites/recentKeepImprove reuse pathways and template conversion.Built-in estimate databaseKeep cautiouslyKeep clearly labelled as estimates; avoid paid accuracy claims.Custom food database importSimplifyUseful for power users, but may be too complex for first App Store MVP.Estimate with GeminiKeep, primaryThe default way to log. One composer for text and photos; review before saving; timeout and cancel; works with the user's own key.What should I eat?KeepGeneralised from menu pick: venue, cooking at home, or a menu photo, aware of today and the week.Meal prepKeepOne cooked batch, logged a serve at a time.Week view modelRebuilt (3.0)The headline includes today, one rounding pass, plain working shown.AI Quick Log (copy/paste)Keep as fallbackFor users without a Gemini key; any chatbot works.Photos/journalEnhance laterBasic photos free; collage/cards can be Pro.StatsReframeMove from generic charts to weekly lifestyle/planning feedback.Backup/exportStrengthenLocal-first trust needs obvious backup status and restore preview.Update checkerKeep freeReliability/maintenance feature, not a paid feature.9.1 Highest-value UX improvements
 1. Make weekly planning language clearer.
 2. Explain Calories Bank and adherence in friendly help modals.
 3. Reduce visual inconsistency in typography and spacing.
@@ -124,7 +127,7 @@ Do not charge users for a feature that depends on nutrition data the app cannot 
 This means:
 • Barcode scanning should not be launched as a paid accuracy feature without a trustworthy data source.
 • Branded food databases should include source/date fields if added.
-• AI-generated nutrition should be positioned as a helper, not a guarantee.
+• AI-generated nutrition should be positioned as a helper, not a guarantee. Confidence and assumptions are shown, and the user edits before saving.
 • Users must be able to edit imported or estimated values.
 
 11. Capacitor / Native App Opportunities
@@ -166,7 +169,7 @@ Minimum success criteria:
 • Check safe areas, bottom navigation, modals, and keyboard.
 
 13. Roadmap
-StageGoalNowDocument vision, audit current app, fix UI/UX inconsistencies, simplify confusing advanced flows.Next buildImprove weekly stats language, Calories Bank clarity, help modals, and backup confidence.Capacitor prototypeAdd iOS shell, test persistence, safe areas, keyboard, photos, and share/export.First Pro candidateAdvanced planning + templates + auto backup + reminders + journal/card exports.Post-launchEvaluate user feedback before adding barcode, AI, cloud sync, Health, widgets, or iCloud.13.1 Suggested implementation order
+StageGoalNow3.0: AI-first logging (one composer, inline key setup, background estimates), "What should I eat?", Week view model rebuilt, motion and accessibility pass.Next buildImprove weekly stats language, Calories Bank clarity, help modals, and backup confidence.Capacitor prototypeAdd iOS shell, test persistence, safe areas, keyboard, photos, and share/export.First Pro candidateAdvanced planning + templates + auto backup + reminders + journal/card exports.Post-launchEvaluate user feedback before adding barcode, cloud sync, Health, widgets, or iCloud.13.1 Suggested implementation order
 1. Lock product language and design principles.
 2. Audit current app against this PDD.
 3. Clean up typography, spacing, and navigation consistency.
@@ -190,7 +193,7 @@ The app is succeeding if users say things like:
 15. Implementation Guidance for Codex
 When asking Codex to work on the app, give it the product principles first, then the exact feature scope. Avoid broad prompts like “make it more premium”.
 Suggested Codex instruction:
-Use the Product Design Document as the source of truth. Do not add AI, barcode, cloud sync, or large branded database features unless explicitly requested. Improve the app around sustainable weekly tracking, local-first data ownership, low-friction repeat logging, and calm progress feedback. Keep core manual tracking free and complete. Pro features should focus on planning, speed, backup confidence, native convenience, and reflection.
+Use the Product Design Document as the source of truth. AI logging with the user's own Gemini key is the default path; keep a manual path beside every AI path; never lock a sheet on a network call; label every estimate and show its assumptions. Do not add barcode, cloud sync, or large branded database features unless explicitly requested. Improve the app around sustainable weekly tracking, local-first data ownership, low-friction repeat logging, and calm progress feedback. Keep core tracking free and complete. Pro features should focus on planning, speed, backup confidence, native convenience, and reflection.
 15.1 Codex prompt for current app audit
 Review the current calorie tracker app against the Product Design Document. Produce a practical audit with four columns: Keep, Improve, Move to Pro, Defer. Focus on sustainable weekly tracking, repeat workflows, local-first data trust, and App Store readiness. Do not suggest barcode scanning, AI label reading, cloud sync, or large branded databases unless listed as deferred roadmap items.
 
@@ -208,9 +211,9 @@ Every app update should keep the app bundle and update metadata aligned.
 
 18. Appendix: One-page Product Summary
 Product: Local-first calorie and macro tracker.
-Positioning: A calm companion for sustainable weekly consistency.
-Not competing on: AI, barcode coverage, or perfect branded databases.
+Positioning: A calm, AI-first companion for sustainable weekly consistency.
+Not competing on: AI accuracy claims, barcode coverage, or perfect branded databases.
 Competing on: Weekly planning, fast reuse, data ownership, practical reflection, native convenience.
-Free: Complete manual tracker.
+Free: Complete tracker, AI estimate (own key) and manual.
 Pro: Planning, speed, backup confidence, native convenience, and journal/card reflection.
 Core phrase: Weekly consistency over daily perfection.

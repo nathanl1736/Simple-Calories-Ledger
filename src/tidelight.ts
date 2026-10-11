@@ -190,6 +190,7 @@ export const PLAN_FLOOR_SHARE = 0.8;
  * How much each day after today can have, treating today as using at least the target Today shows (its custom
  * target, or its share of a spread bank) until midnight. That keeps Today's "left today" and Week's pace telling
  * the same story. Null when today isn't in progress or nothing comes after it, so callers word the last day apart.
+ * Since 3.0 the screens plan from weekView.ts (today counts only its overage, every number rounded once); this stays for its tests.
  */
 export function restOfWeekPlan(days: PlanDay[], banked: number, today: string, todayTarget?: number) {
   const todayDay = days.find(day => day.date === today && day.status === 'today');
@@ -205,7 +206,7 @@ export function restOfWeekPlan(days: PlanDay[], banked: number, today: string, t
   return { days: after, perDay, todayExtra, overAtFloor: (perDay - even) * after.length };
 }
 
-/** "Tuesday took the week to −320. Thursday brought it back.": the week's lowest dip, told only once a later day has made it up. */
+/** "Tuesday took the week to −320. Thursday brought it back.": the week's lowest dip, told only once a later day has made it up. Not shown since 3.0. */
 export function weekStory(days: PlanDay[]) {
   let balance = 0;
   let low = 0;
@@ -225,7 +226,7 @@ export function weekStory(days: PlanDay[]) {
   return lowDate && backDate && low <= -100 ? { lowDate, low, backDate } : null;
 }
 
-/** The running balance at the end of each day that's finished or already counted, for the tide line. Held (light) days keep the line flat and are drawn dotted. */
+/** The running balance at the end of each day that's finished or already counted, for the tide line (removed from Week in 3.0). Held (light) days keep the line flat. */
 export function tideBalance(days: PlanDay[]) {
   let balance = 0;
   const points: { date: string; balance: number; held: boolean; counted: boolean }[] = [];
