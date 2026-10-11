@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppState, EnergyUnit, Entry } from '../types';
 import { downloadBlob } from '../image';
+import { mealCardFileName, photoFileName } from '../fileNames';
 import { canvasToPngBlob, MealGroup, renderMealCardCanvas } from '../canvas';
 import { estimateSourceLabel } from '../aiEstimate';
 import {
@@ -363,30 +364,31 @@ export async function shareMealCard(group: MealGroup, energyUnit: EnergyUnit, no
   try {
     const canvas = await renderMealCardCanvas(group, energyUnit);
     const blob = await canvasToPngBlob(canvas);
-    await sharePhotoBlob(blob, `simple-calories-ledger-${group.date}-${group.meal.toLowerCase()}.png`, 'Meal Summary', notify);
+    await sharePhotoBlob(blob, mealCardFileName(group.date, group.meal), 'Meal Summary', notify);
   } catch (err) {
     console.warn(err);
     notify('Could not share PNG');
   }
 }
 
-export async function sharePhoto(src: string, filename: string, notify: (text: string) => void) {
+/** Shares a journal photo as the file it is (a JPEG), named for the day it was logged. */
+export async function sharePhoto(src: string, date: string, notify: (text: string) => void) {
   const response = await fetch(src);
   const blob = await response.blob();
-  await sharePhotoBlob(blob, filename, 'Meal Photo', notify);
+  await sharePhotoBlob(blob, photoFileName(date, blob.type), 'Meal Photo', notify);
 }
 
 async function sharePhotoBlob(blob: Blob, filename: string, title: string, notify: (text: string) => void) {
-  const file = new File([blob], filename, { type: 'image/png' });
+  const file = new File([blob], filename, { type: blob.type || 'image/png' });
   if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
     await navigator.share({ files: [file], title, text: title });
     notify('Share sheet opened');
   } else {
     downloadBlob(blob, filename);
-    notify('Sharing unavailable. PNG downloaded instead');
+    notify(`Sharing unavailable. ${file.type === 'image/png' ? 'PNG' : 'Photo'} downloaded instead`);
   }
 }
 
 export function EntryPhotoModal({ entry, open, onClose, onReplace, onRemove, onShare }: { entry: Entry | null; open: boolean; onClose: () => void; onReplace: () => void; onRemove: () => void; onShare: () => void }) {
-  return <Modal open={open} title="Meal photo" onClose={onClose} className="lightbox" bottomSheet>{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share PNG</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
+  return <Modal open={open} title="Meal photo" onClose={onClose} className="lightbox" bottomSheet>{entry?.photo ? <><div className="photo-preview-shell"><img className="photo-preview-large" src={entry.photo} alt="" /></div><p className="hint">{entry.name} | {readable(entry.date)}</p><div className="actions vertical"><button className="primary" type="button" onClick={onReplace}>Replace</button><button className="primary" type="button" onClick={onShare}>Save / Share photo</button><button className="secondary danger" type="button" onClick={onRemove}>Remove</button></div></> : <div className="empty">No photo yet.</div>}</Modal>;
 }

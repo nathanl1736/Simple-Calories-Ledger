@@ -6,6 +6,7 @@ import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './s
 import { readState, saveState } from './storage';
 import { compressImage, recompressDataUrl } from './image';
 import { backupAgeDays, backupCounts, exportBackup, parseBackup } from './backup';
+import { newestNotes } from './releaseNotes';
 import { applyAppUpdate, checkForAppUpdate, clearUpdateReloadMarkers, dismissUpdatePrompt, registerServiceWorker, watchForUpdatesOnResume, type UpdateInfo } from './pwa';
 import { MealGroup } from './canvas';
 import { databaseItemToFood, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
@@ -16,7 +17,7 @@ import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickL
 import { buildEstimateRequest, estimateNotes, estimateSourceValue, parseGeminiEstimate, type GeminiEstimate } from './aiEstimate';
 import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstimate, requestSuggestion } from './geminiEstimate';
 import { usualChips, type UsualChip } from './logUsuals';
-import { removeEntry, restoreEntry, revertFoodUse, type RemovedEntry } from './undo';
+import { removeEntry, removeFood, restoreEntry, restoreFood, revertFoodUse, type RemovedEntry, type RemovedFood } from './undo';
 import { estimatingLabel, logSheetTitle, suggestSheetTitle } from './estimateJob';
 import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, parseBatchEstimate, pruneBatches } from './mealPrep';
 import { buildSuggestContext, buildSuggestRequest, isSuggestFresh, loadLastSuggest, mealBudget, parseSuggest, saveLastSuggest, suggestNotesLead, type SuggestItem, type SuggestSession } from './suggest';
@@ -1192,7 +1193,9 @@ export function App() {
       </button>
     </div>
   ) : null;
-  const updateNotes = (availableUpdate?.notes?.length ? availableUpdate.notes : ['Update available.']).slice(0, 5);
+  // release-notes.json is oldest first, so the sheet reads from the end: the newest five, newest first.
+  const newestUpdateNotes = newestNotes(availableUpdate?.notes ?? []);
+  const updateNotes = newestUpdateNotes.length ? newestUpdateNotes : ['Update available.'];
   const incomingVersion = availableUpdate?.version || '';
   const copyAiPrompt = () => navigator.clipboard
     ? navigator.clipboard.writeText(state.settings.aiPreferences.trim() ? `${AI_QUICK_LOG_PROMPT}\n\nAbout me: ${state.settings.aiPreferences.trim()}` : AI_QUICK_LOG_PROMPT).then(() => notify('Prompt copied')).catch(() => notify('Could not copy prompt'))
@@ -1239,7 +1242,295 @@ export function App() {
 
   return (
     <OpenSettingsContext.Provider value={openSettingsHere}>
-    <AppShell tab={tab} setTab={setTab} onLogFood={() => openLogSheet()} pill={pill}>
+    <AppShell tab={tab} setTab={setTab} onLogFood={() => openLogSheet()} pill={pill} overlays={(
+      <>
+        {/* Beside the page, not in it: the page is inert while a sheet is open, and these are opened from sheets. */}
+        <input ref={importRef} hidden type="file" accept="application/json" onChange={event => {
+          const file = event.target.files?.[0];
+          if (!file) return;
+          parseBackup(file).then(next => {
+            const counts = backupCounts(next);
+            if (!confirm(`Import backup and replace current local data? This backup has ${counts.entries} entries and ${counts.photos} photos.`)) return;
+            return persist(next).then(() => notify(`Backup imported: ${counts.entries} entries`));
+          }).catch(err => alert(err.message)).finally(() => {
+            if (importRef.current) importRef.current.value = '';
+          });
+        }} />
+        <input ref={customDatabaseImportRef} hidden type="file" accept="application/json" onChange={event => {
+          const file = event.target.files?.[0];
+          if (!file) return;
+          importCustomFoodDatabase(file).finally(() => {
+            if (customDatabaseImportRef.current) customDatabaseImportRef.current.value = '';
+          });
+        }} />
+        <input ref={photoInputRef} hidden type="file" accept="image/*" onChange={event => {
+          compressImage(event.target.files?.[0]).then(photo => {
+            setEntryDraft(draft => ({ ...draft, photo }));
+            if (photo) notify('Photo attached');
+          });
+        }} />
+        <input ref={entryPhotoInputRef} hidden type="file" accept="image/*" onChange={event => {
+          const file = event.target.files?.[0];
+          if (!file || !activePhotoEntryId) return;
+          compressImage(file).then(photo => updateState(draft => {
+            const entry = draft.entries.find(item => item.id === activePhotoEntryId);
+            if (entry) {
+              entry.photo = photo;
+              entry.updatedAt = Date.now();
+            }
+          })).then(() => notify('Meal photo saved'));
+        }} />
+        {/* Before the sheets it hands over to, so each of them opens above it as it slides away. */}
+        <LogSheet
+          open={modal === 'log'}
+          title={logSheetTitle(selectedDate, todayKey())}
+          suggestTitle={suggestSheetTitle(selectedDate, todayKey())}
+          state={state}
+          mode={logMode}
+          onMode={setLogMode}
+          meal={logMeal}
+          draft={logDraft}
+          setDraft={setLogDraft}
+          suggest={{
+            date: selectedDate,
+            meal: suggestMeal,
+            onMeal: setSuggestMeal,
+            draft: suggestDraft,
+            setDraft: setSuggestDraft,
+            session: activeSuggestion,
+            view: suggestView,
+            onChange: () => setSuggestView('compose'),
+            onStartOver: startOverSuggest,
+            onLog: item => activeSuggestion && prefillSuggestion(item, activeSuggestion.meal, activeSuggestion.result.venue),
+            onRun: startSuggest
+          }}
+          job={estimateJob}
+          chips={logChips}
+          // Its own close only: Estimate, a chip or another way may already have opened the next sheet.
+          onClose={() => setModal(current => (current === 'log' ? null : current))}
+          onEstimate={startEstimate}
+          onCancelEstimate={cancelEstimate}
+          onReview={() => estimateJob && reviewJob(estimateJob.id)}
+          onDismissJob={() => setEstimateJob(current => (current?.status === 'running' ? current : null))}
+          onLogChip={logChip}
+          onReviewChip={reviewChip}
+          onTypeIn={() => openEntry(logMeal)}
+          onSearch={openFoodSearch}
+          onRoughMeal={() => setModal('roughMeal')}
+          onBatch={() => openBatchSheet('new')}
+          onPasteEstimate={pasteAiQuickLogFromClipboard}
+          onSaveKey={saveGeminiKey}
+        />
+        <EntryModal
+          open={modal === 'entry'}
+          openMode={entryOpenMode}
+          state={state}
+          foods={state.foods}
+          draft={entryDraft}
+          setDraft={setEntryDraft}
+          onClose={() => setModal(current => (current === 'entry' ? null : current))}
+          onSave={saveEntry}
+          onPickPhoto={() => photoInputRef.current?.click()}
+          onSaveDatabaseFood={saveDatabaseFood}
+          onRefine={estimateSession && entryDraft.estimateDetails && !entryDraft.editingId ? refineGeminiEstimate : undefined}
+          onRoughMeal={() => setModal('roughMeal')}
+          onRepeat={id => {
+            const entry = state.entries.find(item => item.id === id);
+            if (!entry) return;
+            setModal(null);
+            repeatEntry(entry);
+          }}
+          onDelete={id => {
+            setModal(null);
+            deleteEntry(id);
+          }}
+          day={entryDay}
+        />
+        <FoodSearch
+          open={modal === 'foodSearch'}
+          state={state}
+          onClose={() => setModal(current => (current === 'foodSearch' ? null : current))}
+          onChoose={prefillFood}
+          onSaveDatabaseFood={saveDatabaseFood}
+          onLogNew={name => openEntry(defaultMealForLogging(), name)}
+          batches={batchesForDay}
+          onLogBatch={batch => {
+            setModal(null);
+            logBatchServe(batch, selectedDate);
+          }}
+        />
+        <FoodModal
+          food={activeFood}
+          open={modal === 'food'}
+          energyUnit={state.settings.energyUnit}
+          onClose={() => setModal(null)}
+          onSave={food => updateState(draft => {
+            const target = draft.foods.find(item => item.id === food.id);
+            if (target) Object.assign(target, food, { updatedAt: Date.now() });
+          }).then(() => {
+            setModal(null);
+            notify('Food updated');
+          })}
+          // Gone at once, with Undo for a few seconds rather than a confirm box. Diary entries stay either way.
+          onDelete={food => {
+            let removed = null as RemovedFood | null;
+            updateLatest(draft => {
+              const result = removeFood(draft.foods, food.id);
+              draft.foods = result.foods;
+              removed = result.removed;
+            }).then(() => {
+              setModal(null);
+              const gone = removed;
+              if (!gone) return;
+              notify('Food deleted', 5000, {
+                label: 'Undo',
+                run: () => updateLatest(draft => {
+                  draft.foods = restoreFood(draft.foods, gone);
+                }).then(() => notify('Undone'))
+              });
+            });
+          }}
+        />
+        <EntryPhotoModal
+          entry={activePhotoEntry}
+          open={modal === 'entryPhoto'}
+          onClose={() => setModal(null)}
+          onReplace={() => entryPhotoInputRef.current?.click()}
+          onRemove={() => activePhotoEntry && updateState(draft => {
+            const entry = draft.entries.find(item => item.id === activePhotoEntry.id);
+            if (entry) entry.photo = null;
+          }).then(() => {
+            setModal(null);
+            notify('Photo removed');
+          })}
+          onShare={() => activePhotoEntry?.photo && sharePhoto(activePhotoEntry.photo, activePhotoEntry.date, notify)}
+        />
+        <MealCardModal
+          state={state}
+          group={activeMealCard}
+          open={modal === 'mealCard'}
+          onClose={() => setModal(null)}
+          onShare={() => activeMealCard && shareMealCard(activeMealCard, energyUnitValue(state.settings.energyUnit), notify)}
+        />
+        <Modal open={modal === 'photo'} title="Meal photo" onClose={() => setModal(null)} className="lightbox" bottomSheet>
+          <div className="photo-preview-shell">{photoPreview ? <img className="photo-preview-large" src={photoPreview} alt="Meal" /> : <div className="empty">No photo available.</div>}</div>
+        </Modal>
+        <AiQuickLogModal
+          open={modal === 'aiQuickLog'}
+          fallbackMeal={aiQuickLogMeal}
+          seedText={aiQuickLogSeedText}
+          // Modal runs a close animation then calls onClose; if we already opened Log Food, do not setModal(null).
+          onClose={() => {
+            setAiQuickLogSeedText('');
+            setModal(current => (current === 'aiQuickLog' ? null : current));
+          }}
+          onParsed={prefillAiQuickLog}
+        />
+        <BatchSheet
+          open={modal === 'batch'}
+          request={batchSheet}
+          batch={batchSheet.batchId ? state.batches.find(batch => batch.id === batchSheet.batchId) || null : null}
+          state={state}
+          onEstimate={estimateBatch}
+          onSaveKey={saveGeminiKey}
+          onBusyChange={setBatchBusy}
+          onBackground={outcome => (outcome.ok
+            ? notify('Your batch estimate is ready', 8000, { label: 'Review', run: () => setModal('batch') })
+            : notify(outcome.message, 8000, { label: 'Try again', run: () => setModal('batch') }))}
+          onSave={saveBatch}
+          onFinish={finishBatch}
+          // Save hands over to a toast, so only close what is still this one.
+          onClose={() => setModal(current => (current === 'batch' ? null : current))}
+        />
+        <Modal open={modal === 'dayTarget'} title={selectedDate === todayKey() ? 'Today\u2019s target' : `Target for ${readable(selectedDate)}`} onClose={() => setModal(null)} bottomSheet>
+          <DayCalorieGoalPanel
+            key={selectedDate}
+            state={state}
+            date={selectedDate}
+            suggested={resolveDayCalorieTarget(state, selectedDate).suggested}
+            effective={resolveDayCalorieTarget(state, selectedDate).effective}
+            hasOverride={resolveDayCalorieTarget(state, selectedDate).hasOverride}
+            past={selectedDate < todayKey()}
+            onPersist={kcal => updateState(draft => applyDayCalorieOverride(draft, selectedDate, kcal))}
+          />
+        </Modal>
+        <Modal open={modal === 'roughMeal'} title="Add a rough meal" onClose={() => setModal(null)} bottomSheet>
+          <RoughMealPanel
+            key={selectedDate}
+            state={state}
+            defaultMeal={selectedDate === todayKey() ? defaultMealForLogging() : 'Dinner'}
+            onLog={logRoughMeal}
+          />
+        </Modal>
+        <Modal open={modal === 'aiQuickLogHelp'} title="AI estimate helper" onClose={() => setModal(null)}>
+          <ol className="update-list ai-help-list">
+            <li>Copy the prompt.</li>
+            <li>Paste it into your AI chatbot.</li>
+            <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
+            <li>Copy the returned JSON (it must include unitMode: per serving or per 100g, with calories matching that choice so nothing double-counts).</li>
+            <li>Tap the sparkle button beside the tabs, then Paste an estimate from another chatbot.</li>
+            <li>Review the Log Food form, then save normally.</li>
+          </ol>
+        </Modal>
+        <Modal open={modal === 'geminiApiKeyHelp'} title="Gemini API key" onClose={() => setModal(null)}>
+          <GeminiKeyHelp />
+        </Modal>
+        <Modal open={modal === 'customDbHelp'} title="Custom Food Database Help" onClose={() => setModal(null)}>
+          <div className="custom-db-help">
+            <ol className="update-list ai-help-list">
+              <li>Create a JSON file on your device.</li>
+              <li>Add foods using the supported fields.</li>
+              <li>Import it from Settings.</li>
+              <li>Enabled databases will appear in Quick Picks search.</li>
+              <li>You can disable or delete databases anytime.</li>
+            </ol>
+            <pre className="json-example">{`{
+    "id": "my_custom_database",
+    "name": "My Custom Foods",
+    "version": "1.0.0",
+    "items": [
+      {
+        "id": "sample_food",
+        "name": "Sample Food",
+        "unitMode": "serving",
+        "servingLabel": "1 serving",
+        "calories": 100,
+        "protein": 10,
+        "carbs": 10,
+        "fat": 2,
+        "tags": ["sample"]
+      }
+    ]
+  }`}</pre>
+          </div>
+        </Modal>
+        <Modal open={modal === 'weekDetails'} title={bankingWeekStart === weekStartMonday(todayKey()) ? 'This week' : weekRange(bankingWeekStart)} onClose={() => setModal(null)} bottomSheet>
+          <WeekDetails state={state} week={weekBank(state, bankingWeekStart)} />
+        </Modal>
+        <Modal open={modal === 'version'} title="Update available" onClose={() => setModal(null)}>
+          <div className="version-badge">{incomingVersion && incomingVersion !== APP_VERSION ? `Version ${APP_VERSION} → ${incomingVersion}` : `Version ${APP_VERSION}`}</div>
+          <p className="hint">
+            {availableUpdate?.source === 'service-worker'
+              ? 'A newer build is already downloaded and waiting. Tap Update now to reload Dawni with the latest changes. Your journal, foods, and settings stay on this device.'
+              : 'A newer build is live on the server. Tap Update now to reload Dawni and load it. Your journal, foods, and settings stay on this device.'}
+          </p>
+          <p className="page-kicker update-notes-heading">What&apos;s new</p>
+          <ul className="update-list">{updateNotes.map(item => <li key={item}>{item}</li>)}</ul>
+          <div className="actions vertical">
+            <button className="primary" type="button" onClick={() => applyAppUpdate(availableUpdate)}>Update now</button>
+            <button className="secondary" type="button" onClick={() => { dismissUpdatePrompt(availableUpdate?.version); setModal(null); }}>Not now</button>
+          </div>
+        </Modal>
+        <Modal open={modal === 'backupReminder'} title="Backup reminder" onClose={() => setModal(null)}>
+          <p className="hint">Your local tracker data is worth protecting. Backups include compressed journal photos, goals, saved foods, and completed days.</p>
+          <div className="actions vertical">
+            <button className="primary" type="button" onClick={() => openSettingsSection('backupSection')}>Open Backup</button>
+            <button className="secondary" type="button" onClick={() => setModal(null)}>Later today</button>
+          </div>
+        </Modal>
+        <ToastHost toast={toast} abovePill={!!pill} onAction={action => { setToast(null); action.run(); }} />
+      </>
+    )}>
       {tab === 'tracking' && (
         <TrackingView
           state={state}
@@ -1412,282 +1703,6 @@ export function App() {
           }}
         />
       )}
-
-      <input ref={importRef} hidden type="file" accept="application/json" onChange={event => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        parseBackup(file).then(next => {
-          const counts = backupCounts(next);
-          if (!confirm(`Import backup and replace current local data? This backup has ${counts.entries} entries and ${counts.photos} photos.`)) return;
-          return persist(next).then(() => notify(`Backup imported: ${counts.entries} entries`));
-        }).catch(err => alert(err.message)).finally(() => {
-          if (importRef.current) importRef.current.value = '';
-        });
-      }} />
-      <input ref={customDatabaseImportRef} hidden type="file" accept="application/json" onChange={event => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        importCustomFoodDatabase(file).finally(() => {
-          if (customDatabaseImportRef.current) customDatabaseImportRef.current.value = '';
-        });
-      }} />
-      <input ref={photoInputRef} hidden type="file" accept="image/*" onChange={event => {
-        compressImage(event.target.files?.[0]).then(photo => {
-          setEntryDraft(draft => ({ ...draft, photo }));
-          if (photo) notify('Photo attached');
-        });
-      }} />
-      <input ref={entryPhotoInputRef} hidden type="file" accept="image/*" onChange={event => {
-        const file = event.target.files?.[0];
-        if (!file || !activePhotoEntryId) return;
-        compressImage(file).then(photo => updateState(draft => {
-          const entry = draft.entries.find(item => item.id === activePhotoEntryId);
-          if (entry) {
-            entry.photo = photo;
-            entry.updatedAt = Date.now();
-          }
-        })).then(() => notify('Meal photo saved'));
-      }} />
-
-      {/* Before the sheets it hands over to, so each of them opens above it as it slides away. */}
-      <LogSheet
-        open={modal === 'log'}
-        title={logSheetTitle(selectedDate, todayKey())}
-        suggestTitle={suggestSheetTitle(selectedDate, todayKey())}
-        state={state}
-        mode={logMode}
-        onMode={setLogMode}
-        meal={logMeal}
-        draft={logDraft}
-        setDraft={setLogDraft}
-        suggest={{
-          date: selectedDate,
-          meal: suggestMeal,
-          onMeal: setSuggestMeal,
-          draft: suggestDraft,
-          setDraft: setSuggestDraft,
-          session: activeSuggestion,
-          view: suggestView,
-          onChange: () => setSuggestView('compose'),
-          onStartOver: startOverSuggest,
-          onLog: item => activeSuggestion && prefillSuggestion(item, activeSuggestion.meal, activeSuggestion.result.venue),
-          onRun: startSuggest
-        }}
-        job={estimateJob}
-        chips={logChips}
-        // Its own close only: Estimate, a chip or another way may already have opened the next sheet.
-        onClose={() => setModal(current => (current === 'log' ? null : current))}
-        onEstimate={startEstimate}
-        onCancelEstimate={cancelEstimate}
-        onReview={() => estimateJob && reviewJob(estimateJob.id)}
-        onDismissJob={() => setEstimateJob(current => (current?.status === 'running' ? current : null))}
-        onLogChip={logChip}
-        onReviewChip={reviewChip}
-        onTypeIn={() => openEntry(logMeal)}
-        onSearch={openFoodSearch}
-        onRoughMeal={() => setModal('roughMeal')}
-        onBatch={() => openBatchSheet('new')}
-        onPasteEstimate={pasteAiQuickLogFromClipboard}
-        onSaveKey={saveGeminiKey}
-      />
-      <EntryModal
-        open={modal === 'entry'}
-        openMode={entryOpenMode}
-        state={state}
-        foods={state.foods}
-        draft={entryDraft}
-        setDraft={setEntryDraft}
-        onClose={() => setModal(current => (current === 'entry' ? null : current))}
-        onSave={saveEntry}
-        onPickPhoto={() => photoInputRef.current?.click()}
-        onSaveDatabaseFood={saveDatabaseFood}
-        onRefine={estimateSession && entryDraft.estimateDetails && !entryDraft.editingId ? refineGeminiEstimate : undefined}
-        onRoughMeal={() => setModal('roughMeal')}
-        onRepeat={id => {
-          const entry = state.entries.find(item => item.id === id);
-          if (!entry) return;
-          setModal(null);
-          repeatEntry(entry);
-        }}
-        onDelete={id => {
-          setModal(null);
-          deleteEntry(id);
-        }}
-        day={entryDay}
-      />
-      <FoodSearch
-        open={modal === 'foodSearch'}
-        state={state}
-        onClose={() => setModal(current => (current === 'foodSearch' ? null : current))}
-        onChoose={prefillFood}
-        onSaveDatabaseFood={saveDatabaseFood}
-        onLogNew={name => openEntry(defaultMealForLogging(), name)}
-        batches={batchesForDay}
-        onLogBatch={batch => {
-          setModal(null);
-          logBatchServe(batch, selectedDate);
-        }}
-      />
-      <FoodModal
-        food={activeFood}
-        open={modal === 'food'}
-        energyUnit={state.settings.energyUnit}
-        onClose={() => setModal(null)}
-        onSave={food => updateState(draft => {
-          const target = draft.foods.find(item => item.id === food.id);
-          if (target) Object.assign(target, food, { updatedAt: Date.now() });
-        }).then(() => {
-          setModal(null);
-          notify('Food updated');
-        })}
-        onDelete={food => {
-          if (!confirm('Delete this food from history? Existing diary entries stay.')) return;
-          updateState(draft => {
-            draft.foods = draft.foods.filter(item => item.id !== food.id);
-          }).then(() => {
-            setModal(null);
-            notify('Food deleted');
-          });
-        }}
-      />
-      <EntryPhotoModal
-        entry={activePhotoEntry}
-        open={modal === 'entryPhoto'}
-        onClose={() => setModal(null)}
-        onReplace={() => entryPhotoInputRef.current?.click()}
-        onRemove={() => activePhotoEntry && updateState(draft => {
-          const entry = draft.entries.find(item => item.id === activePhotoEntry.id);
-          if (entry) entry.photo = null;
-        }).then(() => {
-          setModal(null);
-          notify('Photo removed');
-        })}
-        onShare={() => activePhotoEntry?.photo && sharePhoto(activePhotoEntry.photo, `simple-calories-ledger-photo-${activePhotoEntry.date}.png`, notify)}
-      />
-      <MealCardModal
-        state={state}
-        group={activeMealCard}
-        open={modal === 'mealCard'}
-        onClose={() => setModal(null)}
-        onShare={() => activeMealCard && shareMealCard(activeMealCard, energyUnitValue(state.settings.energyUnit), notify)}
-      />
-      <Modal open={modal === 'photo'} title="Meal photo" onClose={() => setModal(null)} className="lightbox" bottomSheet>
-        <div className="photo-preview-shell">{photoPreview ? <img className="photo-preview-large" src={photoPreview} alt="Meal" /> : <div className="empty">No photo available.</div>}</div>
-      </Modal>
-      <AiQuickLogModal
-        open={modal === 'aiQuickLog'}
-        fallbackMeal={aiQuickLogMeal}
-        seedText={aiQuickLogSeedText}
-        // Modal runs a close animation then calls onClose; if we already opened Log Food, do not setModal(null).
-        onClose={() => {
-          setAiQuickLogSeedText('');
-          setModal(current => (current === 'aiQuickLog' ? null : current));
-        }}
-        onParsed={prefillAiQuickLog}
-      />
-      <BatchSheet
-        open={modal === 'batch'}
-        request={batchSheet}
-        batch={batchSheet.batchId ? state.batches.find(batch => batch.id === batchSheet.batchId) || null : null}
-        state={state}
-        onEstimate={estimateBatch}
-        onSaveKey={saveGeminiKey}
-        onBusyChange={setBatchBusy}
-        onBackground={outcome => (outcome.ok
-          ? notify('Your batch estimate is ready', 8000, { label: 'Review', run: () => setModal('batch') })
-          : notify(outcome.message, 8000, { label: 'Try again', run: () => setModal('batch') }))}
-        onSave={saveBatch}
-        onFinish={finishBatch}
-        // Save hands over to a toast, so only close what is still this one.
-        onClose={() => setModal(current => (current === 'batch' ? null : current))}
-      />
-      <Modal open={modal === 'dayTarget'} title={selectedDate === todayKey() ? 'Today\u2019s target' : `Target for ${readable(selectedDate)}`} onClose={() => setModal(null)} bottomSheet>
-        <DayCalorieGoalPanel
-          key={selectedDate}
-          state={state}
-          date={selectedDate}
-          suggested={resolveDayCalorieTarget(state, selectedDate).suggested}
-          effective={resolveDayCalorieTarget(state, selectedDate).effective}
-          hasOverride={resolveDayCalorieTarget(state, selectedDate).hasOverride}
-          past={selectedDate < todayKey()}
-          onPersist={kcal => updateState(draft => applyDayCalorieOverride(draft, selectedDate, kcal))}
-        />
-      </Modal>
-      <Modal open={modal === 'roughMeal'} title="Add a rough meal" onClose={() => setModal(null)} bottomSheet>
-        <RoughMealPanel
-          key={selectedDate}
-          state={state}
-          defaultMeal={selectedDate === todayKey() ? defaultMealForLogging() : 'Dinner'}
-          onLog={logRoughMeal}
-        />
-      </Modal>
-      <Modal open={modal === 'aiQuickLogHelp'} title="AI estimate helper" onClose={() => setModal(null)}>
-        <ol className="update-list ai-help-list">
-          <li>Copy the prompt.</li>
-          <li>Paste it into your AI chatbot.</li>
-          <li>Tell it your ingredients, amounts, sauces, oils, and cooking method.</li>
-          <li>Copy the returned JSON (it must include unitMode: per serving or per 100g, with calories matching that choice so nothing double-counts).</li>
-          <li>Tap the sparkle button beside the tabs, then Paste an estimate from another chatbot.</li>
-          <li>Review the Log Food form, then save normally.</li>
-        </ol>
-      </Modal>
-      <Modal open={modal === 'geminiApiKeyHelp'} title="Gemini API key" onClose={() => setModal(null)}>
-        <GeminiKeyHelp />
-      </Modal>
-      <Modal open={modal === 'customDbHelp'} title="Custom Food Database Help" onClose={() => setModal(null)}>
-        <div className="custom-db-help">
-          <ol className="update-list ai-help-list">
-            <li>Create a JSON file on your device.</li>
-            <li>Add foods using the supported fields.</li>
-            <li>Import it from Settings.</li>
-            <li>Enabled databases will appear in Quick Picks search.</li>
-            <li>You can disable or delete databases anytime.</li>
-          </ol>
-          <pre className="json-example">{`{
-  "id": "my_custom_database",
-  "name": "My Custom Foods",
-  "version": "1.0.0",
-  "items": [
-    {
-      "id": "sample_food",
-      "name": "Sample Food",
-      "unitMode": "serving",
-      "servingLabel": "1 serving",
-      "calories": 100,
-      "protein": 10,
-      "carbs": 10,
-      "fat": 2,
-      "tags": ["sample"]
-    }
-  ]
-}`}</pre>
-        </div>
-      </Modal>
-      <Modal open={modal === 'weekDetails'} title={bankingWeekStart === weekStartMonday(todayKey()) ? 'This week' : weekRange(bankingWeekStart)} onClose={() => setModal(null)} bottomSheet>
-        <WeekDetails state={state} week={weekBank(state, bankingWeekStart)} />
-      </Modal>
-      <Modal open={modal === 'version'} title="Update available" onClose={() => setModal(null)}>
-        <div className="version-badge">{incomingVersion && incomingVersion !== APP_VERSION ? `Version ${APP_VERSION} → ${incomingVersion}` : `Version ${APP_VERSION}`}</div>
-        <p className="hint">
-          {availableUpdate?.source === 'service-worker'
-            ? 'A newer build is already downloaded and waiting. Tap Update now to reload Dawni with the latest changes. Your journal, foods, and settings stay on this device.'
-            : 'A newer build is live on the server. Tap Update now to reload Dawni and load it. Your journal, foods, and settings stay on this device.'}
-        </p>
-        <p className="page-kicker update-notes-heading">What&apos;s new</p>
-        <ul className="update-list">{updateNotes.map(item => <li key={item}>{item}</li>)}</ul>
-        <div className="actions vertical">
-          <button className="primary" type="button" onClick={() => applyAppUpdate(availableUpdate)}>Update now</button>
-          <button className="secondary" type="button" onClick={() => { dismissUpdatePrompt(availableUpdate?.version); setModal(null); }}>Not now</button>
-        </div>
-      </Modal>
-      <Modal open={modal === 'backupReminder'} title="Backup reminder" onClose={() => setModal(null)}>
-        <p className="hint">Your local tracker data is worth protecting. Backups include compressed journal photos, goals, saved foods, and completed days.</p>
-        <div className="actions vertical">
-          <button className="primary" type="button" onClick={() => openSettingsSection('backupSection')}>Open Backup</button>
-          <button className="secondary" type="button" onClick={() => setModal(null)}>Later today</button>
-        </div>
-      </Modal>
-      <ToastHost toast={toast} abovePill={!!pill} onAction={action => { setToast(null); action.run(); }} />
     </AppShell>
     </OpenSettingsContext.Provider>
   );

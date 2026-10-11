@@ -121,6 +121,67 @@ export function takeKeyboardFromStandIn(input: HTMLInputElement) {
   return typed;
 }
 
+/** The page behind the sheets: set `inert` while any of them (or the search overlay) is up. */
+const BACKGROUND_SELECTOR = 'main.app, .tabbar-wrap';
+let backgroundInertCount = 0;
+let backgroundOpener: HTMLElement | null = null;
+
+/** The element with focus, unless that is the page itself or the invisible field that holds the keyboard. */
+function focusedElement(): HTMLElement | null {
+  const active = document.activeElement;
+  return active instanceof HTMLElement && active !== document.body && !active.classList.contains(KEYBOARD_STAND_IN) ? active : null;
+}
+
+/** True when nothing has focus (the element that had it was removed). */
+function focusIsLost() {
+  const active = document.activeElement;
+  return !active || active === document.body || active === document.documentElement;
+}
+
+/**
+ * Makes the page behind a sheet (main and the tab bar) inert, so Tab, screen readers and taps can't
+ * reach it, and gives focus back to whatever opened the first sheet once the last one has gone.
+ * Shared across sheets like the scroll lock, so a handoff from one sheet to the next never frees the page early.
+ */
+export function acquireBackgroundInert() {
+  if (backgroundInertCount === 0) {
+    backgroundOpener = focusedElement();
+    document.querySelectorAll<HTMLElement>(BACKGROUND_SELECTOR).forEach(el => { el.inert = true; });
+  }
+  backgroundInertCount += 1;
+  let released = false;
+
+  return () => {
+    if (released) return;
+    released = true;
+    backgroundInertCount = Math.max(0, backgroundInertCount - 1);
+    if (backgroundInertCount > 0) return;
+    document.querySelectorAll<HTMLElement>(BACKGROUND_SELECTOR).forEach(el => { el.inert = false; });
+    const opener = backgroundOpener;
+    backgroundOpener = null;
+    // Unless focus has already gone somewhere on purpose.
+    if (opener?.isConnected && focusIsLost()) opener.focus({ preventScroll: true });
+  };
+}
+
+const TABBABLE = 'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]';
+
+/** What Tab can reach inside `root`, in order: enabled, shown, not set aside. */
+function tabbables(root: HTMLElement) {
+  return Array.from(root.querySelectorAll<HTMLElement>(TABBABLE)).filter(el => {
+    if (el.tabIndex < 0 || el.classList.contains(KEYBOARD_STAND_IN) || el.closest('[inert], [hidden]')) return false;
+    if ((el instanceof HTMLButtonElement || el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) && el.disabled) return false;
+    if (el instanceof HTMLInputElement && el.type === 'hidden') return false;
+    return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  });
+}
+
+/** The sheet on top: the last backdrop that isn't on its way out. */
+function topmostBackdrop() {
+  const backdrops = document.querySelectorAll('.modal-backdrop:not(.closing)');
+  return backdrops[backdrops.length - 1] ?? null;
+}
+
 /**
  * Runs `fn` once no modal holds the scroll lock. Releasing the lock can restore
  * the old scroll offset, so scrolling to a section any earlier could be undone.
@@ -163,6 +224,18 @@ export function Modal({ open, title, children, onClose, wide = false, className 
   useEffect(() => {
     if (!rendered) return;
     return acquireModalScrollLock();
+  }, [rendered]);
+
+  // The page behind is inert while a sheet is up. When this one goes, focus returns to what opened it
+  // (if that is still there and nothing else has taken focus); the last sheet away also frees the page.
+  useEffect(() => {
+    if (!rendered) return;
+    const opener = focusedElement();
+    const release = acquireBackgroundInert();
+    return () => {
+      release();
+      if (opener?.isConnected && focusIsLost()) opener.focus({ preventScroll: true });
+    };
   }, [rendered]);
 
   // Single close gate — all dismiss paths funnel here. A swipe passes the time its own flick-out takes.
@@ -335,6 +408,52 @@ export function Modal({ open, title, children, onClose, wide = false, className 
     return () => document.removeEventListener('keydown', onKey);
   }, [rendered, open, requestClose]);
 
+  // Tab stays inside the sheet on top: from its last control round to its first, and back.
+  useEffect(() => {
+    if (!rendered || !open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) return;
+      const panel = panelRef.current;
+      if (!panel || closingRef.current || topmostBackdrop() !== panel.parentElement) return;
+      const items = tabbables(panel);
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        panel.focus({ preventScroll: true });
+        return;
+      }
+      const active = document.activeElement;
+      if (!active || !panel.contains(active) || (active === panel && event.shiftKey)) {
+        // Outside, or on the sheet itself and going back: into the sheet's far end.
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (active === first && event.shiftKey) {
+        event.preventDefault();
+        last.focus();
+      } else if (active === last && !event.shiftKey) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [rendered, open]);
+
+  // Focus moves into the sheet once it has arrived, for keyboards and screen readers. A field that took focus
+  // itself (Log food's calories, the Log sheet's text box on a desktop) keeps it, and so does the keyboard on its way in.
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setTimeout(() => {
+      const panel = panelRef.current;
+      if (!panel || closingRef.current || topmostBackdrop() !== panel.parentElement) return;
+      const active = document.activeElement;
+      if (active && (panel.contains(active) || active.classList.contains(KEYBOARD_STAND_IN))) return;
+      panel.focus({ preventScroll: true });
+    }, bottomSheet ? 440 : 240);
+    return () => window.clearTimeout(timer);
+  }, [open, bottomSheet]);
+
   useEffect(() => {
     if (open) {
       window.clearTimeout(closeTimerRef.current);
@@ -373,7 +492,7 @@ export function Modal({ open, title, children, onClose, wide = false, className 
       onMouseDown={bottomSheet ? undefined : backdropMouse}
     >
       {bottomSheet && <div className="modal-scrim" data-swipe-lock onMouseDown={backdropMouse} />}
-      <section ref={panelRef} className={panelClass} data-swipe-lock role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={panelRef} className={panelClass} data-swipe-lock role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="close" type="button" onClick={() => requestClose()} aria-label="Close"><span aria-hidden="true" /></button>

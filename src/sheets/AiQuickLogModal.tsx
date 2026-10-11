@@ -89,7 +89,7 @@ export function AiQuickLogModal({ open, fallbackMeal, seedText, onClose, onParse
         <Field label="Quick log JSON" full>
           <textarea className="ai-quick-log-textarea" value={text} onChange={event => updateText(event.target.value)} placeholder='{"name":"Beef mince bowl","unitMode":"serving","amount":"1","meal":"Dinner","calories":520,"protein":45,"carbs":18,"fat":28,"notes":"Ingredients and estimate notes"}' />
         </Field>
-        {error && <p className="ai-quick-log-error">{error}</p>}
+        {error && <p className="ai-quick-log-error" role="alert">{error}</p>}
       </div>
     </Modal>
   );

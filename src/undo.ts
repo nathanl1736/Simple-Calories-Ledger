@@ -17,6 +17,23 @@ export function restoreEntry(entries: Entry[], removed: RemovedEntry): Entry[] {
   return [...entries.slice(0, index), removed.entry, ...entries.slice(index)];
 }
 
+/** A saved food taken out of Foods, and where it sat. */
+export type RemovedFood = { food: Food; index: number };
+
+/** Takes one saved food out. `removed` is null when it was already gone. */
+export function removeFood(foods: Food[], id: string): { foods: Food[]; removed: RemovedFood | null } {
+  const index = foods.findIndex(food => food.id === id);
+  if (index < 0) return { foods, removed: null };
+  return { foods: [...foods.slice(0, index), ...foods.slice(index + 1)], removed: { food: foods[index], index } };
+}
+
+/** Undo for removeFood: back where it was, unless it has come back some other way meanwhile. */
+export function restoreFood(foods: Food[], removed: RemovedFood): Food[] {
+  if (foods.some(food => food.id === removed.food.id)) return foods;
+  const index = Math.max(0, Math.min(removed.index, foods.length));
+  return [...foods.slice(0, index), removed.food, ...foods.slice(index)];
+}
+
 const sameFood = (a: Food | undefined, b: Food | undefined) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
 
 /**

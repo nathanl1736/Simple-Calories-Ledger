@@ -6,7 +6,7 @@ import { normaliseSearchText } from '../foodSearch';
 import { estimateSourceLabel } from '../aiEstimate';
 import { batchServe, batchServesLeft } from '../mealPrep';
 import { energyLabel, energyValue, entryUnitModeValue, fmt, fmtPortion } from '../utils';
-import { acquireModalScrollLock, takeKeyboardFromStandIn } from '../ui/Modal';
+import { acquireBackgroundInert, acquireModalScrollLock, takeKeyboardFromStandIn } from '../ui/Modal';
 import { type IconName, Icon } from '../ui/icons';
 import { databaseSourceChip, databaseServingText } from '../ui/format';
 import { FoodDatabasePreviewModal } from './EntryModal';
@@ -87,6 +87,9 @@ export function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDa
 
   // While it's up, the page behind stays put.
   useEffect(() => (rendered ? acquireModalScrollLock() : undefined), [rendered]);
+
+  // And out of reach of Tab and screen readers: the page and its tab bar are inert while the search is up.
+  useEffect(() => (rendered ? acquireBackgroundInert() : undefined), [rendered]);
 
   // Loaded now, so the first search doesn't wait for the food database.
   useEffect(() => {

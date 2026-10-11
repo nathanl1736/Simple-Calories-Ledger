@@ -1,4 +1,5 @@
-import { ReactNode, useState } from 'react';
+import { type InputHTMLAttributes, ReactNode, useState } from 'react';
+import { parseTypedNumber } from '../numberInput';
 import { fmt } from '../utils';
 import { Icon } from './icons';
 
@@ -51,6 +52,32 @@ export function scrollChipIntoView(row: HTMLElement | null, smooth: boolean) {
   const chipBox = active.getBoundingClientRect();
   const left = row.scrollLeft + chipBox.left - rowBox.left - (row.clientWidth - chipBox.width) / 2;
   row.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
+}
+
+/**
+ * A number field that keeps what was typed while it is being typed ("1." on its way to "1.5") and
+ * hands the number it means to `onValue` as it changes, so saving without leaving the field still
+ * saves what is on screen. When the field is left, or the number is changed from outside, it shows
+ * `display(value)` again.
+ */
+export function NumberInput({ value, onValue, display = String, ...rest }: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> & { value: number; onValue: (value: number) => void; display?: (value: number) => string }) {
+  const [text, setText] = useState<string | null>(null);
+  const shown = text !== null && parseTypedNumber(text) === value ? text : display(value);
+  return (
+    <input
+      inputMode="decimal"
+      {...rest}
+      value={shown}
+      onChange={event => {
+        setText(event.target.value);
+        onValue(parseTypedNumber(event.target.value));
+      }}
+      onBlur={event => {
+        setText(null);
+        rest.onBlur?.(event);
+      }}
+    />
+  );
 }
 
 export function Field({ label, children, full = false }: { label: string; children: ReactNode; full?: boolean }) {

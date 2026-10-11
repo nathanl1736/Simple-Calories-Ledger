@@ -1,6 +1,7 @@
 import { APP_VERSION } from './version';
 import type { AppState, BackupPayload } from './types';
 import { customFoodItemCount } from './customFoodDatabases';
+import { BACKUP_SHARE_TITLE, backupFileName as backupFileNameFor } from './fileNames';
 import { downloadBlob } from './image';
 import { normalizeStateShape } from './state';
 import { toKey, validBackupReminderDays } from './utils';
@@ -29,7 +30,7 @@ export function backupAgeDays(state: AppState, now = Date.now()) {
 }
 
 export function backupFileName() {
-  return `calorie-tracker-backup-${toKey(new Date())}.json`;
+  return backupFileNameFor(toKey(new Date()));
 }
 
 export async function exportBackup(state: AppState) {
@@ -51,7 +52,7 @@ export async function exportBackup(state: AppState) {
     if (!navigator.canShare || navigator.canShare({ files: [file] })) {
       await navigator.share({
         files: [file],
-        title: 'Simple Calories Ledger backup'
+        title: BACKUP_SHARE_TITLE
       });
       return backupState;
     }

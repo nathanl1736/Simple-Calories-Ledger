@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { EnergyUnit, Food } from '../types';
 import { estimateSourceLabel } from '../aiEstimate';
-import { energyInputFromKcal, energyInputToKcal, energyUnitLabel, energyUnitValue, entryUnitModeValue, n } from '../utils';
+import { energyInputFromKcal, energyInputToKcal, energyUnitLabel, energyUnitValue, entryUnitModeValue } from '../utils';
 import { Modal } from '../ui/Modal';
-import { FavouriteToggle, Field } from '../ui/controls';
+import { FavouriteToggle, Field, NumberInput } from '../ui/controls';
 
 export function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }: { food: Food | null; open: boolean; energyUnit: EnergyUnit; onClose: () => void; onSave: (food: Food) => void; onDelete: (food: Food) => void }) {
   const [draft, setDraft] = useState<Food | null>(food);
@@ -38,19 +38,19 @@ export function FoodModal({ food, open, energyUnit, onClose, onSave, onDelete }:
         </Field>
         <Field label="Fat">
           <div className="calorie-input-row macro-input-row">
-            <input inputMode="decimal" value={draft.fat} onChange={event => patch({ fat: n(event.target.value) })} />
+            <NumberInput value={draft.fat} onValue={fat => patch({ fat })} />
             <span>g</span>
           </div>
         </Field>
         <Field label="Carbs">
           <div className="calorie-input-row macro-input-row">
-            <input inputMode="decimal" value={draft.carbs} onChange={event => patch({ carbs: n(event.target.value) })} />
+            <NumberInput value={draft.carbs} onValue={carbs => patch({ carbs })} />
             <span>g</span>
           </div>
         </Field>
         <Field label="Protein">
           <div className="calorie-input-row macro-input-row">
-            <input inputMode="decimal" value={draft.protein} onChange={event => patch({ protein: n(event.target.value) })} />
+            <NumberInput value={draft.protein} onValue={protein => patch({ protein })} />
             <span>g</span>
           </div>
         </Field>

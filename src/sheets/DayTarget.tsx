@@ -45,6 +45,7 @@ export function DayCalorieGoalPanel({
               <input
                 id={sliderId}
                 className="day-calorie-slider"
+                aria-label="Calorie target for this day"
                 type="range"
                 aria-valuemin={min}
                 aria-valuemax={max}

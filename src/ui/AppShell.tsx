@@ -32,10 +32,11 @@ export function useSettleAnimation(token: string) {
 }
 
 /**
- * The page, the floating tab bar and the sparkle. `pill` is a slim status line above the bar while
+ * The page, the floating tab bar and the sparkle. `overlays` (sheets, the toast) sit beside the page, not in it,
+ * because the page and the tab bar go inert while a sheet is open. `pill` is a slim status line above the bar while
  * something runs in the background (an estimate the person closed the sheet on); it hides with the bar.
  */
-export function AppShell({ tab, setTab, onLogFood, pill, children }: { tab: Tab; setTab: (tab: Tab) => void; onLogFood: () => void; pill?: ReactNode; children: ReactNode }) {
+export function AppShell({ tab, setTab, onLogFood, pill, overlays, children }: { tab: Tab; setTab: (tab: Tab) => void; onLogFood: () => void; pill?: ReactNode; overlays?: ReactNode; children: ReactNode }) {
   const [navHidden, setNavHidden] = useState(false);
 
   useEffect(() => {
@@ -95,6 +96,7 @@ export function AppShell({ tab, setTab, onLogFood, pill, children }: { tab: Tab;
           </button>
         )}
       </div>
+      {overlays}
     </>
   );
 }

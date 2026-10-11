@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { AppState, Batch, Food } from '../types';
 import { ONE_OFF_ESTIMATE_DAYS } from '../favourites';
 import { activeBatches, batchServe, batchServesLeft, finishedBatches } from '../mealPrep';
-import { energyLabel, energyValue, fmt, fmtPortion, foodUnitText, todayKey } from '../utils';
+import { energyLabel, energyValue, entryUnitModeValue, fmt, fmtPortion, foodUnitText, todayKey } from '../utils';
 import { Icon } from '../ui/icons';
 import { FavouriteToggle, ServePips } from '../ui/controls';
 import { SettingsGlassButton } from '../ui/SettingsButton';
@@ -135,15 +135,17 @@ function BatchRow({ state, batch, onLog, onManage }: { state: AppState; batch: B
 }
 
 function FoodRow({ state, food, showUsage, onPrefill, onToggleFavourite, onManage }: { state: AppState; food: Food; showUsage: boolean; onPrefill: (food: Food) => void; onToggleFavourite: (food: Food) => void; onManage: (food: Food) => void }) {
-  const sub = [foodUnitText(food), showUsage && food.usageCount ? `logged ${fmt(food.usageCount)}×` : '', `P ${fmt(food.protein)} · C ${fmt(food.carbs)} · F ${fmt(food.fat)}g`].filter(Boolean).join(' · ');
+  // Short enough to stay on one line beside the name: how often it's been logged. "Per serving" is the usual
+  // case and goes unsaid; a food whose numbers are per 100g says so, as its calories would otherwise mislead.
+  const sub = [entryUnitModeValue(food.unitMode) === '100g' ? foodUnitText(food) : '', showUsage && food.usageCount ? `logged ${fmt(food.usageCount)}×` : ''].filter(Boolean).join(' · ');
   return (
     <div className="food-row" data-swipe-lock>
       <FavouriteToggle on={food.favourite} onToggle={() => onToggleFavourite(food)} label={`Favourite ${food.name}`} size={20} />
       <div className="body">
         <strong>{food.name}</strong>
-        <div className="food-sub">{sub}</div>
+        {sub && <div className="food-sub">{sub}</div>}
       </div>
-      <div className="food-cal">{food.estimateSource && <><span aria-hidden="true">≈</span><span className="sr-only">About </span></>}{fmt(energyValue(state, food.calories))}<small>{energyLabel(state)}</small></div>
+      <div className="food-cal"><span>{food.estimateSource && <><span aria-hidden="true">≈</span><span className="sr-only">About </span></>}{fmt(energyValue(state, food.calories))}</span><small>{energyLabel(state)}</small></div>
       <button className="food-log-btn" type="button" onClick={() => onPrefill(food)} aria-label={`Log ${food.name}`}><Icon name="plus" size={20} /></button>
       <button className="food-manage-btn" type="button" onClick={() => onManage(food)} aria-label={`Manage ${food.name}`}><span aria-hidden="true" /></button>
     </div>
