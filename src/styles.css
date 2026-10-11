@@ -81,6 +81,13 @@
   --motion-fast: 140ms;
   --motion-medium: 210ms;
   --ease-ios: cubic-bezier(.2, .8, .2, 1);
+  /* 3.0 motion: sheets arrive over 420 ms on iOS's sheet curve and leave over 260; a press settles in 100; the week's tiles fill over 420. */
+  --ease-sheet: cubic-bezier(.32, .72, 0, 1);
+  --ease-sheet-out: cubic-bezier(.4, 0, .6, 1);
+  --motion-sheet-in: 420ms;
+  --motion-sheet-out: 260ms;
+  --motion-press: 100ms;
+  --motion-tide: 420ms;
   --journal-photo-caption-bg: rgba(12, 10, 8, 0.94);
   --journal-photo-caption-ink: rgb(255, 255, 255);
 }
@@ -932,7 +939,7 @@ textarea { min-height: 78px; resize: vertical; }
   background: var(--color-modal-scrim);
   padding: calc(16px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
   overscroll-behavior: contain;
-  animation: modalBackdropIn var(--motion-medium) ease both;
+  animation: modalBackdropIn var(--motion-medium) ease;
   transition: opacity var(--motion-fast) ease;
 }
 .modal-backdrop.closing { opacity: 0; pointer-events: none; }
@@ -949,11 +956,11 @@ textarea { min-height: 78px; resize: vertical; }
   inset: 0;
   z-index: 0;
   background: var(--color-modal-scrim);
-  animation: modalBackdropIn var(--motion-medium) ease both;
+  animation: modalBackdropIn var(--motion-medium) ease;
 }
 .modal-backdrop.modal-backdrop--scrim.closing .modal-scrim {
   opacity: 0;
-  transition: opacity var(--motion-medium) ease;
+  transition: opacity var(--motion-sheet-out) ease;
 }
 .modal-backdrop.modal-backdrop--scrim > .modal-panel {
   position: relative;
@@ -972,7 +979,7 @@ textarea { min-height: 78px; resize: vertical; }
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  animation: modalPanelIn var(--motion-medium) var(--ease-ios) both;
+  animation: modalPanelIn var(--motion-medium) var(--ease-ios);
   will-change: transform, opacity;
 }
 .modal-backdrop.closing .modal-panel:not(.modal-panel--bottom-sheet) { transform: translate3d(0, 10px, 0) scale(.985); opacity: 0; transition: transform var(--motion-fast) ease, opacity var(--motion-fast) ease; }
@@ -982,7 +989,7 @@ textarea { min-height: 78px; resize: vertical; }
 .modal-panel--bottom-sheet {
   animation: none;
   transform: translate3d(0, 110%, 0);
-  transition: transform 320ms var(--ease-ios);
+  transition: transform var(--motion-sheet-in) var(--ease-sheet);
 }
 .modal-backdrop.entered .modal-panel--bottom-sheet {
   transform: translate3d(0, 0, 0);
@@ -2283,3 +2290,45 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .meal-chip-row, .rough-meal-meals { position: relative; flex-wrap: nowrap; gap: 10px; margin: 0 -16px; padding: 0 16px 2px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .meal-chip-row::-webkit-scrollbar, .rough-meal-meals::-webkit-scrollbar { display: none; }
 .meal-chip, .rough-meal-meals .chip { flex: none; min-height: 44px; }
+
+/* ===== 3.0 Motion (chunk 4) ===== */
+/* Sheets: in over --motion-sheet-in on the sheet curve (set on .modal-panel--bottom-sheet above), out over --motion-sheet-out on a gentler one.
+   The destination state's transition is the one that runs, so the not-entered rule below is the closing one. Swiping a sheet away times its own flick in Modal.tsx. */
+.modal-backdrop:not(.entered) .modal-panel--bottom-sheet { transition-duration: var(--motion-sheet-out); transition-timing-function: var(--ease-sheet-out); }
+/* Pulled up past its top, a sheet gives way a third as far, and the card colour fills in beneath it so no gap opens at the screen's edge. */
+.modal-panel--bottom-sheet.is-pulled { box-shadow: 0 -8px 30px rgba(15, 42, 46, .14), 0 120px 0 0 var(--card); }
+
+/* Press: the delegated listener in ui/press.ts scales the element itself on pointerdown, so the CSS :active scale steps aside to avoid doubling it. */
+.is-pressed:active { transform: none; }
+
+/* Toasts fade out over --motion-fast instead of vanishing (ToastHost keeps them mounted that long). */
+@keyframes toastOut {
+  to { opacity: 0; transform: translate(-50%, 4px) scale(.98); }
+}
+.toast.leaving { animation: toastOut var(--motion-fast) ease both; pointer-events: none; }
+
+/* Week tiles: the water, the amber cap and the lines settle to their new heights, like a tide coming in. A plan line that appears fades in. */
+.tl-tile-room, .tl-tile-water, .tl-tile-cap { transition: height var(--motion-tide) var(--ease-ios), bottom var(--motion-tide) var(--ease-ios); }
+.tl-tile-target, .tl-tile-plan, .tl-tile > .tl-tile-sun { transition: bottom var(--motion-tide) var(--ease-ios); }
+@keyframes planIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.tl-tile > .tl-tile-plan { animation: planIn var(--motion-tide) ease-out both; }
+
+/* Reduced motion keeps the 1 ms rule above for everything else. Sheets don't slide: they cross-fade over 200 ms in place. */
+@keyframes modalPanelFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-panel--bottom-sheet { transform: none; opacity: 0; transition: opacity 200ms ease !important; }
+  .modal-backdrop.entered .modal-panel--bottom-sheet { opacity: 1; }
+  .modal-scrim { animation-duration: 200ms !important; transition-duration: 200ms !important; }
+  .modal-panel:not(.modal-panel--bottom-sheet) { animation-name: modalPanelFade; animation-duration: 200ms !important; }
+  .modal-backdrop.closing .modal-panel:not(.modal-panel--bottom-sheet) { transform: none; transition-duration: 200ms !important; }
+  .toast.leaving { animation-name: toastFadeOut; }
+}
+@keyframes toastFadeOut {
+  to { opacity: 0; }
+}

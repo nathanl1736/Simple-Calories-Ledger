@@ -1,7 +1,7 @@
-import { ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { AppState, Batch, DayPart, Entry, Meal } from '../types';
-import { arcSlice, DAY_PART_BAND, DAY_PART_LABEL, dayPartGroups, miniArc, nextMealSlot, skyFor, sunArc, usualsForMeal } from '../tidelight';
+import { arcSlice, DAY_PART_BAND, DAY_PART_LABEL, dayPartGroups, miniArc, nextMealSlot, skyFor, usualsForMeal } from '../tidelight';
 import { estimateSourceLabel } from '../aiEstimate';
 import { batchServe, batchServesLeft } from '../mealPrep';
 import {
@@ -32,6 +32,7 @@ import { Icon } from '../ui/icons';
 import { ServePips } from '../ui/controls';
 import { useSettleAnimation } from '../ui/AppShell';
 import { useSky, skyStyle } from '../ui/sky';
+import { HeroArc, HeroText, MacroValue, MinorBar, ProteinBar, type HeroReading, type MacroReading } from '../ui/hero';
 import { signedEnergyText, BANK_STATUS_TEXT } from './WeekView';
 import { weekViewFor } from '../weekView';
 
@@ -190,34 +191,35 @@ export function TrackingView(props: {
   const goal = calorieTarget.effective || 1;
   const eaten = props.totals.calories;
   const remaining = goal - eaten;
-  const overTarget = remaining < 0;
   const bulking = baseDayGoal.trackingMode === 'Bulking';
   const unit = energyLabel(state);
   const day = bankDay(state, props.selectedDate);
   const dayWord = isToday ? ' today' : '';
+  const unitFor = (shown: number) => shown < 0 ? `${unit} over${dayWord}` : bulking ? `${unit} to go${dayWord}` : `${unit} left${dayWord}`;
   let heroNumber = fmt(energyValue(state, Math.abs(remaining)));
-  let heroUnit = overTarget ? `${unit} over${dayWord}` : bulking ? `${unit} to go${dayWord}` : `${unit} left${dayWord}`;
+  let heroUnit = unitFor(remaining);
+  // What the big number counts to: signed, so "left" turns to "over" as it passes zero.
+  let heroReading: HeroReading = { kind: 'number', value: Math.sign(remaining) * energyValue(state, Math.abs(remaining)), unit: unitFor };
   // A finished day says how it ended, the way the week bank counts it.
   if (isPast) {
     if (day.status === 'untracked') {
       heroNumber = '—';
       heroUnit = 'Nothing logged';
+      heroReading = { kind: 'text', number: heroNumber, unit: heroUnit };
     } else if (day.status === 'light') {
       heroNumber = fmt(energyValue(state, eaten));
       heroUnit = `${unit} logged · held at target`;
+      heroReading = { kind: 'number', value: energyValue(state, eaten), unit: heroUnit };
     } else {
-      heroNumber = `${day.status === 'estimated' ? '≈' : ''}${fmt(energyValue(state, Math.abs(day.delta)))}`;
+      const prefix = day.status === 'estimated' ? '≈' : '';
+      heroNumber = `${prefix}${fmt(energyValue(state, Math.abs(day.delta)))}`;
       heroUnit = `${unit} ${day.delta < 0 ? 'over' : 'under'}${day.status === 'estimated' ? ' · rough guess' : ''}`;
+      heroReading = { kind: 'number', value: energyValue(state, Math.abs(day.delta)), prefix, unit: heroUnit };
     }
   }
-  const heroSize = heroNumber.length <= 3 ? 'size-3' : heroNumber.length <= 5 ? 'size-5' : 'size-6';
   // In the order eaten, by part of the day rather than the clock: breakfast logged at 1pm still sits in the morning.
   const parts = dayPartGroups(props.entries);
   const ordered = parts.flatMap(group => group.entries);
-  const arc = sunArc(ordered.map(entry => entry.calories), goal);
-  const glowId = useId();
-  const coreId = useId();
-  const afterglowId = useId();
   // A custom target plans this day; the week bank stays on the usual target, and the button says so.
   const bankTarget = fmt(energyValue(state, baseDayGoal.calories));
   const targetNote = calorieTarget.hasOverride ? ' · custom' : bankAdjustment !== 0 ? ' · with bank' : '';
@@ -242,19 +244,15 @@ export function TrackingView(props: {
   const proteinReachable = proteinLeft > 0 && proteinLeft * 4 <= Math.max(0, remaining);
   // A finished day shows what was eaten, not what's "left".
   const showEaten = macroView === 'eaten' || isPast;
-  // Past the protein goal is good news, so it reads "goal met · +19g" rather than as an overrun.
-  const proteinPast = !showEaten && proteinLeft < 0;
-  const proteinBig = proteinPast ? `+${fmt(-proteinLeft)}g` : `${fmt(showEaten ? props.totals.protein : Math.abs(proteinLeft))}g`;
-  const proteinTail = showEaten
-    ? proteinLeft <= 0 ? '· goal met' : 'eaten'
-    : proteinPast ? 'goal met ·' : proteinLeft === 0 ? '· goal met' : proteinReachable ? 'to go' : 'left';
-  let proteinSoFar = 0;
-  const proteinSegments = ordered.map((entry, index) => {
-    const start = proteinSoFar / Math.max(1, goalMacros.protein) * 100;
-    proteinSoFar += entry.protein;
-    const end = Math.min(100, proteinSoFar / Math.max(1, goalMacros.protein) * 100);
-    return { key: entry.id, left: start, width: Math.max(0, end - start), first: index === 0 };
-  }).filter(segment => segment.width > 0.3 && segment.left < 100);
+  // What the protein figure says for a (live) number: grams left, or eaten. Past the goal is good news, so it
+  // reads "goal met · +19g" rather than as an overrun.
+  const proteinFigure = (shown: number): MacroReading => {
+    const grams = Math.round(shown);
+    if (showEaten) return { big: `${fmt(grams)}g`, tail: proteinLeft <= 0 ? '· goal met' : 'eaten' };
+    if (grams < 0) return { lead: 'goal met ·', big: `+${fmt(-grams)}g` };
+    return { big: `${fmt(grams)}g`, tail: grams === 0 ? '· goal met' : proteinReachable ? 'to go' : 'left' };
+  };
+  const proteinGrams = ordered.map(entry => entry.protein);
   const minorMacros: [string, number, number][] = [['Carbs', props.totals.carbs, goalMacros.carbs], ['Fat', props.totals.fat, goalMacros.fat]];
 
   // The week's balance and plan, from the same model as Week, so both screens show the same numbers.
@@ -333,22 +331,8 @@ export function TrackingView(props: {
         </nav>
 
         <section className="tl-hero" aria-label={`${heroNumber} ${heroUnit}. ${fmt(energyValue(state, eaten))} eaten of ${fmt(energyValue(state, goal))}.`}>
-          <svg className="tl-arc" viewBox="0 150 390 198" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
-            <defs>
-              <radialGradient id={glowId}><stop offset="0%" stopColor="#F7B547" stopOpacity="0.42" /><stop offset="50%" stopColor="#F7B547" stopOpacity="0.16" /><stop offset="100%" stopColor="#F7B547" stopOpacity="0" /></radialGradient>
-              <radialGradient id={coreId} cx="40%" cy="35%"><stop offset="0%" stopColor="#FFF4D6" /><stop offset="55%" stopColor="#F7B547" /><stop offset="100%" stopColor="#EB8A2F" /></radialGradient>
-              <radialGradient id={afterglowId}><stop offset="0%" stopColor="#9E7426" stopOpacity="0.45" /><stop offset="100%" stopColor="#9E7426" stopOpacity="0" /></radialGradient>
-            </defs>
-            {arc.remainder && <path className="tl-arc-rest" d={arc.remainder} />}
-            {arc.segments.map((d, index) => <path key={index} className="tl-arc-lit" d={d} />)}
-            {arc.over > 0 && <ellipse cx="353" cy="348" rx={30 + 50 * Math.min(arc.over, 600) / 600} ry={(30 + 50 * Math.min(arc.over, 600) / 600) * 0.45} fill={`url(#${afterglowId})`} />}
-            <circle cx={arc.sun.x} cy={arc.sun.y} r="36" fill={`url(#${glowId})`} />
-            <circle className="tl-sun" cx={arc.sun.x} cy={arc.sun.y} r="11" fill={`url(#${coreId})`} />
-          </svg>
-          <div className="tl-hero-text">
-            <p className={`tl-hero-number ${heroSize}`}>{heroNumber}</p>
-            <p className="tl-hero-unit">{heroUnit}</p>
-          </div>
+          <HeroArc calories={ordered.map(entry => entry.calories)} target={goal} />
+          <HeroText reading={heroReading} finalNumber={heroNumber} finalUnit={heroUnit} />
         </section>
       </div>
 
@@ -414,18 +398,23 @@ export function TrackingView(props: {
       >
         <span className="tl-macro protein" aria-hidden="true">
           <span className="tl-macro-label"><b>Protein</b> of {fmt(goalMacros.protein)}g</span>
-          <span className="tl-macro-value">{proteinPast ? <><span className="lead">{proteinTail}</span><strong>{proteinBig}</strong></> : <><strong>{proteinBig}</strong><span>{proteinTail}</span></>}</span>
-          <span className="tl-macro-bar">{proteinSegments.map(segment => <i key={segment.key} style={{ left: `${segment.left}%`, width: `${segment.width}%` }} />)}</span>
+          <MacroValue value={showEaten ? props.totals.protein : proteinLeft} snapKey={showEaten ? 'eaten' : 'left'} describe={proteinFigure} />
+          <ProteinBar grams={proteinGrams} goal={goalMacros.protein} />
         </span>
         {minorMacros.map(([name, value, target]) => {
           const left = Math.round(target - value);
           return (
             <span className="tl-macro" key={name} aria-hidden="true">
               <span className="tl-macro-label"><b>{name}</b> of {fmt(target)}g</span>
-              <span className="tl-macro-value">
-                {showEaten ? <><strong>{fmt(value)}g</strong><span>eaten</span></> : <><strong>{fmt(Math.abs(left))}g</strong><span>{left >= 0 ? 'left' : 'over'}</span></>}
-              </span>
-              <span className={`tl-macro-bar minor ${left < 0 ? 'over' : ''}`}><i style={{ width: `${Math.min(100, value / Math.max(1, target) * 100)}%` }} /></span>
+              <MacroValue
+                value={showEaten ? value : target - value}
+                snapKey={showEaten ? 'eaten' : 'left'}
+                describe={shown => {
+                  const grams = Math.round(shown);
+                  return showEaten ? { big: `${fmt(grams)}g`, tail: 'eaten' } : { big: `${fmt(Math.abs(grams))}g`, tail: grams >= 0 ? 'left' : 'over' };
+                }}
+              />
+              <MinorBar value={value} target={target} over={left < 0} />
             </span>
           );
         })}
