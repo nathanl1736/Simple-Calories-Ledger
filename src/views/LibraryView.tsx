@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import type { AppState, Batch, Food } from '../types';
 import { ONE_OFF_ESTIMATE_DAYS } from '../favourites';
-import { activeBatches, batchServe, batchServesLeft, finishedBatches } from '../mealPrep';
+import { activeBatches, batchServe, batchServesLeft, BOUGHT_SHELF_DAYS, finishedBatches, serveGrams } from '../mealPrep';
 import { energyLabel, energyValue, entryUnitModeValue, fmt, fmtPortion, foodUnitText, todayKey } from '../utils';
 import { Icon } from '../ui/icons';
 import { FavouriteToggle, ServePips } from '../ui/controls';
 import { SettingsGlassButton } from '../ui/SettingsButton';
 import { cookedText } from '../ui/format';
 
-/** What Foods' Meal prep list can do with a batch. */
+/** What Foods' Fridge list can do with something in it. */
 type MealPrepActions = {
   onNew: () => void;
   onLog: (batch: Batch) => void;
@@ -39,7 +39,7 @@ export function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, on
       <header className="page-header has-helper has-tools">
         <h1 className="page-title">Foods</h1>
         <SettingsGlassButton />
-        <p className="hint page-subtitle library-hint">{prep ? 'Cook once, log a serve at a time. A batch clears once it’s eaten, or a week after you cook it.' : sub === 'favourites' ? 'Tap + to log a food again. Heart the ones you eat often.' : `Tap + to log a food again. AI estimates you only log once clear after ${ONE_OFF_ESTIMATE_DAYS} days, unless you heart them.`}</p>
+        <p className="hint page-subtitle library-hint">{prep ? `Meal prep and food you bought, logged a serve at a time. Cooking clears once it’s eaten or after a week, bought food after ${BOUGHT_SHELF_DAYS} days.` : sub === 'favourites' ? 'Tap + to log a food again. Heart the ones you eat often.' : `Tap + to log a food again. AI estimates you only log once clear after ${ONE_OFF_ESTIMATE_DAYS} days, unless you heart them.`}</p>
       </header>
       <div className="page-controls">
         <div className="seg" role="tablist" aria-label="Saved foods">
@@ -50,7 +50,7 @@ export function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, on
             Favourites
           </button>
           <button className={prep ? 'active' : ''} onClick={() => setSub('prep')} type="button" role="tab" aria-selected={prep}>
-            Meal prep
+            Fridge
           </button>
         </div>
         {!prep && <input className="search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your usual foods" />}
@@ -71,7 +71,7 @@ export function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, on
   );
 }
 
-/** Foods → Meal prep: batches on the go, then the last few finished ones to cook again. */
+/** Foods → Fridge: what's on the go, then the last few finished ones to cook or buy again. */
 function MealPrepList({ state, actions }: { state: AppState; actions: MealPrepActions }) {
   const today = todayKey();
   const active = activeBatches(state.batches, state.entries, today);
@@ -80,7 +80,7 @@ function MealPrepList({ state, actions }: { state: AppState; actions: MealPrepAc
     <>
       <button type="button" className="prep-new" onClick={actions.onNew}>
         <span className="add-icon" aria-hidden="true"><Icon name="plus" /></span>
-        <span className="add-text"><strong>New batch</strong><small>Split a cook-up into serves</small></span>
+        <span className="add-text"><strong>Add to fridge</strong><small>Meal prep or something you bought</small></span>
         <Icon name="chevron" size={18} />
       </button>
       {active.length ? (
@@ -89,21 +89,21 @@ function MealPrepList({ state, actions }: { state: AppState; actions: MealPrepAc
         </section>
       ) : (
         <div className="empty prep-empty">
-          <strong>No meal prep on the go.</strong>
-          <div>Cooked a batch? List what went in and how many serves. Each serve is then one tap from Today, and the batch clears once it’s eaten.</div>
+          <strong>Nothing in your fridge yet.</strong>
+          <div>Cooked a batch, or bought ready meals or a tub of ice cream? Add it here and split it into serves. Each serve is then one tap from Today, and it clears once it’s eaten.</div>
         </div>
       )}
       {finished.length > 0 && (
         <details className="extra-info prep-again">
-          <summary>Cook again ({finished.length})</summary>
+          <summary>Have again ({finished.length})</summary>
           <div className="extra-info-body">
             {finished.map(batch => (
               <div key={batch.id} className="prep-again-row">
                 <span className="prep-again-text">
                   <strong>{batch.name}</strong>
-                  <small>{fmt(batch.servings)} serves · {fmt(energyValue(state, batchServe(batch).calories))} {energyLabel(state)} each · {cookedText(batch.cookedOn)}</small>
+                  <small>{fmt(batch.servings)} serves · {fmt(energyValue(state, batchServe(batch).calories))} {energyLabel(state)} each · {cookedText(batch.cookedOn, batch.kind)}</small>
                 </span>
-                <button type="button" className="secondary prep-again-btn" onClick={() => actions.onCookAgain(batch)}>Cook again</button>
+                <button type="button" className="secondary prep-again-btn" onClick={() => actions.onCookAgain(batch)}>{batch.kind === 'bought' ? 'Bought again' : 'Cook again'}</button>
                 <button type="button" className="prep-again-remove" aria-label={`Remove ${batch.name}`} onClick={() => actions.onRemove(batch)}>
                   <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
                 </button>
@@ -119,16 +119,17 @@ function MealPrepList({ state, actions }: { state: AppState; actions: MealPrepAc
 function BatchRow({ state, batch, onLog, onManage }: { state: AppState; batch: Batch; onLog: (batch: Batch) => void; onManage: (batch: Batch) => void }) {
   const left = batchServesLeft(batch, state.entries);
   const each = batchServe(batch);
+  const grams = serveGrams(batch);
   return (
     <div className="food-row prep-row" data-swipe-lock>
-      <span className="prep-row-icon" aria-hidden="true"><Icon name="prep" size={20} /></span>
+      <span className="prep-row-icon" aria-hidden="true"><Icon name={batch.kind === 'bought' ? 'bag' : 'prep'} size={20} /></span>
       <strong className="prep-row-name">{batch.name}</strong>
       <button className="food-log-btn" type="button" onClick={() => onLog(batch)} aria-label={`Log a serve of ${batch.name}`}><Icon name="plus" size={20} /></button>
       <button className="food-manage-btn" type="button" onClick={() => onManage(batch)} aria-label={`Edit ${batch.name}`}><span aria-hidden="true" /></button>
       {/* The detail lines run under the buttons, so they have the row's full width. */}
-      <div className="food-sub prep-row-left"><ServePips left={left} servings={batch.servings} />{fmtPortion(left)} of {fmt(batch.servings)} left · {cookedText(batch.cookedOn)}</div>
+      <div className="food-sub prep-row-left"><ServePips left={left} servings={batch.servings} />{fmtPortion(left)} of {fmt(batch.servings)} left · {cookedText(batch.cookedOn, batch.kind)}</div>
       <div className="food-sub prep-row-macros">
-        <b>{batch.estimateSource && <><span aria-hidden="true">≈</span><span className="sr-only">About </span></>}{fmt(energyValue(state, each.calories))} {energyLabel(state)}</b> a serve · P {fmt(each.protein)} · C {fmt(each.carbs)} · F {fmt(each.fat)}g
+        <b>{batch.estimateSource && <><span aria-hidden="true">≈</span><span className="sr-only">About </span></>}{fmt(energyValue(state, each.calories))} {energyLabel(state)}</b> a serve{grams ? ` (${fmt(grams)} g)` : ''} · P {fmt(each.protein)} · C {fmt(each.carbs)} · F {fmt(each.fat)}g
       </div>
     </div>
   );

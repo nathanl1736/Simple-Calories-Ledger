@@ -141,6 +141,53 @@ await step('Suggest: a typed venue reaches a result with Log this', async () => 
   await s.closeAll();
 });
 
+// A 2x2 PNG stands in for a photo of a nutrition panel; the mocked Gemini reads it as a 1 L tub of 8 serves.
+const LABEL_PNG = { name: 'label.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP43+AARAwQCgAz7gb9lkiSPAAAAABJRU5ErkJggg==', 'base64') };
+
+await step('Fridge: a label photo goes in as 8 serves, and one tap on Today logs a serve', async () => {
+  await sparkle().click();
+  await visible(s.dialog());
+  await s.dialog().getByRole('button', { name: /Add to fridge/ }).first().click();
+  await visible(s.dialog().getByRole('button', { name: /I bought it/ }));
+  await shot('fridge-choose');
+  // "I bought it" opens the camera in the same tap.
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 4000 }), s.dialog().getByRole('button', { name: /I bought it/ }).click()]);
+  await chooser.setFiles(LABEL_PNG);
+  await visible(s.dialog().locator('.fridge-photos .log-thumb'));
+  await s.dialog().getByRole('button', { name: 'Read label', exact: true }).click();
+  await visible(s.dialog().getByText('From label'), 15000);
+  await visible(s.dialog().getByText(/The label’s serve is 1 scoop \(70 g\)/));
+  await shot('fridge-review');
+  await s.dialog().getByRole('button', { name: 'Save 8 serves', exact: true }).click();
+  await page.waitForTimeout(600);
+  const row = page.locator('.tl-prep-row', { hasText: 'Vanilla ice cream' });
+  await visible(row);
+  await row.click();
+  await visible(page.getByText(/7 left/).first());
+  await shot('fridge-today');
+});
+
+await step('Fridge: two ready meals typed in by name are 2 serves in Foods → Fridge', async () => {
+  await s.tab('library');
+  await page.getByRole('tab', { name: 'Fridge' }).click();
+  await page.getByRole('button', { name: /Add to fridge/ }).first().click();
+  await visible(s.dialog().getByRole('button', { name: /I bought it/ }));
+  // The camera opening is checked in the step above; headless Chromium sometimes declines a second chooser in one run.
+  const chooser = page.waitForEvent('filechooser', { timeout: 2500 }).catch(() => null);
+  await s.dialog().getByRole('button', { name: /I bought it/ }).click();
+  await (await chooser)?.setFiles([]);
+  await s.dialog().getByPlaceholder(/Muscle Chef/).fill('Muscle Chef chicken pesto pasta');
+  await s.dialog().getByRole('button', { name: 'One pack more' }).click();
+  await s.dialog().getByRole('button', { name: 'Estimate', exact: true }).click();
+  await visible(s.dialog().getByRole('button', { name: 'Save 2 serves', exact: true }), 15000);
+  await s.dialog().getByRole('button', { name: 'Save 2 serves', exact: true }).click();
+  await page.waitForTimeout(600);
+  await visible(page.locator('.prep-row', { hasText: 'Chicken pesto pasta' }));
+  await visible(page.getByText(/bought today/).first());
+  await shot('fridge-foods');
+  await s.tab('tracking');
+});
+
 await step('Long-press on an entry opens its menu', async () => {
   await s.scrollTo('[aria-label="Day line"]');
   const row = page.locator('[aria-label="Day line"] .tl-row, [aria-label="Day line"] [role=button]').first();
@@ -159,7 +206,7 @@ for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.ok
 console.log(`\npage errors: ${pageErrors.length}`);
 pageErrors.forEach(e => console.log(`  ${e.message}`));
 console.log(`unexpected console errors: ${unexpectedConsole.length}`);
-unexpectedConsole.forEach(e => console.log(`  ${e.text}`));
+unexpectedConsole.forEach(e => console.log(`  ${e.text}${e.url ? `  (${e.url})` : ""}`));
 const ok = !failed.length && !pageErrors.length && !unexpectedConsole.length;
 console.log(ok ? '\nSMOKE OK' : '\nSMOKE FAILED');
 process.exit(ok ? 0 : 1);

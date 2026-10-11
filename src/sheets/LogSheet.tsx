@@ -203,10 +203,10 @@ export function LogSheet(props: {
     }
   });
 
-  const way = (icon: IconName, label: string, onClick: () => void) => (
-    <button type="button" className="log-way" onClick={onClick}>
+  const way = (icon: IconName, label: string, onClick: () => void, detail = '') => (
+    <button type="button" className={detail ? 'log-way has-detail' : 'log-way'} onClick={onClick}>
       <span className="log-way-icon" aria-hidden="true"><Icon name={icon} size={20} /></span>
-      <span className="log-way-label">{label}</span>
+      <span className="log-way-label">{label}{detail && <small>{detail}</small>}</span>
       <Icon name="chevron" size={16} />
     </button>
   );
@@ -358,7 +358,7 @@ export function LogSheet(props: {
                   aria-label={`${checking ? 'Check' : 'Log'} ${chip.name}${chip.kind === 'prep' ? `, a serve, ${fmtPortion(chip.left)} left` : ''}, ${fmt(energyValue(state, chip.calories))} ${unit}`}
                   {...chipHandlers(chip)}
                 >
-                  {chip.kind === 'prep' && <Icon name="prep" size={16} />}
+                  {chip.kind === 'prep' && <Icon name={chip.batch.kind === 'bought' ? 'bag' : 'prep'} size={16} />}
                   <b>{chip.name}</b>
                   {chip.kind === 'prep' && <span className="log-chip-left">· {fmtPortion(chip.left)} left</span>}
                   <span className="log-chip-cal">{fmt(energyValue(state, chip.calories))}</span>
@@ -381,10 +381,10 @@ export function LogSheet(props: {
           <section className="log-ways-section" aria-label="Other ways to log">
             <div className="log-section-head"><span>Other ways</span></div>
             <div className="log-ways">
+              {way('prep', 'Add to fridge', props.onBatch, 'Meal prep or something you bought')}
               {way('edit', 'Type it in', typeIn)}
               {way('search', 'Search foods', props.onSearch)}
               {way('approx', 'Rough meal', props.onRoughMeal)}
-              {way('prep', 'Meal prep a batch', props.onBatch)}
             </div>
           </section>
         )}

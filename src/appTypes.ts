@@ -40,8 +40,8 @@ export type EntryDraft = {
 };
 
 /** What the meal prep sheet saves; the app adds the id and the dates. */
-export type BatchInput = Pick<Batch, 'name' | 'recipe' | 'servings' | 'total' | 'ingredients' | 'estimateSource' | 'assumptions' | 'confidence'>;
-/** How the meal prep sheet was opened: a new batch, editing one on the go, or cooking a finished one again. `opened` starts it afresh. */
+export type BatchInput = Pick<Batch, 'name' | 'kind' | 'recipe' | 'servings' | 'total' | 'grams' | 'ingredients' | 'estimateSource' | 'assumptions' | 'confidence'>;
+/** How the fridge sheet was opened: something new, editing one on the go, or cooking or buying a finished one again. `opened` starts it afresh. */
 export type BatchSheetRequest = { mode: 'new' | 'edit' | 'again'; batchId: string | null; opened: number };
 
 /** What's typed and photographed in the Log sheet's composer. Kept by the app, so it survives closing the sheet. */

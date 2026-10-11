@@ -50,7 +50,7 @@ Visual findings from the screenshot review are in section 9.
 - **Settings** gets a sliders button in the header toolbar of every tab (same 44 px glass button Today has). `settingsReturnTab` is set to the tab that opened it; "Done" returns there. If the stored active tab on cold start is `settings`, start on Today.
 - **Tap to save, everywhere.** Delete `SwipeConfirm` and its CSS. Every sheet's primary action is a 48 px accent button: "Log 720 Cal", "Save", "Save 4 serves". After logging, show a toast "Logged 720 Cal · lunch" with **Undo** (5 s). Delete entry becomes a soft delete with Undo instead of `confirm()`.
 - **No locked sheets.** Any sheet that is waiting on Gemini can be closed; the request continues; completion is announced (section 4.4). Every Gemini request has a 45 s timeout and an `AbortController` wired to a visible Cancel.
-- **Terminology** (use exactly): Log food · Estimate · Suggest / What should I eat? · Type it in · Search foods · Usuals · Meal prep · Rough meal · Week bank · banked · Foods (tab) · Settings. "Gemini" is named only where the key or model matters (Settings, the connect card, the model line in the sheet footer).
+- **Terminology** (use exactly): Log food · Estimate · Suggest / What should I eat? · Type it in · Search foods · Usuals · Fridge (Add to fridge; cooked = meal prep, or bought) · Rough meal · Week bank · banked · Foods (tab) · Settings. "Gemini" is named only where the key or model matters (Settings, the connect card, the model line in the sheet footer).
 
 ---
 

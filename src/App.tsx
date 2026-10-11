@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION } from './version';
 import { flushSync } from 'react-dom';
-import type { AppState, Batch, DayPart, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
+import type { AppState, Batch, BatchKind, DayPart, EnergyUnit, Entry, Food, Meal, Settings, ThemePreference } from './types';
 import { DEFAULT, normalizeEntry, normalizeFood, normalizeStateShape } from './state';
 import { readState, saveState } from './storage';
 import { compressImage, recompressDataUrl } from './image';
@@ -15,11 +15,11 @@ import { pruneOneOffEstimates, recordFoodUse, type FavouriteChange } from './fav
 import { dayPartAt, entryDayPart, mealDayPart, usualsForMeal } from './tidelight';
 import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import { buildEstimateRequest, estimateNotes, estimateSourceValue, parseGeminiEstimate, type GeminiEstimate } from './aiEstimate';
-import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstimate, requestSuggestion } from './geminiEstimate';
+import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstimate, requestPackEstimate, requestSuggestion } from './geminiEstimate';
 import { usualChips, type UsualChip } from './logUsuals';
 import { removeEntry, removeFood, restoreEntry, restoreFood, revertFoodUse, type RemovedEntry, type RemovedFood } from './undo';
 import { estimatingLabel, logSheetTitle, suggestSheetTitle } from './estimateJob';
-import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, parseBatchEstimate, pruneBatches } from './mealPrep';
+import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, buildPackRequest, parseBatchEstimate, parsePackEstimate, pruneBatches, serveNote } from './mealPrep';
 import { buildSuggestContext, buildSuggestRequest, isSuggestFresh, loadLastSuggest, mealBudget, parseSuggest, saveLastSuggest, suggestNotesLead, type SuggestItem, type SuggestSession } from './suggest';
 import {
   applyDayCalorieOverride,
@@ -204,8 +204,8 @@ export function App() {
   /** Suggest mode shows the suggestion, or the form to ask again. */
   const [suggestView, setSuggestView] = useState<'result' | 'compose'>('result');
   const [estimateJob, setEstimateJob] = useState<EstimateJob | null>(null);
-  /** The meal prep sheet is waiting on Gemini, for the pill while it's closed. */
-  const [batchBusy, setBatchBusy] = useState(false);
+  /** The fridge sheet is waiting on Gemini (for cooked or bought food), for the pill while it's closed. */
+  const [batchBusy, setBatchBusy] = useState<BatchKind | null>(null);
   /** The state as last saved, for work that finishes after the render that started it, like Undo. */
   const latestState = useRef(state);
   const tabScrollRef = useRef<Partial<Record<Tab, number>>>({});
@@ -507,7 +507,7 @@ export function App() {
   };
 
   const touchFoodAfterLog = (draftState: AppState, entry: Entry, draft: EntryDraft): FavouriteChange => {
-    // Meal prep runs out, so its serves stay out of saved foods and Recent.
+    // The fridge runs out, so its serves stay out of saved foods and Recent.
     if (entry.autoNamed || entry.batchId) return null;
     const isDatabaseFood = draft.source === 'foodEstimateDatabase' || draft.source === 'customFoodDatabase';
     return recordFoodUse(draftState.foods, {
@@ -707,7 +707,7 @@ export function App() {
   /** A usual from the Now line or the Log sheet: logged at once, with Undo. */
   const logUsualNow = (entry: Entry, meal: Meal) => commitEntry(usualDraft(entry, meal));
 
-  /** A serve of meal prep as a Log food draft, for checking before logging. */
+  /** A serve from the fridge as a Log food draft, for checking before logging. */
   const serveDraft = (batch: Batch, meal: Meal): EntryDraft => {
     const serve = batchServe(batch);
     const left = batchServesLeft(batch, latestState.current.entries);
@@ -719,7 +719,7 @@ export function App() {
       carbs: draftNumberText(Math.round(serve.carbs * 10) / 10),
       fat: draftNumberText(Math.round(serve.fat * 10) / 10),
       portion: fmtPortion(Math.max(0, Math.min(1, left)) || 1),
-      notes: `Meal prep: a serve of a batch of ${fmt(batch.servings)}.`,
+      notes: serveNote(batch),
       estimateSource: batch.estimateSource,
       batchId: batch.id
     };
@@ -1027,7 +1027,7 @@ export function App() {
   };
 
   /**
-   * Meal prep: one tap logs a serve of a batch straight away, to the meal the clock suggests,
+   * The fridge: one tap logs a serve straight away, to the meal the clock suggests,
    * with Undo in the toast. Tapping the entry afterwards changes the meal or the amount.
    */
   const logBatchServe = async (batch: Batch, date: string, meal: Meal = defaultMealForLogging()) => {
@@ -1053,7 +1053,7 @@ export function App() {
       part: mealDayPart(meal) ? undefined : recentLog()?.part ?? dayPartNow(),
       estimateSource: batch.estimateSource,
       batchId: batch.id,
-      notes: `Meal prep: a serve of a batch of ${fmt(batch.servings)}.`,
+      notes: serveNote(batch),
       createdAt: now,
       updatedAt: now
     });
@@ -1071,7 +1071,8 @@ export function App() {
   };
 
   const openBatchSheet = (mode: BatchSheetRequest['mode'], batchId: string | null = null) => {
-    setBatchSheet({ mode, batchId, opened: Date.now() });
+    // A count, not the time: two openings must never look like the same one.
+    setBatchSheet(current => ({ mode, batchId, opened: current.opened + 1 }));
     setModal('batch');
   };
 
@@ -1085,6 +1086,21 @@ export function App() {
     });
     const estimate = parseBatchEstimate(raw);
     if (!estimate) throw new Error('Gemini replied in a format Dawni couldn’t read. Try again.');
+    return { raw, estimate };
+  };
+
+  /** Bought food for the fridge: one pack read from label photos and/or what's typed. */
+  const estimatePack = async (description: string, photos: string[], packs: number, previous?: string, correction?: string, signal?: AbortSignal) => {
+    const { settings } = latestState.current;
+    const raw = await requestPackEstimate({
+      apiKey: settings.geminiApiKey,
+      userText: buildPackRequest({ description, photoCount: photos.length, packs, preferences: settings.aiPreferences, previous, correction }),
+      imageDataUrls: photos,
+      accept: text => !!parsePackEstimate(text),
+      signal
+    });
+    const estimate = parsePackEstimate(raw);
+    if (!estimate) throw new Error('Gemini couldn’t read that label. Try a closer, flatter photo, or enter the numbers yourself.');
     return { raw, estimate };
   };
 
@@ -1105,7 +1121,7 @@ export function App() {
     setModal(null);
     if (!saved) return;
     if (logNow) return logBatchServe(saved, today);
-    notify(editing ? 'Batch updated' : `Saved · ${fmt(input.servings)} serves`);
+    notify(editing ? 'Saved' : `In your fridge · ${fmt(input.servings)} serve${input.servings === 1 ? '' : 's'}`);
   };
 
   const finishBatch = async (batch: Batch) => {
@@ -1127,7 +1143,7 @@ export function App() {
     await updateLatest(draft => {
       draft.batches = draft.batches.filter(item => item.id !== batch.id);
     });
-    notify('Removed from Cook again', 5000, {
+    notify('Removed', 5000, {
       label: 'Undo',
       run: () => updateLatest(draft => {
         if (!draft.batches.some(item => item.id === batch.id)) draft.batches.push(batch);
@@ -1165,10 +1181,10 @@ export function App() {
   };
 
   const activeFood = state.foods.find(food => food.id === activeFoodId) || null;
-  // Meal prep with serves left that was cooked by the day shown on Today.
+  // The fridge: serves left of anything cooked or bought by the day shown on Today.
   const batchesForDay = activeBatches(state.batches, state.entries, todayKey()).filter(batch => batch.cookedOn <= selectedDate);
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
-  // The Log sheet's usuals row: this meal's usuals, meal prep with serves left, then favourites.
+  // The Log sheet's usuals row: this meal's usuals, the fridge, then favourites.
   const logChips = modal === 'log'
     ? usualChips({
       usuals: usualsForMeal(state.entries, logMeal, todayKey(), new Set(state.foods.map(food => food.id)), 28, 8),
@@ -1181,7 +1197,7 @@ export function App() {
     : [];
   // While Gemini works on something whose sheet was closed: a slim pill above the tab bar, on every tab.
   const estimating = estimateJob?.status === 'running' && modal !== 'log';
-  const pillLabel = estimating && estimateJob ? estimatingLabel(estimateJob.meal, estimateJob.kind) : batchBusy && modal !== 'batch' ? 'Estimating the batch…' : '';
+  const pillLabel = estimating && estimateJob ? estimatingLabel(estimateJob.meal, estimateJob.kind) : batchBusy && modal !== 'batch' ? (batchBusy === 'bought' ? 'Reading the label…' : 'Estimating the batch…') : '';
   const pill = pillLabel ? (
     <div className="log-pill-wrap" role="status">
       <button type="button" className="log-pill" aria-label={`${pillLabel} Open to see it.`} onClick={() => {
@@ -1432,10 +1448,11 @@ export function App() {
           batch={batchSheet.batchId ? state.batches.find(batch => batch.id === batchSheet.batchId) || null : null}
           state={state}
           onEstimate={estimateBatch}
+          onEstimatePack={estimatePack}
           onSaveKey={saveGeminiKey}
           onBusyChange={setBatchBusy}
           onBackground={outcome => (outcome.ok
-            ? notify('Your batch estimate is ready', 8000, { label: 'Review', run: () => setModal('batch') })
+            ? notify(outcome.kind === 'bought' ? 'Your label is read' : 'Your batch estimate is ready', 8000, { label: 'Review', run: () => setModal('batch') })
             : notify(outcome.message, 8000, { label: 'Try again', run: () => setModal('batch') }))}
           onSave={saveBatch}
           onFinish={finishBatch}
@@ -1559,6 +1576,7 @@ export function App() {
           onLogUsual={logUsualNow}
           batches={batchesForDay}
           onLogBatch={batch => logBatchServe(batch, selectedDate)}
+          onAddToFridge={() => openBatchSheet('new')}
           onOpenTarget={() => setModal('dayTarget')}
           onOpenWeek={() => openWeek(selectedDate)}
           onOpenSettings={() => openSettings('tracking')}

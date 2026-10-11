@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 import type { Meal } from '../types';
 import { type Tab } from '../appTypes';
 
-export type IconName = 'today' | 'week' | 'journal' | 'foods' | 'settings' | 'plus' | 'search' | 'sparkle' | 'chevron' | 'copy' | 'paste' | 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'edit' | 'heart' | 'recent' | 'database' | 'prep' | 'camera' | 'approx' | 'more';
+export type IconName = 'today' | 'week' | 'journal' | 'foods' | 'settings' | 'plus' | 'search' | 'sparkle' | 'chevron' | 'copy' | 'paste' | 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'drink' | 'edit' | 'heart' | 'recent' | 'database' | 'prep' | 'bag' | 'camera' | 'approx' | 'more';
 
 /** Line icons drawn on a 24px grid, stroked in the current text colour. */
 const ICON_PATHS: Record<IconName, ReactNode> = {
@@ -28,6 +28,8 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   database: <><ellipse cx="12" cy="6" rx="7" ry="2.5" /><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6" /><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5" /></>,
   /** A meal prep container: lid, handle and two compartments. */
   prep: <><rect x="3.5" y="10" width="17" height="10" rx="2.5" /><path d="M2.5 10h19" /><path d="M9.5 7h5" /><path d="M10 10v10" /></>,
+  /** A shopping bag: food bought ready made, kept in the fridge. */
+  bag: <><path d="M5.5 8.5h13l-1 11.5a1.5 1.5 0 0 1-1.5 1.4H8a1.5 1.5 0 0 1-1.5-1.4z" /><path d="M9 8.5V7a3 3 0 0 1 6 0v1.5" /></>,
   camera: <><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.3l1.5-2h5.4l1.5 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" /><circle cx="12" cy="12.8" r="3.4" /></>,
   /** About equal: a rough size rather than a breakdown. */
   approx: <><path d="M5 9.5c2.3-2 4.7-2 7 0s4.7 2 7 0" /><path d="M5 15.5c2.3-2 4.7-2 7 0s4.7 2 7 0" /></>,
