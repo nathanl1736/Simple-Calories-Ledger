@@ -2035,10 +2035,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .tl-prep-row:active { transform: scale(.985); }
 .tl-prep-row .tl-manual-text strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-prep-add { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent-tint); color: var(--color-accent-text); }
+.tl-prep-head { display: flex; align-items: center; justify-content: space-between; min-height: 36px; margin: 0 0 -4px; padding: 0 4px 0 14px; font-size: 13px; line-height: 18px; font-weight: var(--weight-semibold); letter-spacing: -.08px; color: var(--sky-ink-2); }
+.tl-prep-more { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; margin: -4px 0; padding: 0 10px; border-radius: 22px; background: none; color: var(--color-accent-text); font-size: 15px; font-weight: var(--weight-semibold); }
+.tl-prep-more:active { opacity: .6; }
+/* Empty, today keeps one slim row so the fridge can be found without hunting for it. */
+.tl-fridge-add { display: grid; grid-template-columns: 32px minmax(0, 1fr) 18px; align-items: center; gap: 12px; width: 100%; min-height: 52px; margin: -2px 0 10px; padding: 6px 16px 6px 10px; border-radius: 26px; background: color-mix(in srgb, var(--card) 72%, transparent); color: var(--ink); text-align: left; }
+.tl-fridge-add:active { transform: scale(.985); }
+.tl-fridge-add-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent-tint); color: var(--color-accent-text); }
+.tl-fridge-add-text { display: grid; min-width: 0; }
+.tl-fridge-add-text strong { font-size: 15px; line-height: 20px; font-weight: var(--weight-semibold); letter-spacing: -.23px; }
+.tl-fridge-add-text span { font-size: 13px; line-height: 18px; color: var(--color-text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-fridge-add > .icon:last-child { color: var(--color-accent-text); }
 
 .food-search-glyph.prep { background: var(--accent-tint); color: var(--color-accent-text); }
 
-/* Foods → Meal prep */
+/* Foods → Fridge */
 .prep-new { width: 100%; display: grid; grid-template-columns: 44px minmax(0, 1fr) 18px; align-items: center; gap: 12px; margin-bottom: 14px; padding: 12px 14px; border-radius: var(--radius-card); background: var(--card); color: var(--ink); text-align: left; }
 .prep-new:active { transform: scale(.985); }
 .prep-new .add-text { display: grid; gap: 2px; min-width: 0; }
@@ -2092,6 +2103,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .batch-actions-note { margin: 0; text-align: center; font-size: 13px; }
 .batch-entry-hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 13px; line-height: 1.35; }
 .batch-entry-hint .icon { flex: none; color: var(--color-accent-text); }
+
+/* Add to fridge: cooked or bought, then a label photo for bought food. */
+.fridge-choices { display: grid; gap: 10px; }
+.fridge-choice { display: grid; grid-template-columns: 44px minmax(0, 1fr) 16px; align-items: center; gap: 12px; width: 100%; min-height: 76px; padding: 12px 14px 12px 12px; border-radius: var(--radius-card); background: var(--card); color: var(--ink); text-align: left; }
+.fridge-choice:active { transform: scale(.985); }
+.fridge-choice-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--accent-tint); color: var(--color-accent-text); }
+.fridge-choice-text { display: grid; gap: 2px; min-width: 0; }
+.fridge-choice-text strong { font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; }
+.fridge-choice-text small { color: var(--color-text-soft); font-size: 14px; line-height: 19px; }
+.fridge-choice > .icon:last-child { color: var(--muted); }
+.fridge-choose-note { margin: 2px 0 0; text-align: center; }
+.fridge-photos { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 4px; }
+.fridge-serves-first { margin-bottom: 10px; }
+.fridge-serves-first .batch-serves-row { margin-top: 0; }
+.fridge-label-serve { margin: 8px 0 0; font-size: 13px; line-height: 1.35; }
 
 /* ===== 3.0 Week (chunk 2) ===== */
 /* Week: the working under the headline, the plan on the days after today, and the stats block. */
@@ -2181,6 +2207,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .log-way + .log-way::before { content: ""; position: absolute; top: 0; left: 56px; right: 0; height: .5px; background: var(--line); }
 .log-way-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent-tint); color: var(--color-accent-text); }
 .log-way > .icon:last-child { color: var(--muted); }
+.log-way.has-detail { min-height: 64px; padding-top: 8px; padding-bottom: 8px; }
+.log-way-label small { display: block; margin-top: 1px; color: var(--color-text-soft); font-size: 13px; line-height: 17px; letter-spacing: -.08px; }
 
 .log-foot { display: grid; gap: 4px; padding: 0 4px; color: var(--muted); font-size: 13px; line-height: 18px; }
 .log-foot-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }

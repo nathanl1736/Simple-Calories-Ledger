@@ -2,7 +2,7 @@
 //
 // The app (src/geminiEstimate.ts) first lists models, ranks them, then calls generateContent on the best one.
 // installGeminiMock() answers both, and picks the reply that matches the request: the user text of the request
-// starts with ESTIMATE REQUEST, BATCH ESTIMATE REQUEST or SUGGEST REQUEST (src/aiEstimate.ts, mealPrep.ts,
+// starts with ESTIMATE REQUEST, BATCH ESTIMATE REQUEST, FRIDGE ITEM REQUEST or SUGGEST REQUEST (src/aiEstimate.ts, mealPrep.ts,
 // suggest.ts; the old MENU PICK REQUEST header still routes to a suggestion); Test key sends "Reply with the
 // word OK.". A suggestion reply is picked from what the user said: menu photos attached give the menu result,
 // Macca's (or another chain) the venue result, cooking or the fridge the home result, anything else a general one.
@@ -47,6 +47,19 @@ export const ESTIMATE_LABEL = {
   source: 'label', name: 'Chobani Fit Greek Yogurt, Vanilla', meal: 'Snack', basis: '100g', servingsEaten: 1, servingDescription: '1 tub (170 g)', servingGrams: 170, gramsEaten: 170,
   total: { calories: 105, protein: 16, carbs: 8.8, fat: 0.7 }, per100g: { calories: 62, protein: 9.4, carbs: 5.2, fat: 0.4 },
   assumptions: ['Ate the whole 170 g tub'], confidence: 'high', notes: 'Read from the nutrition information panel.'
+};
+
+/* Bought food for the fridge (PACK_SCHEMA): a tub read off its label, and a ready meal named without a photo. */
+export const PACK_TUB = {
+  source: 'label', name: 'Vanilla ice cream (Connoisseur)', servingsPerPack: 8, servingDescription: '1 scoop (70 g)', servingGrams: 70, packGrams: 1000,
+  perServing: { calories: 160, protein: 2.5, carbs: 17, fat: 9.2 }, per100g: { calories: 229, protein: 3.6, carbs: 24.3, fat: 13.1 },
+  assumptions: [], confidence: 'high', notes: 'A 1 L tub of vanilla ice cream.'
+};
+export const PACK_TUB_1L = { ...PACK_TUB, servingsPerPack: 14, assumptions: ['1 L tub: 14 serves of 70 g'] };
+export const PACK_MEAL = {
+  source: 'estimate', name: 'Chicken pesto pasta (Muscle Chef)', servingsPerPack: 1, servingDescription: '1 meal (350 g)', servingGrams: 350, packGrams: 350,
+  perServing: { calories: 455, protein: 42, carbs: 38, fat: 14 }, per100g: { calories: 0, protein: 0, carbs: 0, fat: 0 },
+  assumptions: ['Typical Muscle Chef pasta meal; no label photo'], confidence: 'medium', notes: 'One ready meal.'
 };
 
 const MINCE = [
@@ -170,6 +183,7 @@ export async function installGeminiMock(context, controller = createGeminiContro
     const photos = (body?.contents?.[0]?.parts || []).filter(part => part.inlineData).length;
     const kind = /Reply with the word OK/.test(userText) ? 'ping'
       : /^BATCH ESTIMATE REQUEST/m.test(userText) || /meal prep for Dawni/.test(system) ? 'batch'
+      : /^FRIDGE ITEM REQUEST/m.test(userText) || /packaged food for Dawni/.test(system) ? 'pack'
         : /^(SUGGEST|MENU PICK) REQUEST/m.test(userText) || /"What should I eat\?" helper in Dawni|menu helper in Dawni/.test(system) ? 'suggest'
           : 'estimate';
     const refine = /Correction from the user:/.test(userText);
@@ -204,6 +218,7 @@ function payloadText(kind, { refine, photos, mode, userText }) {
   if (kind === 'ping') return 'OK';
   if (mode === 'unreadable') return 'Sorry, I could not work that one out. Could you tell me a bit more about what was in it?';
   if (kind === 'batch') return JSON.stringify(refine ? BATCH_REFINED : BATCH_RESULT);
+  if (kind === 'pack') return JSON.stringify(refine ? PACK_TUB_1L : photos > 0 ? PACK_TUB : PACK_MEAL);
   if (kind === 'suggest') return JSON.stringify(suggestionFor(userText, photos));
   if (refine) return JSON.stringify(ESTIMATE_BOWL_SMALL);
   return JSON.stringify(photos > 0 ? ESTIMATE_LABEL : ESTIMATE_BOWL);

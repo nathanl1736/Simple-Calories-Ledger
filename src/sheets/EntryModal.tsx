@@ -418,7 +418,7 @@ export function EntryModal({
       <label className="field-caption" htmlFor="entryName">Food name</label>
       <div className="name-row">
         <input ref={nameInputRef} id="entryName" value={draft.name} placeholder={isFavourite && !draft.name.trim() ? 'Name your favourite' : `${draft.meal} entry`} onChange={event => update({ name: event.target.value })} />
-        {/* Meal prep runs out, so a serve of it isn't something to favourite. */}
+        {/* The fridge runs out, so a serve from it isn't something to favourite. */}
         {!draft.batchId && <FavouriteToggle on={isFavourite} onToggle={toggleFavourite} />}
       </div>
     </div>
@@ -468,7 +468,7 @@ export function EntryModal({
               <span aria-hidden="true">{per100g ? 'g' : draftPortion(draft) === 1 ? 'serving' : 'servings'}</span>
             </div>
           </div>
-          {draft.batchId && <p className="hint batch-entry-hint"><Icon name="prep" size={15} />A serve of meal prep. Servings eaten here count toward what’s left of the batch.</p>}
+          {draft.batchId && <p className="hint batch-entry-hint"><Icon name="prep" size={15} />A serve from your fridge. Servings eaten here count toward what’s left.</p>}
           {multiplier !== 1 && (
             <div className="meta-chips portion-preview" aria-live="polite">
               <span className="portion-preview-label">Logged total</span>

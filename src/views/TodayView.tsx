@@ -173,10 +173,12 @@ export function TrackingView(props: {
   onRoughMeal: () => void;
   /** Logs a usual from the Now line straight away, with Undo. */
   onLogUsual: (entry: Entry, meal: Meal) => void;
-  /** Meal prep with serves left, cooked by the day shown. */
+  /** The fridge: serves left of anything cooked or bought by the day shown. */
   batches: Batch[];
   /** Logs one serve straight away, with Undo. */
   onLogBatch: (batch: Batch) => void;
+  /** Opens Add to fridge: meal prep, or something bought. */
+  onAddToFridge: () => void;
   onOpenTarget: () => void;
   onOpenWeek: () => void;
   onOpenSettings: () => void;
@@ -354,9 +356,17 @@ export function TrackingView(props: {
         </section>
       )}
 
-      {/* Meal prep on the go: one tap logs a serve, with Undo in the toast. */}
+      {/* The fridge: one tap logs a serve, with Undo in the toast. Empty, today keeps one slim row so it can be found. */}
       {props.selectedDate <= today && props.batches.length > 0 && (
-        <div className="tl-prep" role="group" aria-label="Meal prep">
+        <div className="tl-prep" role="group" aria-label="In your fridge">
+          <div className="tl-prep-head">
+            <span>In your fridge</span>
+            {isToday && (
+              <button type="button" className="tl-prep-more" onClick={props.onAddToFridge} aria-label="Add to fridge">
+                <Icon name="plus" size={16} /><span>Add</span>
+              </button>
+            )}
+          </div>
           {props.batches.map(batch => {
             const left = batchServesLeft(batch, state.entries);
             const each = batchServe(batch);
@@ -368,7 +378,7 @@ export function TrackingView(props: {
                 onClick={() => props.onLogBatch(batch)}
                 aria-label={`Log a serve of ${batch.name}, ${energyText(state, each.calories)}. ${fmtPortion(left)} of ${fmt(batch.servings)} serves left.`}
               >
-                <span className="tl-manual-icon" aria-hidden="true"><Icon name="prep" size={20} /></span>
+                <span className="tl-manual-icon" aria-hidden="true"><Icon name={batch.kind === 'bought' ? 'bag' : 'prep'} size={20} /></span>
                 <span className="tl-manual-text" aria-hidden="true">
                   <strong>{batch.name}</strong>
                   <span><ServePips left={left} servings={batch.servings} />{fmtPortion(left)} left · {fmt(energyValue(state, each.calories))} {unit} each</span>
@@ -378,6 +388,13 @@ export function TrackingView(props: {
             );
           })}
         </div>
+      )}
+      {isToday && !firstRun && !props.batches.length && (
+        <button type="button" className="tl-fridge-add" onClick={props.onAddToFridge}>
+          <span className="tl-fridge-add-icon" aria-hidden="true"><Icon name="prep" size={18} /></span>
+          <span className="tl-fridge-add-text"><strong>Add to fridge</strong><span>Meal prep or something you bought</span></span>
+          <Icon name="plus" size={18} />
+        </button>
       )}
 
       <button type="button" className="tl-week-row" onClick={props.onOpenWeek} aria-label={`${weekTitle}: ${weekModel.row.net}. ${weekNote}. ${weekModel.row.pace}. Opens Week.`}>

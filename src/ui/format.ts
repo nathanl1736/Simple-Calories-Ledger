@@ -1,4 +1,4 @@
-import type { Food, Meal } from '../types';
+import type { BatchKind, Food, Meal } from '../types';
 import { type FoodDatabaseItem } from '../foodDatabase';
 import { addDays, entryUnitModeValue, fmtGram, shortDate, todayKey } from '../utils';
 
@@ -43,11 +43,12 @@ export function databaseServingText(item: FoodDatabaseItem | Food) {
   return item.servingLabel || (item.servingGrams ? `${fmtGram(item.servingGrams)}g` : 'per serving');
 }
 
-/** "cooked today", "cooked yesterday", "cooked Mon", or the date once it's a week back. */
-export function cookedText(cookedOn: string) {
+/** When something went in the fridge: "cooked today", "bought yesterday", "cooked Mon", or the date once it's a week back. */
+export function cookedText(cookedOn: string, kind: BatchKind = 'cooked') {
+  const verb = kind === 'bought' ? 'bought' : 'cooked';
   const today = todayKey();
-  if (cookedOn === today) return 'cooked today';
-  if (cookedOn === addDays(today, -1)) return 'cooked yesterday';
-  if (cookedOn > addDays(today, -7)) return `cooked ${new Date(`${cookedOn}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'short' })}`;
-  return `cooked ${shortDate(cookedOn)}`;
+  if (cookedOn === today) return `${verb} today`;
+  if (cookedOn === addDays(today, -1)) return `${verb} yesterday`;
+  if (cookedOn > addDays(today, -7)) return `${verb} ${new Date(`${cookedOn}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'short' })}`;
+  return `${verb} ${shortDate(cookedOn)}`;
 }

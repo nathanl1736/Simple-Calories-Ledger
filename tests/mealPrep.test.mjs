@@ -153,3 +153,96 @@ test('meal prep serves never become a usual on the Now line', () => {
   ];
   assert.deepEqual(usualsForMeal(entries, 'Dinner', '2026-10-09').map(u => u.name), ['Salmon']);
 });
+
+// The fridge (3.1): bought food, read off its label, alongside meal prep.
+const label = fields => JSON.stringify({
+  source: 'label',
+  name: 'Vanilla ice cream (Connoisseur)',
+  servingsPerPack: 8,
+  servingDescription: '1 scoop (70 g)',
+  servingGrams: 70,
+  packGrams: 0,
+  perServing: { calories: 160, protein: 2.5, carbs: 17, fat: 9.2 },
+  per100g: { calories: 229, protein: 3.6, carbs: 24.3, fat: 13.1 },
+  assumptions: [],
+  confidence: 'high',
+  notes: 'A 1 L tub',
+  ...fields
+});
+
+test('a label reading is one pack: a label serve times the servings per package', () => {
+  const pack = m.parsePackEstimate(label());
+  assert.equal(pack.source, 'label');
+  assert.equal(pack.name, 'Vanilla ice cream (Connoisseur)');
+  assert.deepEqual(pack.perPack, { calories: 1280, protein: 20, carbs: 136, fat: 73.6 });
+  assert.equal(pack.servingsPerPack, 8);
+  assert.equal(pack.servingDescription, '1 scoop (70 g)');
+  // The weight comes from the label's serves, not the net amount: a 1 L tub's serves are in grams.
+  assert.equal(pack.packGrams, 560);
+  assert.equal(m.parsePackEstimate(label({ packGrams: 1000 })).packGrams, 560);
+  // With no serve size, the net weight is all there is.
+  assert.equal(m.parsePackEstimate(label({ servingGrams: 0, packGrams: 500 })).packGrams, 500);
+});
+
+test('a label with only a per 100 g column uses the pack weight', () => {
+  const pack = m.parsePackEstimate(label({ perServing: { calories: 0, protein: 0, carbs: 0, fat: 0 }, servingGrams: 0, packGrams: 500 }));
+  assert.equal(pack.perPack.calories, 1145);
+  assert.equal(pack.perPack.protein, 18);
+});
+
+test('unreadable, unnamed or empty label readings are rejected', () => {
+  assert.equal(m.parsePackEstimate('nope'), null);
+  assert.equal(m.parsePackEstimate(label({ name: '' })), null);
+  assert.equal(m.parsePackEstimate(label({ perServing: { calories: 0 }, per100g: { calories: 0 } })), null);
+  // A missing servings per package is one serve, as a ready meal is.
+  assert.equal(m.parsePackEstimate(label({ servingsPerPack: 0 })).servingsPerPack, 1);
+  assert.equal(m.parsePackEstimate(label({ source: 'guess' })).source, 'estimate');
+});
+
+test('packs multiply out: two ready meals are two serves, a tub is its label serves', () => {
+  const meal = { perPack: { calories: 450, protein: 40, carbs: 35, fat: 15 }, servingsPerPack: 1, packGrams: 350 };
+  assert.deepEqual(m.packBatch(meal, 2), { total: { calories: 900, protein: 80, carbs: 70, fat: 30 }, servings: 2, grams: 700 });
+  const tub = m.parsePackEstimate(label());
+  const lot = m.packBatch(tub, 1);
+  assert.equal(lot.servings, 8);
+  assert.equal(lot.total.calories, 1280);
+  // A label's "approx 2.5" serves rounds to whole serves; packs stay between 1 and 12.
+  assert.equal(m.packBatch({ ...meal, servingsPerPack: 2.5 }, 1).servings, 3);
+  assert.equal(m.packsValue(0), 1);
+  assert.equal(m.packsValue(40), 12);
+});
+
+test('the label request says how many packs and photos, and passes corrections on', () => {
+  const text = m.buildPackRequest({ description: 'Muscle Chef chicken pesto pasta', photoCount: 2, packs: 2, preferences: '' });
+  assert.match(text, /Packs bought: 2 \(for context only; describe one pack\)/);
+  assert.match(text, /Photos attached: 2/);
+  assert.match(text, /What it is: Muscle Chef chicken pesto pasta/);
+  const bare = m.buildPackRequest({ description: '', photoCount: 1, packs: 1, preferences: '', previous: '{}', correction: 'it is the 1 L tub' });
+  assert.match(bare, /What it is: see the photos/);
+  assert.match(bare, /Correction from the user: it is the 1 L tub/);
+  assert.match(m.PACK_ESTIMATE_PROMPT, /Do not multiply by the number of packs/);
+  assert.match(m.PACK_ESTIMATE_PROMPT, /kcal = kJ \/ 4\.184/);
+});
+
+test('bought food keeps 60 days on Today; cooking still a week', () => {
+  const tub = batch({ kind: 'bought', cookedOn: '2026-10-05' });
+  assert.equal(m.batchLastDay(tub), '2026-12-04');
+  assert.equal(m.batchState(tub, [], '2026-11-20'), 'active');
+  assert.equal(m.batchState(tub, [], '2026-12-05'), 'expired');
+  assert.equal(m.batchShelfDays(batch()), 7);
+});
+
+test('a serve knows its weight from the label, and its note says where it came from', () => {
+  assert.equal(m.serveGrams({ servings: 8, grams: 560 }), 70);
+  assert.equal(m.serveGrams({ servings: 4, grams: 0 }), 0);
+  assert.equal(m.serveNote(batch()), 'Meal prep: a serve of a batch of 4.');
+  assert.equal(m.serveNote(batch({ kind: 'bought', servings: 8 })), 'From the fridge: a serve of 8.');
+});
+
+test('batches saved before the fridge read back as home cooking with no weight', () => {
+  const state = normalizeStateShape({ batches: [batch(), batch({ id: 'b2', kind: 'bought', grams: '700' })] });
+  assert.equal(state.batches[0].kind, 'cooked');
+  assert.equal(state.batches[0].grams, 0);
+  assert.equal(state.batches[1].kind, 'bought');
+  assert.equal(state.batches[1].grams, 700);
+});

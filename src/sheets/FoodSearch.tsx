@@ -63,7 +63,7 @@ export function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDa
   onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   /** Log food to type in, named after the search. */
   onLogNew: (name: string) => void;
-  /** Meal prep with serves left: listed first, and one tap logs a serve. */
+  /** The fridge, serves left: listed first, and one tap logs a serve. */
   batches: Batch[];
   onLogBatch: (batch: Batch) => void;
 }) {
@@ -237,7 +237,7 @@ export function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDa
   const waiting = !browsing && databaseQuery !== trimmedQuery;
   const nothing = !browsing && !waiting && !prepRows.length && !favouriteRows.length && !recentRows.length && !databaseRows.length;
   const summary = browsing || waiting ? '' : nothing ? `No matches for ${trimmedQuery}` : [
-    prepRows.length ? `${prepRows.length} meal prep` : '',
+    prepRows.length ? `${prepRows.length} in your fridge` : '',
     favouriteRows.length ? `${favouriteRows.length} favourite${favouriteRows.length === 1 ? '' : 's'}` : '',
     recentRows.length ? `${recentRows.length} recent` : '',
     databaseMatches.length ? `${Math.min(databaseMatches.length, 20)} from the food database` : ''
@@ -310,16 +310,16 @@ export function FoodSearch({ open, state, anchorRef, onClose, onChoose, onSaveDa
           <div ref={resultsRef} className="food-search-results" onTouchMove={dismissKeyboard}>
             {prepRows.length > 0 && (
               <section className="food-search-group">
-                <h2 className="food-search-label">Meal prep · tap to log a serve</h2>
+                <h2 className="food-search-label">In your fridge · tap to log a serve</h2>
                 <div className="food-search-list">
                   {prepRows.map(batch => {
                     const left = batchServesLeft(batch, state.entries);
                     const each = batchServe(batch);
                     return (
                       <button key={batch.id} type="button" className="food-search-row" onClick={() => onLogBatch(batch)}>
-                        <span className="food-search-glyph prep" aria-hidden="true"><Icon name="prep" size={18} /></span>
+                        <span className="food-search-glyph prep" aria-hidden="true"><Icon name={batch.kind === 'bought' ? 'bag' : 'prep'} size={18} /></span>
                         <span className="food-search-main">
-                          <span className="sr-only">Meal prep, logs a serve: </span>
+                          <span className="sr-only">In your fridge, logs a serve: </span>
                           <span className="food-search-name">{batch.name}</span>
                           <span className="food-search-sub">{fmtPortion(left)} of {fmt(batch.servings)} left · <b>{fmt(each.protein)}g</b> protein</span>
                         </span>

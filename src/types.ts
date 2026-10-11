@@ -67,25 +67,32 @@ export type BatchIngredient = {
   fat: number;
 };
 
+/** Where something in the fridge came from: cooked at home (meal prep), or bought ready made. */
+export type BatchKind = 'cooked' | 'bought';
+
 /**
- * A cooked batch split into serves (meal prep). Kept apart from saved foods: a serve is logged
- * at a time until none are left, a week has passed since cooking, or it is finished early.
+ * Something in the fridge, split into serves: a cooked batch (meal prep), or food bought by the
+ * pack or tub. Kept apart from saved foods: a serve is logged at a time until none are left, its
+ * shelf days have passed, or it is finished early.
  */
 export type Batch = {
   id: string;
   name: string;
-  /** What went in, as typed: ingredients and amounts. */
+  kind: BatchKind;
+  /** What went in, as typed: ingredients and amounts. For bought food, what the user typed about it. */
   recipe: string;
   /** Serves the batch was split into. One serve is `total` divided by this. */
   servings: number;
   /** The whole batch. kcal and grams. */
   total: Totals;
-  /** Gemini's breakdown of `total`. Empty when the numbers were typed in. */
+  /** Grams (or mL) in the whole lot, from a label, so a serve can say its size. 0 when unknown. */
+  grams: number;
+  /** Gemini's breakdown of `total`. Empty when the numbers were typed in, and for bought food. */
   ingredients: BatchIngredient[];
   estimateSource: EntryEstimateSource | null;
   assumptions: string[];
   confidence: 'high' | 'medium' | 'low' | null;
-  /** The day it was cooked. It drops off Today a week later. */
+  /** The day it was cooked or bought. It drops off Today `batchShelfDays` later. */
   cookedOn: string;
   /** Set by Finish, when the rest was eaten without logging or thrown out. */
   finishedAt: number | null;

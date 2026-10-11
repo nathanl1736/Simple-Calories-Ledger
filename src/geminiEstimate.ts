@@ -1,5 +1,5 @@
 import { ESTIMATE_SCHEMA, GEMINI_ESTIMATE_PROMPT, JSON_RETRY_NOTE } from './aiEstimate';
-import { BATCH_ESTIMATE_PROMPT, BATCH_SCHEMA } from './mealPrep';
+import { BATCH_ESTIMATE_PROMPT, BATCH_SCHEMA, PACK_ESTIMATE_PROMPT, PACK_SCHEMA } from './mealPrep';
 import { SUGGEST_PROMPT, SUGGEST_SCHEMA } from './suggest';
 import { readValue, saveValue } from './storage';
 import { withTimeout } from './requestTimeout';
@@ -833,6 +833,31 @@ export async function requestBatchEstimate({
     accept,
     signal,
     fallbackError: 'Gemini could not estimate this batch.'
+  });
+}
+
+/** Reads one pack of bought food for the fridge, from label photos or a description; `userText` is built by `buildPackRequest`. */
+export async function requestPackEstimate({
+  apiKey,
+  userText,
+  imageDataUrls = [],
+  accept,
+  signal
+}: {
+  apiKey: string;
+  userText: string;
+  imageDataUrls?: string[];
+  accept?: (text: string) => boolean;
+  signal?: AbortSignal;
+}) {
+  return requestGeminiJson(apiKey, {
+    systemPrompt: PACK_ESTIMATE_PROMPT,
+    userText,
+    imageParts: imageDataUrls.map(inlineImagePart),
+    responseSchema: PACK_SCHEMA,
+    accept,
+    signal,
+    fallbackError: 'Gemini could not read this label.'
   });
 }
 

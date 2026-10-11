@@ -90,7 +90,8 @@ export async function fresh(s, cfg) {
 
   await step(s, 'batch no key', async () => {
     await s.sparkle();
-    await page.getByRole('button', { name: /Meal prep a batch/ }).click();
+    await page.getByRole('button', { name: /Add to fridge/ }).first().click();
+    await page.getByRole('button', { name: /I cooked it/ }).click();
     await s.settle(700);
     await s.sheet('meal-prep-sheet', 'describe-no-key', 'Meal prep a batch with no Gemini key: the Estimate button becomes "Set up Gemini to estimate".');
     await s.closeTop();
@@ -143,7 +144,7 @@ export async function fresh(s, cfg) {
     await page.getByRole('tab', { name: 'Favourites' }).click();
     await s.settle(400);
     await s.shot('foods', 'favourites-empty', 'Foods, Favourites: empty state.');
-    await page.getByRole('tab', { name: 'Meal prep' }).click();
+    await page.getByRole('tab', { name: 'Fridge' }).click();
     await s.settle(400);
     await s.shot('foods', 'meal-prep-empty', 'Foods, Meal prep: empty state with New batch.');
     await s.audit('foods meal prep empty');
@@ -371,7 +372,7 @@ export async function tour(s, cfg) {
     await s.audit('manage food sheet');
     await s.focusTrap('manage food sheet');
     await s.closeTop();
-    await page.getByRole('tab', { name: 'Meal prep' }).click(); await s.settle(400);
+    await page.getByRole('tab', { name: 'Fridge' }).click(); await s.settle(400);
     await s.page2('foods', 'meal-prep', 'Foods, Meal prep: New batch, the batch on the go (serve pips, serves left, per-serve macros) and Cook again.');
     await s.audit('foods meal prep');
     await page.locator('.prep-again summary').click(); await s.settle(300);
@@ -750,7 +751,8 @@ export async function aiFlows(s, cfg) {
   /* ---- meal prep batch ---- */
   await step(s, 'batch', async () => {
     await s.sparkle();
-    await page.getByRole('button', { name: /Meal prep a batch/ }).click();
+    await page.getByRole('button', { name: /Add to fridge/ }).first().click();
+    await page.getByRole('button', { name: /I cooked it/ }).click();
     await s.settle(800);
     await s.sheet('meal-prep-sheet', 'describe-empty', 'Meal prep a batch: ingredients box with a placeholder, serves stepper, Estimate batch disabled, "Enter the numbers yourself".');
     await s.audit('batch describe');
@@ -786,7 +788,8 @@ export async function aiFlows(s, cfg) {
   await step(s, 'batch error', async () => {
     ctl.mode = 'rate';
     await s.sparkle();
-    await page.getByRole('button', { name: /Meal prep a batch/ }).click();
+    await page.getByRole('button', { name: /Add to fridge/ }).first().click();
+    await page.getByRole('button', { name: /I cooked it/ }).click();
     await s.settle(700);
     await page.locator('.batch-recipe').fill('2 cups lentils\n1 can coconut milk');
     await page.getByRole('button', { name: 'Estimate batch' }).click();
