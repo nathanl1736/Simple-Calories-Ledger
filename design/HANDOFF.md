@@ -29,8 +29,8 @@ If you are a Claude session picking this up (Fable, Opus or Sonnet), this file i
 | Chunk 0: split `App.tsx` into files, zero behaviour change | done and merged (c843a02); verified: 150/150 declarations moved once, tsc, 88 tests, build, `design/audit/smoke.mjs` |
 | Chunk 1: Log sheet + estimate flow + tap-to-save + inline key connect (Opus) | done and merged with chunk 2; 127 tests; smoke OK light+dark; screenshots in design/build/chunk1/ |
 | Chunk 2: `weekView.ts` + Week screen + Today week row (Opus) | done and merged (6c8a104); 106 tests; owner's Saturday reconciles (163 to even out, Sunday about 1,287 = 1,450 − 163); screenshots in design/build/chunk2/; `weekViewFor(...).promptLine` ready for chunk 3 |
-| Chunk 3: Suggest mode | running |
-| Chunk 4: Motion (parallel with 3) | running |
+| Chunk 3: Suggest mode (Sonnet) | running (resumed after a usage-limit stop) |
+| Chunk 4: Motion (Sonnet, parallel with 3) | running (resumed after a usage-limit stop) |
 | Chunk 5: a11y/polish, version 3.0.0.0, release notes (Sonnet) | after 3+4 (PDD v0.2 already done, 420590b) |
 | Verify with re-captured screenshots; fix; PR; CI; merge; confirm Pages deploy | last |
 
@@ -41,5 +41,6 @@ If you are a Claude session picking this up (Fable, Opus or Sonnet), this file i
 ## Conventions for whoever continues
 - Commit messages end with the Co-Authored-By and Claude-Session lines used in this branch's history. No model names in code, commits or the PR body.
 - Every chunk: `npm test` and `npm run build` green before commit.
-- Trim `design/audit/screenshots/` to a curated set (~30 files) before the PR merges; the full dump is 37 MB.
+- `design/audit/screenshots/` is trimmed to 40 before references (7714529). Squash-merge the PR so the 37 MB of intermediate screenshots never reach main's history.
+- There is no CI on pull requests: `.github/workflows/deploy.yml` runs only on pushes to main (test, build, deploy to Pages). Gate the PR on local tsc/test/build/smoke, then confirm the deploy run on main after merging.
 - PR body ends with the "Generated with Claude Code" footer and the session link, as the harness requires.
