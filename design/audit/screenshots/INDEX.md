@@ -1,3 +1,5 @@
+> **Trimmed for the 3.0 merge.** The full capture was 445 images (37 MB). This folder keeps 40 "before" references used by `design/REDESIGN.md` (light and dark). The index below lists the full run; regenerate any shot with `node design/audit/capture.mjs` (see its header) against a 2.8.2.0 build.
+
 # Dawni screenshot index
 
 Captured 2026-10-10 from branch claude/ai-first-redesign (app version in package.json) by `node design/audit/capture.mjs`.
