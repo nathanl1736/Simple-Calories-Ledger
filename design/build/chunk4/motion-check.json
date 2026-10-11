@@ -1,0 +1,371 @@
+{
+  "normal.log": {
+    "before": {
+      "number": "710",
+      "unit": "Cal left today",
+      "cx": 246.4,
+      "protein": "75g"
+    },
+    "after": {
+      "number": "190",
+      "unit": "Cal left today",
+      "cx": 344.4,
+      "protein": "30g"
+    },
+    "samples": 38,
+    "distinctNumbers": 21,
+    "distinctCx": 21
+  },
+  "normal.undo": {
+    "beforeUndo": {
+      "number": "330",
+      "unit": "Cal over today",
+      "cx": 353,
+      "protein": "+15g"
+    },
+    "afterUndo": {
+      "number": "190",
+      "unit": "Cal left today",
+      "cx": 344.4,
+      "protein": "30g"
+    },
+    "distinctNumbers": 21
+  },
+  "reduced.log": {
+    "before": {
+      "number": "710",
+      "unit": "Cal left today",
+      "cx": 246.4,
+      "protein": "75g"
+    },
+    "after": {
+      "number": "190",
+      "unit": "Cal left today",
+      "cx": 344.4,
+      "protein": "30g"
+    },
+    "samples": 38,
+    "distinctNumbers": 2,
+    "distinctCx": 2
+  },
+  "reduced.undo": {
+    "beforeUndo": {
+      "number": "330",
+      "unit": "Cal over today",
+      "cx": 353,
+      "protein": "+15g"
+    },
+    "afterUndo": {
+      "number": "190",
+      "unit": "Cal left today",
+      "cx": 344.4,
+      "protein": "30g"
+    },
+    "distinctNumbers": 2
+  },
+  "dateChange": {
+    "before": {
+      "number": "710",
+      "unit": "Cal left today",
+      "cx": 246.4,
+      "protein": "75g"
+    },
+    "after": {
+      "number": "41",
+      "unit": "Cal under",
+      "cx": 352.6,
+      "protein": "129g"
+    },
+    "intermediateCx": 16
+  },
+  "weekTiles": {
+    "before": 90.8281,
+    "after": 134.156,
+    "distinctHeights": 10
+  },
+  "flick": {
+    "during": {
+      "y": 144,
+      "opacity": 1,
+      "pulled": false,
+      "scrim": 0.806971
+    },
+    "closedInMs": 292
+  },
+  "sheetOpen": {
+    "samples": 46,
+    "openedMs": 380
+  },
+  "strip": {
+    "frames": 51,
+    "strip": [
+      {
+        "file": "strip-000ms.png",
+        "target": 0,
+        "drawnAt": 8
+      },
+      {
+        "file": "strip-080ms.png",
+        "target": 80,
+        "drawnAt": 76
+      },
+      {
+        "file": "strip-160ms.png",
+        "target": 160,
+        "drawnAt": 156
+      },
+      {
+        "file": "strip-320ms.png",
+        "target": 320,
+        "drawnAt": 321
+      },
+      {
+        "file": "strip-600ms.png",
+        "target": 600,
+        "drawnAt": 607
+      }
+    ]
+  },
+  "results": [
+    {
+      "name": "normal: nothing runs a frame callback while Today is idle",
+      "ok": true,
+      "detail": "0 callbacks in 700 ms"
+    },
+    {
+      "name": "normal: logging changes the number",
+      "ok": true,
+      "detail": "710 to 190"
+    },
+    {
+      "name": "normal: the number counts through intermediate values",
+      "ok": true,
+      "detail": "19 between: 703, 603, 561, 479, 408, 350"
+    },
+    {
+      "name": "normal: the number only moves one way and never passes the final value",
+      "ok": true,
+      "detail": "min 190 vs final 190"
+    },
+    {
+      "name": "normal: the sun travels through intermediate positions",
+      "ok": true,
+      "detail": "21 distinct cx"
+    },
+    {
+      "name": "normal: the sun only moves forward and never past where it ends",
+      "ok": true,
+      "detail": "max 344.4 vs final 344.4"
+    },
+    {
+      "name": "normal: it settles in under 1 s",
+      "ok": true,
+      "detail": "settled at 781 ms"
+    },
+    {
+      "name": "normal: the protein figure moves too",
+      "ok": true,
+      "detail": "75g | 74g | 66g | 62g | 55g | 49g | 44g | 40g | 37g | 35g | 34g | 33g | 32g | 31g | 30g"
+    },
+    {
+      "name": "normal: the protein bar grows through intermediate widths",
+      "ok": true,
+      "detail": "20 distinct widths"
+    },
+    {
+      "name": "normal: the final values equal a freshly loaded Today",
+      "ok": true,
+      "detail": "190/344.4/30g vs 190/344.4/30g"
+    },
+    {
+      "name": "normal: the frame loop stops once settled",
+      "ok": true,
+      "detail": "0 callbacks in the 700 ms after settling"
+    },
+    {
+      "name": "normal: undo restores the numbers from before that entry",
+      "ok": true,
+      "detail": "330 to 190 (was 190 before it)"
+    },
+    {
+      "name": "normal: undo animates back through intermediate values",
+      "ok": true,
+      "detail": "19 between: 321, 218, 134, 57, 6, 33"
+    },
+    {
+      "name": "normal: undo moves the sun back smoothly",
+      "ok": true,
+      "detail": "16 distinct cx"
+    },
+    {
+      "name": "normal: the toast fades out rather than vanishing",
+      "ok": true,
+      "detail": "8 fading samples, opacity 1.00, 1.00, 0.87, 0.38, 0.12, 0.02, 0.00, 0.00"
+    },
+    {
+      "name": "reduced: nothing runs a frame callback while Today is idle",
+      "ok": true,
+      "detail": "0 callbacks in 700 ms"
+    },
+    {
+      "name": "reduced: logging changes the number",
+      "ok": true,
+      "detail": "710 to 190"
+    },
+    {
+      "name": "reduced: the number jumps straight to the final value",
+      "ok": true,
+      "detail": "values seen: 710 | 190"
+    },
+    {
+      "name": "reduced: the sun jumps straight to its final place",
+      "ok": true,
+      "detail": "cx seen: 246.4 | 344.4"
+    },
+    {
+      "name": "reduced: it lands within the first 150 ms of the tap",
+      "ok": true,
+      "detail": "landed at 61 ms"
+    },
+    {
+      "name": "reduced: the final values equal a freshly loaded Today",
+      "ok": true,
+      "detail": "190/344.4/30g vs 190/344.4/30g"
+    },
+    {
+      "name": "reduced: undo restores the numbers from before that entry",
+      "ok": true,
+      "detail": "330 to 190 (was 190 before it)"
+    },
+    {
+      "name": "reduced: undo jumps straight back",
+      "ok": true,
+      "detail": "values seen: 330 | 190"
+    },
+    {
+      "name": "interrupting: undo mid-flight starts from where the sun is, not from either end",
+      "ok": true,
+      "detail": "mid-flight cx 314.3, first sample after 314.3"
+    },
+    {
+      "name": "interrupting: it still ends at the right place",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "turning reduced motion on mid-flight snaps to the final value",
+      "ok": true,
+      "detail": "453 then 190 then 190"
+    },
+    {
+      "name": "date change: the sun springs from the previous day to the new one",
+      "ok": true,
+      "detail": "246.4 to 352.6 through 16 positions"
+    },
+    {
+      "name": "date change: the first sample is still the previous day (it springs from there)",
+      "ok": true,
+      "detail": "first cx 246.4 vs previous 246.4"
+    },
+    {
+      "name": "macros: tapping left / eaten swaps the figure at once instead of counting",
+      "ok": true,
+      "detail": "values seen: 51g left | 109g eaten"
+    },
+    {
+      "name": "week tiles: the water fill rises through intermediate heights",
+      "ok": true,
+      "detail": "90.8px to 134.2px through 9 heights"
+    },
+    {
+      "name": "sheet: the panel follows the finger while dragging",
+      "ok": true,
+      "detail": "y 144, scrim 0.81"
+    },
+    {
+      "name": "sheet: a quick flick down closes it",
+      "ok": true,
+      "detail": "gone after 292 ms"
+    },
+    {
+      "name": "sheet: a short drag returns it to the top",
+      "ok": true,
+      "detail": "held at 40px, back at 0, scrim 1"
+    },
+    {
+      "name": "sheet: pulled far and let go slowly, it closes",
+      "ok": true,
+      "detail": "gone after 303 ms"
+    },
+    {
+      "name": "sheet: lifted back up as it is let go, it returns even though it was pulled far",
+      "ok": true,
+      "detail": "back at 0"
+    },
+    {
+      "name": "sheet: pulled up past the top it moves at 0.35 of the finger",
+      "ok": true,
+      "detail": "panel -23.1px, expected -23.1px"
+    },
+    {
+      "name": "sheet: and eases back when let go",
+      "ok": true,
+      "detail": "back at 0"
+    },
+    {
+      "name": "sheet: opens over about 420 ms",
+      "ok": true,
+      "detail": "380 ms (sampled every 20 ms)"
+    },
+    {
+      "name": "sheet: the scrim fades out as it closes",
+      "ok": true,
+      "detail": "13 opacity steps: 1.00 0.95 0.86 0.72 0.45 0.34 0.25 0.19 0.13 0.06 0.03 0.02 0.01"
+    },
+    {
+      "name": "sheet: closes over about 260 ms",
+      "ok": true,
+      "detail": "gone after 291 ms (350 total)"
+    },
+    {
+      "name": "reduced motion: a sheet cross-fades instead of sliding",
+      "ok": true,
+      "detail": "y always 0; 9 opacity steps"
+    },
+    {
+      "name": "reduced motion: dragging still follows the finger and a flick still closes it",
+      "ok": true,
+      "detail": "held 200px, gone after 232 ms"
+    },
+    {
+      "name": "press: a row settles to 0.98 on pointer down",
+      "ok": true,
+      "detail": "idle none, 60 ms 0.983135, 180 ms 0.98"
+    },
+    {
+      "name": "press: and eases back on release",
+      "ok": true,
+      "detail": "after release none"
+    },
+    {
+      "name": "press: moving more than 10 px cancels it",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "press: a touch press scales at once, and lets go when it becomes a scroll",
+      "ok": true,
+      "detail": "touching 0.98, after scrolling none"
+    },
+    {
+      "name": "press: chips scale too",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "press: under reduced motion nothing scales",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

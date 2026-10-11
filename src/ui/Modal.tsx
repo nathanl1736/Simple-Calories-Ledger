@@ -1,4 +1,5 @@
 import { ReactNode, type MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { prefersReducedMotion } from '../motion';
 
 export const MODAL_SCROLL_LOCK_RELEASED_EVENT = 'modal-scroll-lock-released';
 export let modalScrollLockCount = 0;
@@ -155,7 +156,8 @@ export function Modal({ open, title, children, onClose, wide = false, className 
   const renderedRef = useRef(rendered);
   renderedRef.current = rendered;
   const panelRef = useRef<HTMLElement>(null);
-  const CLOSE_MS = bottomSheet ? 320 : 180;
+  // Sheets slide out in 260 ms (they came in over 420); under reduced motion they cross-fade for 200 instead.
+  const closeMs = useCallback(() => bottomSheet ? (prefersReducedMotion() ? 200 : 260) : 180, [bottomSheet]);
 
   // Body scroll lock is shared across modal instances so handoffs cannot unlock the page early.
   useEffect(() => {
@@ -163,8 +165,8 @@ export function Modal({ open, title, children, onClose, wide = false, className 
     return acquireModalScrollLock();
   }, [rendered]);
 
-  // Single close gate — all dismiss paths funnel here.
-  const requestClose = useCallback(() => {
+  // Single close gate — all dismiss paths funnel here. A swipe passes the time its own flick-out takes.
+  const requestClose = useCallback((ms?: number) => {
     if (closingRef.current) return;
     closingRef.current = true;
     cancelAnimationFrame(rafRef.current!);
@@ -177,31 +179,43 @@ export function Modal({ open, title, children, onClose, wide = false, className 
       setClosing(false);
       closingRef.current = false;
       onCloseRef.current();
-    }, CLOSE_MS);
-  }, [CLOSE_MS]);
+    }, ms ?? closeMs());
+  }, [closeMs]);
 
   // Swipe down to close, like an iOS sheet: from the handle/title bar, or from the
   // content once it is scrolled to the top. Native listeners, because React's
   // touch handlers are passive and could not stop the page scrolling.
+  // The panel follows the finger 1:1 (from wherever it is: it may still be sliding in), gives way
+  // slowly if pulled up past its resting place, and on release carries the finger's own speed on:
+  // out if it was flicked down or pulled far, back if it was lifted, taking as long as the rest of
+  // the way takes at that speed (never under 120 ms or over 260).
   useEffect(() => {
     const panel = panelRef.current;
     if (!rendered || !panel) return;
     let startX = 0;
     let startY = 0;
-    let startTime = 0;
     let eligible = false;
     let decided = false;
     let dragging = false;
+    /** Where the panel sat when the finger took hold, and where it is now (past the top, this is the eased distance). */
+    let base = 0;
     let offset = 0;
+    let samples: { y: number; t: number }[] = [];
     const scrim = () => panel.parentElement?.querySelector<HTMLElement>(':scope > .modal-scrim') || null;
     const isTopmost = () => {
       const backdrops = document.querySelectorAll('.modal-backdrop');
       return backdrops[backdrops.length - 1] === panel.parentElement;
     };
+    const panelY = () => {
+      const transform = getComputedStyle(panel).transform;
+      if (!transform || transform === 'none') return 0;
+      try { return new DOMMatrixReadOnly(transform).m42; } catch { return 0; }
+    };
     const reset = () => {
       dragging = false;
       decided = false;
       offset = 0;
+      samples = [];
     };
     const onStart = (event: TouchEvent) => {
       reset();
@@ -215,7 +229,7 @@ export function Modal({ open, title, children, onClose, wide = false, className 
         && (!!target.closest('.modal-head') || !modalCanScroll(target, 'up'));
       startX = event.touches[0]?.clientX ?? 0;
       startY = event.touches[0]?.clientY ?? 0;
-      startTime = performance.now();
+      samples = [{ y: startY, t: event.timeStamp }];
     };
     const onMove = (event: TouchEvent) => {
       if (!eligible) return;
@@ -228,41 +242,70 @@ export function Modal({ open, title, children, onClose, wide = false, className 
         decided = true;
         dragging = dy > 0 && Math.abs(dy) > Math.abs(dx);
         if (!dragging) return;
+        // Take hold from the live position, so grabbing a sheet that is still arriving doesn't make it jump.
+        base = panelY();
         panel.style.transition = 'none';
+        // An entrance animation still running would otherwise hold the transform (and the scrim's opacity) and ignore the finger.
+        panel.style.animation = 'none';
+        const fade = scrim();
+        if (fade) fade.style.animation = 'none';
       }
       if (!dragging) return;
       event.preventDefault();
-      offset = Math.max(0, dy);
+      const raw = base + dy;
+      // Past the top it resists: a third of the way, then no more. (Down, it is 1:1.)
+      offset = raw < 0 ? raw * 0.35 : raw;
       panel.style.transform = `translate3d(0, ${offset}px, 0)`;
+      panel.classList.toggle('is-pulled', offset < 0);
+      samples.push({ y: touch.clientY, t: event.timeStamp });
+      while (samples.length > 2 && event.timeStamp - samples[0].t > 100) samples.shift();
       const fade = scrim();
-      if (fade) fade.style.opacity = String(Math.max(0.25, 1 - offset / Math.max(panel.offsetHeight, 1)));
+      if (fade) fade.style.opacity = String(Math.min(1, Math.max(0.25, 1 - Math.max(0, offset) / Math.max(panel.offsetHeight, 1))));
     };
-    const onEnd = () => {
+    const onEnd = (event: TouchEvent) => {
       if (!dragging) return reset();
-      const elapsed = Math.max(1, performance.now() - startTime);
-      const fast = offset / elapsed > 0.6 && offset > 40;
-      const far = offset > Math.min(140, panel.offsetHeight * 0.25);
+      const height = Math.max(panel.offsetHeight, 1);
+      // The finger's speed as it left, px per ms, down the screen positive. Resting before lifting counts as none.
+      const last = samples[samples.length - 1];
+      const first = samples.find(sample => event.timeStamp - sample.t <= 100) || last;
+      const velocity = last && first && last.t > first.t && event.timeStamp - last.t <= 80 ? (last.y - first.y) / (last.t - first.t) : 0;
+      const flicked = velocity > 0.6 && offset > 40;
+      const far = offset > Math.min(140, height * 0.25);
+      const lifted = velocity < -0.25;
+      const dismiss = !lifted && (flicked || far);
       const fade = scrim();
-      if (fast || far) {
-        panel.style.transition = `transform ${Math.min(CLOSE_MS, 220)}ms cubic-bezier(.2, .8, .2, 1)`;
-        panel.style.transform = 'translate3d(0, 110%, 0)';
+      const reduceMotion = prefersReducedMotion();
+      const remaining = Math.max(1, dismiss ? height * 1.1 - offset : Math.abs(offset));
+      const ms = reduceMotion ? 200 : Math.round(Math.min(260, Math.max(120, remaining / Math.max(Math.abs(velocity), 0.001))));
+      // Carrying speed on wants a curve that starts at about the finger's pace; from rest, the sheet's own.
+      const ease = Math.abs(velocity) >= 0.3 ? 'cubic-bezier(.4, .4, .6, 1)' : 'cubic-bezier(.32, .72, 0, 1)';
+      if (dismiss) {
+        if (reduceMotion) {
+          // No sliding: it fades where it was let go.
+          panel.style.transition = `opacity ${ms}ms ease`;
+          panel.style.opacity = '0';
+        } else {
+          panel.style.transition = `transform ${ms}ms ${ease}`;
+          panel.style.transform = 'translate3d(0, 110%, 0)';
+        }
         if (fade) {
-          fade.style.transition = `opacity ${Math.min(CLOSE_MS, 220)}ms ease`;
+          fade.style.transition = `opacity ${ms}ms ease`;
           fade.style.opacity = '0';
         }
-        requestClose();
+        requestClose(ms);
       } else {
-        panel.style.transition = 'transform 220ms cubic-bezier(.2, .8, .2, 1)';
+        panel.style.transition = reduceMotion ? 'none' : `transform ${ms}ms ${ease}`;
         panel.style.transform = '';
         if (fade) {
-          fade.style.transition = 'opacity 220ms ease';
+          fade.style.transition = reduceMotion ? 'none' : `opacity ${ms}ms ease`;
           fade.style.opacity = '';
         }
         window.setTimeout(() => {
           if (closingRef.current) return;
           panel.style.transition = '';
+          panel.classList.remove('is-pulled');
           if (fade) fade.style.transition = '';
-        }, 240);
+        }, reduceMotion ? 0 : ms + 20);
       }
       reset();
     };
@@ -276,7 +319,7 @@ export function Modal({ open, title, children, onClose, wide = false, className 
       panel.removeEventListener('touchend', onEnd);
       panel.removeEventListener('touchcancel', onEnd);
     };
-  }, [rendered, requestClose, CLOSE_MS]);
+  }, [rendered, requestClose]);
 
   // Esc closes the topmost modal on desktop.
   useEffect(() => {

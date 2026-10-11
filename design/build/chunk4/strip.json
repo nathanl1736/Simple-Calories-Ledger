@@ -1,0 +1,30 @@
+{
+  "frames": 51,
+  "strip": [
+    {
+      "file": "strip-000ms.png",
+      "target": 0,
+      "drawnAt": 8
+    },
+    {
+      "file": "strip-080ms.png",
+      "target": 80,
+      "drawnAt": 76
+    },
+    {
+      "file": "strip-160ms.png",
+      "target": 160,
+      "drawnAt": 156
+    },
+    {
+      "file": "strip-320ms.png",
+      "target": 320,
+      "drawnAt": 321
+    },
+    {
+      "file": "strip-600ms.png",
+      "target": 600,
+      "drawnAt": 607
+    }
+  ]
+}

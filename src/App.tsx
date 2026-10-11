@@ -52,6 +52,7 @@ import { type Tab, type EntryOpenMode, type JournalDayViewMode, type JournalLabe
 import { modalScrollLockCount, holdKeyboard, afterModalScrollLock, Modal } from './ui/Modal';
 import { OpenSettingsContext } from './ui/SettingsButton';
 import { TABS, AppShell } from './ui/AppShell';
+import { ToastHost } from './ui/ToastHost';
 import { defaultMealForCurrentTime, accentInk } from './ui/format';
 import { TrackingView } from './views/TodayView';
 import { weekRange, RichStatsView, WeekDetails } from './views/WeekView';
@@ -1686,14 +1687,7 @@ export function App() {
           <button className="secondary" type="button" onClick={() => setModal(null)}>Later today</button>
         </div>
       </Modal>
-      {toast && (
-        <div key={toast.id} className={`toast ${toast.action ? 'has-action' : ''} ${pill ? 'above-pill' : ''}`} role="status">
-          <span>{toast.text}</span>
-          {toast.action && (
-            <button type="button" className="toast-action" onClick={() => { const action = toast.action; setToast(null); action?.run(); }}>{toast.action.label}</button>
-          )}
-        </div>
-      )}
+      <ToastHost toast={toast} abovePill={!!pill} onAction={action => { setToast(null); action.run(); }} />
     </AppShell>
     </OpenSettingsContext.Provider>
   );
