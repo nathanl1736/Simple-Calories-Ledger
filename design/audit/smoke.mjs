@@ -110,6 +110,30 @@ await step('Typing in Log food searches: results replace the usuals, a tap opens
   await s.closeAll();
 });
 
+await step('Favourites have their own row in Log food: a tap logs one with Undo, See all shows them all', async () => {
+  await sparkle().click();
+  await visible(s.dialog());
+  const row = s.dialog().locator('.log-favourites');
+  await visible(row.getByText('Favourites', { exact: true }));
+  // Every favourite is in its own row and none is also a usual.
+  const favourites = await row.locator('.log-chip:not(.log-chip-more) b').allInnerTexts();
+  const usuals = await s.dialog().locator('.log-usuals .log-chip:not(.log-chip-more) b').allInnerTexts();
+  const saved = (s.seeded?.foods || []).filter(food => food.favourite).map(food => food.name);
+  if (saved.some(name => !favourites.includes(name))) throw new Error(`Missing favourites: ${saved.filter(name => !favourites.includes(name)).join(', ')}`);
+  if (favourites.some(name => usuals.includes(name))) throw new Error('A favourite shows in both rows');
+  await shot('log-favourites');
+  const seeAll = s.dialog().locator('.log-see-all');
+  if (await seeAll.count()) {
+    await seeAll.click();
+    await visible(s.dialog().locator('#log-favourite-chips.is-wrapped'));
+    await shot('log-favourites-all');
+  }
+  await row.locator('.log-chip', { hasText: 'Flat white' }).first().click();
+  await visible(page.getByRole('button', { name: 'Undo' }));
+  await page.getByRole('button', { name: 'Undo' }).first().click();
+  await page.waitForTimeout(400);
+});
+
 await step('A food database result shows its estimate over Log food', async () => {
   await sparkle().click();
   await visible(s.dialog());

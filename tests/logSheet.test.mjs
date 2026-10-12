@@ -1,10 +1,10 @@
-// The Log sheet's pure parts: the usuals row, Undo bookkeeping, and the estimating copy. npm test (Node 22.6+).
+// The Log sheet's pure parts: the usuals and favourites rows, Undo bookkeeping, and the estimating copy. npm test (Node 22.6+).
 import { register } from 'node:module';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 register('./resolveTs.mjs', import.meta.url);
-const { usualChips, MAX_USUAL_CHIPS } = await import('../src/logUsuals.ts');
+const { logChips, favouritesByUse, MAX_USUAL_CHIPS } = await import('../src/logUsuals.ts');
 const { removeEntry, restoreEntry, revertFoodUse } = await import('../src/undo.ts');
 const { elapsedText, estimatingLabel, logSheetTitle, SHOW_ELAPSED_AFTER_MS } = await import('../src/estimateJob.ts');
 
@@ -13,45 +13,81 @@ const food = (id, name, calories, extra = {}) => ({ id, name, calories, protein:
 const batch = (id, name) => ({ id, name, recipe: '', servings: 4, total: { calories: 2000, protein: 0, carbs: 0, fat: 0 }, ingredients: [], estimateSource: null, assumptions: [], confidence: null, cookedOn: '2026-10-08', finishedAt: null, createdAt: 1, updatedAt: 1 });
 const usual = (key, latest) => ({ key, name: latest.name, latest });
 
-/* ---------------------------------------------------------------- usuals row */
+/* ---------------------------------------------------------------- usuals and favourites rows */
 
-test('usuals come first, then meal prep with serves left, then favourites by use', () => {
-  const chips = usualChips({
+const row = chips => chips.map(chip => `${chip.kind}:${chip.name}`);
+
+test('usuals come first, then meal prep with serves left; favourites have their own row, most logged first', () => {
+  const { usuals, favourites } = logChips({
     usuals: [usual('a', entry('e1', 'Chicken and rice', 520)), usual('b', entry('e2', 'Tuna salad sandwich', 380))],
     batches: [{ batch: batch('b1', 'Beef mince rice bowl'), left: 3, calories: 500 }, { batch: batch('b2', 'Curry'), left: 0, calories: 600 }],
     foods: [food('f1', 'Flat white', 120, { usageCount: 31 }), food('f2', 'Greek yoghurt', 194, { usageCount: 40 }), food('f3', 'Apple', 95, { favourite: false })]
   });
-  assert.deepEqual(chips.map(chip => `${chip.kind}:${chip.name}`), [
+  assert.deepEqual(row(usuals), [
     'usual:Chicken and rice',
     'usual:Tuna salad sandwich',
-    'prep:Beef mince rice bowl',
-    'favourite:Greek yoghurt',
-    'favourite:Flat white'
+    'prep:Beef mince rice bowl'
   ]);
-  const prep = chips.find(chip => chip.kind === 'prep');
+  assert.deepEqual(row(favourites), ['favourite:Greek yoghurt', 'favourite:Flat white']);
+  const prep = usuals.find(chip => chip.kind === 'prep');
   assert.equal(prep.left, 3);
   assert.equal(prep.calories, 500);
 });
 
+test('every favourite is in Favourites: one that is a usual for this meal leads it, logging as last time', () => {
+  const { usuals, favourites } = logChips({
+    usuals: [usual('f2', entry('e1', 'Greek yoghurt', 250, { sourceFoodId: 'f2', portion: 1.3 })), usual('b', entry('e2', 'Tuna salad sandwich', 380))],
+    batches: [],
+    foods: [food('f1', 'Flat white', 120, { usageCount: 31 }), food('f2', 'Greek yoghurt', 194, { usageCount: 4 })]
+  });
+  assert.deepEqual(row(usuals), ['usual:Tuna salad sandwich']);
+  assert.deepEqual(row(favourites), ['usual:Greek yoghurt', 'favourite:Flat white']);
+  assert.equal(favourites[0].calories, 250, 'what was logged last time, not the saved serve');
+  assert.equal(favourites[0].entry.portion, 1.3);
+});
+
+test('a usual matches its favourite by name when it was not picked from it', () => {
+  const { usuals, favourites } = logChips({
+    usuals: [usual('flat white', entry('e1', 'Flat White', 130))],
+    batches: [],
+    foods: [food('f1', 'flat white', 120)]
+  });
+  assert.deepEqual(usuals, []);
+  assert.deepEqual(row(favourites), ['usual:Flat White']);
+});
+
 test('the same food never shows twice, by saved food or by name', () => {
-  const chips = usualChips({
-    usuals: [usual('f1', entry('e1', 'Flat white', 120, { sourceFoodId: 'f1' }))],
+  const { usuals, favourites } = logChips({
+    usuals: [usual('f1', entry('e1', 'Flat white', 120, { sourceFoodId: 'f1' })), usual('flat white', entry('e2', 'flat white', 118))],
     batches: [],
     foods: [food('f1', 'Flat white (large)', 150), food('f2', 'flat white ', 130), food('f3', 'Banana', 105)]
   });
-  assert.deepEqual(chips.map(chip => chip.name), ['Flat white', 'Banana']);
+  assert.deepEqual(usuals, []);
+  assert.deepEqual(favourites.map(chip => chip.name), ['Flat white', 'Banana']);
 });
 
-test('the row stops at eight chips', () => {
+test('the usuals row stops at eight chips; favourites keep every one', () => {
   const foods = Array.from({ length: 20 }, (_, i) => food(`f${i}`, `Food ${i}`, 100 + i));
+  const usuals = Array.from({ length: 12 }, (_, i) => usual(`u${i}`, entry(`e${i}`, `Usual ${i}`, 200 + i)));
   assert.equal(MAX_USUAL_CHIPS, 8);
-  assert.equal(usualChips({ usuals: [], batches: [], foods }).length, 8);
-  assert.equal(usualChips({ usuals: [], batches: [], foods, limit: 3 }).length, 3);
+  assert.equal(logChips({ usuals, batches: [], foods }).usuals.length, 8);
+  assert.equal(logChips({ usuals, batches: [], foods, limit: 3 }).usuals.length, 3);
+  assert.equal(logChips({ usuals: [], batches: [], foods }).favourites.length, 20);
+});
+
+test('no favourites, no favourites row', () => {
+  const { favourites } = logChips({ usuals: [], batches: [], foods: [food('f1', 'Apple', 95, { favourite: false })] });
+  assert.deepEqual(favourites, []);
+});
+
+test('favourites tie on use go most recent first', () => {
+  const foods = [food('a', 'Older', 100, { usageCount: 5, lastUsedAt: 10 }), food('b', 'Newer', 100, { usageCount: 5, lastUsedAt: 20 }), food('c', 'Not one', 100, { favourite: false, usageCount: 99 })];
+  assert.deepEqual(favouritesByUse(foods).map(item => item.name), ['Newer', 'Older']);
 });
 
 test('a usual logs what was logged last time', () => {
   const latest = entry('e9', 'Eggs on sourdough', 420, { portion: 2 });
-  const [chip] = usualChips({ usuals: [usual('x', latest)], batches: [], foods: [] });
+  const [chip] = logChips({ usuals: [usual('x', latest)], batches: [], foods: [] }).usuals;
   assert.equal(chip.calories, 420);
   assert.equal(chip.entry, latest);
 });

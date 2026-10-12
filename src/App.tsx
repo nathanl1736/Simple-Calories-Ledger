@@ -16,7 +16,7 @@ import { dayPartAt, entryDayPart, mealDayPart, usualsForMeal } from './tidelight
 import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import { buildEstimateRequest, estimateNotes, estimateSourceValue, parseGeminiEstimate, type GeminiEstimate } from './aiEstimate';
 import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstimate, requestPackEstimate, requestSuggestion } from './geminiEstimate';
-import { usualChips, type UsualChip } from './logUsuals';
+import { logChips, type UsualChip } from './logUsuals';
 import { removeEntry, removeFood, restoreEntry, restoreFood, revertFoodUse, type RemovedEntry, type RemovedFood } from './undo';
 import { estimatingLabel, logSheetTitle, suggestSheetTitle } from './estimateJob';
 import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, buildPackRequest, parseBatchEstimate, parsePackEstimate, pruneBatches, serveNote } from './mealPrep';
@@ -731,7 +731,7 @@ export function App() {
     };
   };
 
-  /** A chip in the Log sheet's usuals row: a tap logs it to the sheet's meal, with Undo. */
+  /** A chip in the Log sheet's usuals or favourites row: a tap logs it to the sheet's meal, with Undo. */
   const logChip = (chip: UsualChip) => {
     setModal(null);
     if (chip.kind === 'prep') return logBatchServe(chip.batch, selectedDate, logMeal);
@@ -1191,9 +1191,9 @@ export function App() {
   // The fridge: serves left of anything cooked or bought by the day shown on Today.
   const batchesForDay = activeBatches(state.batches, state.entries, todayKey()).filter(batch => batch.cookedOn <= selectedDate);
   const activePhotoEntry = state.entries.find(entry => entry.id === activePhotoEntryId) || null;
-  // The Log sheet's usuals row: this meal's usuals, the fridge, then favourites.
-  const logChips = modal === 'log'
-    ? usualChips({
+  // The Log sheet's one-tap rows: this meal's usuals and the fridge, then every favourite.
+  const quickChips = modal === 'log'
+    ? logChips({
       usuals: usualsForMeal(state.entries, logMeal, todayKey(), new Set(state.foods.map(food => food.id)), 28, 8),
       batches: batchesForDay.map(batch => {
         const left = batchServesLeft(batch, state.entries);
@@ -1201,7 +1201,7 @@ export function App() {
       }),
       foods: state.foods
     })
-    : [];
+    : { usuals: [], favourites: [] };
   // While Gemini works on something whose sheet was closed: a slim pill above the tab bar, on every tab.
   const estimating = estimateJob?.status === 'running' && modal !== 'log';
   const pillLabel = estimating && estimateJob ? estimatingLabel(estimateJob.meal, estimateJob.kind) : batchBusy && modal !== 'batch' ? (batchBusy === 'bought' ? 'Reading the label…' : 'Estimating the batch…') : '';
@@ -1328,7 +1328,8 @@ export function App() {
             onRun: startSuggest
           }}
           job={estimateJob}
-          chips={logChips}
+          chips={quickChips.usuals}
+          favourites={quickChips.favourites}
           // Its own close only: Estimate, a chip or another way may already have opened the next sheet.
           onClose={() => setModal(current => (current === 'log' ? null : current))}
           onEstimate={startEstimate}
