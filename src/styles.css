@@ -2180,6 +2180,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .log-chip-more { gap: 4px; padding: 0 14px; color: var(--color-accent-text); font-weight: var(--weight-semibold); }
 .log-chip-more.active { background: var(--accent-tint); }
 
+/* Favourites (3.1.2): every hearted food, a row of the same chips under the usuals. See all unfolds the row so
+   every one shows at once, wrapped, without scrolling sideways. */
+.log-chips.is-wrapped { flex-wrap: wrap; margin: 0; padding: 0; overflow: visible; }
+.log-chips.is-wrapped .log-chip { max-width: 100%; }
+.log-section-head .log-see-all { flex: none; display: inline-flex; align-items: center; justify-content: flex-end; min-width: 44px; min-height: 44px; margin-block: -13px; padding: 0 4px; border-radius: 0; background: none; color: var(--color-accent-text); font-size: 13px; line-height: 18px; font-weight: var(--weight-semibold); }
+/* Before the first heart: an empty slot, dashed like the database's suggestions, saying how to fill it. */
+.log-favourites-empty { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0; padding: 8px 16px 8px 10px; box-sizing: border-box; border: 1.5px dashed color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 22px; color: var(--muted); font-size: 15px; line-height: 20px; letter-spacing: -.23px; }
+.log-favourites-empty-glyph { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--color-favourite) 14%, var(--card)); color: var(--color-favourite); }
+
 /* Other ways: plain rows, like a grouped list. */
 .log-ways { overflow: hidden; border-radius: 22px; background: var(--tl-inset); }
 .log-way { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr) 16px; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0 16px 0 12px; border-radius: 0; background: none; color: var(--ink); font-size: 17px; line-height: 22px; letter-spacing: -.43px; text-align: left; }

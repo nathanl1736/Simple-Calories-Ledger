@@ -29,7 +29,7 @@ export function LibraryView({ state, sub, setSub, query, setQuery, onPrefill, on
   };
   const emptyCopy =
     sub === 'favourites'
-      ? { title: 'No favourites yet.', body: 'Tap the heart on a food you eat often. Favourites show here and first when you type in Log food.' }
+      ? { title: 'No favourites yet.', body: 'Tap the heart on a food you eat often. Favourites wait in Log food, one tap from logged, and come first when you search.' }
       : query.trim()
         ? { title: 'No matches yet.', body: 'Try a different food name.' }
         : { title: 'Nothing here yet.', body: 'Your usual foods will appear here as you reuse them.' };

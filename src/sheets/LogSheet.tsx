@@ -22,9 +22,28 @@ const COMPOSER_MAX_PX = 140;
 const LONG_PRESS_MS = 450;
 
 /**
+ * Whether a row that scrolls sideways has more in it than shows. Checked after each render, as chips come and
+ * go, and when the row changes width. `paused` keeps the last answer, for while the row is unfolded.
+ */
+function useRunsOffSide(row: HTMLElement | null, paused: boolean) {
+  const [overflows, setOverflows] = useState(false);
+  const measure = () => {
+    if (!paused) setOverflows(!!row && row.scrollWidth > row.clientWidth + 1);
+  };
+  useLayoutEffect(measure);
+  useEffect(() => {
+    if (!row || paused || typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [row, paused]);
+  return overflows;
+}
+
+/**
  * Log food: one sheet, one text box rather than a menu. Type and it searches your foods, the fridge
- * and the food database, the results standing in for the usuals and other ways below; or describe
- * or photograph what was eaten and Estimate; or tap a usual to log it at once. Its Suggest mode asks
+ * and the food database, the results standing in for the usuals, favourites and other ways below; or
+ * describe or photograph what was eaten and Estimate; or tap a usual or a favourite to log it at once. Its Suggest mode asks
  * what to eat instead: where you're going or what's at home, and Gemini fits it to the day and the
  * week. Opened by the sparkle on any tab, the Now line, the first-run card and Journal. What it logs
  * goes to the day shown on Today.
@@ -45,7 +64,10 @@ export function LogSheet(props: {
   /** What Suggest mode asks and shows. */
   suggest: SuggestProps;
   job: EstimateJob | null;
+  /** This meal's usuals and the fridge. */
   chips: UsualChip[];
+  /** Every favourite, its own row under the usuals. */
+  favourites: UsualChip[];
   onClose: () => void;
   onEstimate: () => void;
   onCancelEstimate: () => void;
@@ -77,6 +99,9 @@ export function LogSheet(props: {
   const [photoError, setPhotoError] = useState('');
   const [checking, setChecking] = useState(false);
   const [tipsOpen, setTipsOpen] = useState(false);
+  /** Favourites unfolded from one sideways row into all of them at once. */
+  const [allFavourites, setAllFavourites] = useState(false);
+  const [favouritesRow, setFavouritesRow] = useState<HTMLDivElement | null>(null);
   const [model, setModel] = useState('');
   const [now, setNow] = useState(() => performance.now());
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -98,12 +123,16 @@ export function LogSheet(props: {
   // then the words are for Gemini.
   const searchQuery = !suggesting && !running && !ready && !connectFor ? composerSearchQuery(draft) : '';
   const searching = !!searchQuery;
+  // The one-tap rows rest under the box: usuals and the fridge, then favourites.
+  const quickRows = !suggesting && !searching && !running && !ready && !connectFor;
+  const showUsuals = quickRows && props.chips.length > 0;
 
   // Each opening starts with the chips logging on tap.
   useEffect(() => {
     if (!open) return;
     setConnectFor(null);
     setChecking(false);
+    setAllFavourites(false);
     setPhotoError('');
   }, [open]);
 
@@ -140,6 +169,9 @@ export function LogSheet(props: {
     el.style.height = 'auto';
     el.style.height = `${Math.max(COMPOSER_MIN_PX, Math.min(COMPOSER_MAX_PX, el.scrollHeight + 2))}px`;
   }, [draft.text, open, connectFor, job?.status, suggesting]);
+
+  // "See all" only when the favourites run off the side of the sheet.
+  const favouritesOverflow = useRunsOffSide(favouritesRow, allFavourites);
 
   // The sheet sits on the bottom edge, so a list that grew and shrank with each letter would move the
   // box being typed in. While it searches, the sheet keeps the height it had before the first letter
@@ -246,6 +278,35 @@ export function LogSheet(props: {
       else props.onLogChip(chip);
     }
   });
+
+  const chipButton = (chip: UsualChip) => (
+    <button
+      key={chip.key}
+      type="button"
+      className={`log-chip ${chip.kind}`}
+      aria-label={`${checking ? 'Check' : 'Log'} ${chip.name}${chip.kind === 'prep' ? `, a serve, ${fmtPortion(chip.left)} left` : ''}, ${fmt(energyValue(state, chip.calories))} ${unit}`}
+      {...chipHandlers(chip)}
+    >
+      {chip.kind === 'prep' && <Icon name={chip.batch.kind === 'bought' ? 'bag' : 'prep'} size={16} />}
+      <b>{chip.name}</b>
+      {chip.kind === 'prep' && <span className="log-chip-left">· {fmtPortion(chip.left)} left</span>}
+      <span className="log-chip-cal">{fmt(energyValue(state, chip.calories))}</span>
+    </button>
+  );
+  // More turns every chip in the sheet into a check first. It ends the first row of chips.
+  const moreChip = (
+    <button
+      type="button"
+      className={`log-chip log-chip-more ${checking ? 'active' : ''}`}
+      aria-pressed={checking}
+      aria-label={checking ? 'Done: tap logs again' : 'More: check one before logging'}
+      onClick={() => setChecking(current => !current)}
+    >
+      {checking ? 'Done' : <><Icon name="more" size={18} /><span>More</span></>}
+    </button>
+  );
+  const checkingHead = 'Tap one to check it before logging';
+  const tapHint = 'Tap to log · hold to check';
 
   const way = (icon: IconName, label: string, onClick: () => void, detail = '') => (
     <button type="button" className={detail ? 'log-way has-detail' : 'log-way'} onClick={onClick}>
@@ -404,37 +465,47 @@ export function LogSheet(props: {
           />
         )}
 
-        {!suggesting && !searching && !running && !ready && !connectFor && props.chips.length > 0 && (
+        {showUsuals && (
           <section className="log-usuals" aria-label={`Usuals for ${props.meal.toLowerCase()}`}>
             <div className="log-section-head">
-              <span>{checking ? 'Tap one to check it before logging' : `Usuals for ${props.meal.toLowerCase()}`}</span>
-              {!checking && <small>Tap to log · hold to check</small>}
+              <span>{checking ? checkingHead : `Usuals for ${props.meal.toLowerCase()}`}</span>
+              {!checking && <small>{tapHint}</small>}
             </div>
             <div className="log-chips">
-              {props.chips.map(chip => (
-                <button
-                  key={chip.key}
-                  type="button"
-                  className={`log-chip ${chip.kind}`}
-                  aria-label={`${checking ? 'Check' : 'Log'} ${chip.name}${chip.kind === 'prep' ? `, a serve, ${fmtPortion(chip.left)} left` : ''}, ${fmt(energyValue(state, chip.calories))} ${unit}`}
-                  {...chipHandlers(chip)}
-                >
-                  {chip.kind === 'prep' && <Icon name={chip.batch.kind === 'bought' ? 'bag' : 'prep'} size={16} />}
-                  <b>{chip.name}</b>
-                  {chip.kind === 'prep' && <span className="log-chip-left">· {fmtPortion(chip.left)} left</span>}
-                  <span className="log-chip-cal">{fmt(energyValue(state, chip.calories))}</span>
-                </button>
-              ))}
-              <button
-                type="button"
-                className={`log-chip log-chip-more ${checking ? 'active' : ''}`}
-                aria-pressed={checking}
-                aria-label={checking ? 'Done: tap logs again' : 'More: check one before logging'}
-                onClick={() => setChecking(current => !current)}
-              >
-                {checking ? 'Done' : <><Icon name="more" size={18} /><span>More</span></>}
-              </button>
+              {props.chips.map(chipButton)}
+              {moreChip}
             </div>
+          </section>
+        )}
+
+        {quickRows && (
+          <section className="log-favourites" aria-label="Favourites">
+            <div className="log-section-head">
+              <span>{!showUsuals && checking && props.favourites.length > 0 ? checkingHead : 'Favourites'}</span>
+              {props.favourites.length > 0 && (favouritesOverflow || allFavourites) ? (
+                <button
+                  type="button"
+                  className="log-see-all"
+                  aria-expanded={allFavourites}
+                  aria-controls="log-favourite-chips"
+                  aria-label={allFavourites ? undefined : `See all ${props.favourites.length} favourites`}
+                  onClick={() => setAllFavourites(current => !current)}
+                >
+                  {allFavourites ? 'Show less' : `See all ${props.favourites.length}`}
+                </button>
+              ) : !showUsuals && !checking && props.favourites.length > 0 && <small>{tapHint}</small>}
+            </div>
+            {props.favourites.length > 0 ? (
+              <div ref={setFavouritesRow} id="log-favourite-chips" className={allFavourites ? 'log-chips is-wrapped' : 'log-chips'}>
+                {props.favourites.map(chipButton)}
+                {!showUsuals && moreChip}
+              </div>
+            ) : (
+              <p className="log-favourites-empty">
+                <span className="log-favourites-empty-glyph" aria-hidden="true"><Icon name="heart" size={16} /></span>
+                <span>Heart a food when you log it and it’ll wait here, one tap away.</span>
+              </p>
+            )}
           </section>
         )}
 

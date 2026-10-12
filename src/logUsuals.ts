@@ -1,7 +1,7 @@
 import type { Batch, Entry, Food } from './types';
 
 /**
- * One chip in the Log sheet's usuals row. A tap logs it straight away:
+ * One chip in the Log sheet's usuals or favourites row. A tap logs it straight away:
  * - usual: what was logged last time for this meal, as it was
  * - prep: a serve of a meal prep batch with serves left
  * - favourite: a hearted food, one serving (or 100 g)
@@ -17,34 +17,58 @@ export const MAX_USUAL_CHIPS = 8;
 
 const nameKey = (name: string) => name.trim().toLowerCase();
 
+/** A row of chips where the same food never shows twice, whether it's matched by its saved food or by name. */
+function chipRow(limit: number) {
+  const chips: UsualChip[] = [];
+  const names = new Set<string>();
+  const foodIds = new Set<string>();
+  return {
+    chips,
+    has: (name: string, foodId?: string | null) => names.has(nameKey(name)) || (!!foodId && foodIds.has(foodId)),
+    take(chip: UsualChip, ...ids: (string | null | undefined)[]) {
+      const name = nameKey(chip.name);
+      if (!name || names.has(name) || ids.some(id => id && foodIds.has(id)) || chips.length >= limit) return;
+      names.add(name);
+      ids.forEach(id => id && foodIds.add(id));
+      chips.push(chip);
+    }
+  };
+}
+
+/** Favourites, the most logged first, most recent breaking ties. */
+export function favouritesByUse(foods: Food[]) {
+  return foods
+    .filter(food => food.favourite)
+    .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0) || (b.lastUsedAt || 0) - (a.lastUsedAt || 0));
+}
+
 /**
- * The usuals row, in order: this meal's usuals (`usualsForMeal`), then meal prep with serves left,
- * then favourites by how often they're logged. The same food never shows twice, whether it's
- * matched by its saved food or by name.
+ * Log food's two rows of one-tap chips:
+ * - usuals: this meal's usuals (`usualsForMeal`) that aren't favourites, then the fridge with serves left
+ * - favourites: every favourite. Those that are usuals for this meal come first and log as they were
+ *   logged last time; the rest follow by how often they're logged.
+ * Every favourite is in its own row, so it can always be found there, and nothing shows twice.
  */
-export function usualChips({ usuals, batches, foods, limit = MAX_USUAL_CHIPS }: {
+export function logChips({ usuals, batches, foods, limit = MAX_USUAL_CHIPS }: {
   usuals: { key: string; name: string; latest: Entry }[];
   batches: { batch: Batch; left: number; calories: number }[];
   foods: Food[];
   limit?: number;
-}): UsualChip[] {
-  const chips: UsualChip[] = [];
-  const names = new Set<string>();
-  const foodIds = new Set<string>();
-  const take = (chip: UsualChip, foodId?: string | null) => {
-    const name = nameKey(chip.name);
-    if (!name || names.has(name) || (foodId && foodIds.has(foodId)) || chips.length >= limit) return;
-    names.add(name);
-    if (foodId) foodIds.add(foodId);
-    chips.push(chip);
-  };
-  usuals.forEach(usual => take({ kind: 'usual', key: `usual:${usual.key}`, name: usual.name, calories: usual.latest.calories, entry: usual.latest }, usual.latest.sourceFoodId));
+}): { usuals: UsualChip[]; favourites: UsualChip[] } {
+  const favourites = favouritesByUse(foods);
+  const usualRow = chipRow(limit);
+  const favouriteRow = chipRow(Infinity);
+  const favouriteFor = (usual: { name: string; latest: Entry }) =>
+    favourites.find(food => food.id === usual.latest.sourceFoodId) || favourites.find(food => nameKey(food.name) === nameKey(usual.name));
+  usuals.forEach(usual => {
+    const chip: UsualChip = { kind: 'usual', key: `usual:${usual.key}`, name: usual.name, calories: usual.latest.calories, entry: usual.latest };
+    const favourite = favouriteFor(usual);
+    if (favourite) favouriteRow.take(chip, favourite.id, usual.latest.sourceFoodId);
+    else if (!favouriteRow.has(usual.name, usual.latest.sourceFoodId)) usualRow.take(chip, usual.latest.sourceFoodId);
+  });
   batches
     .filter(item => item.left > 0)
-    .forEach(item => take({ kind: 'prep', key: `prep:${item.batch.id}`, name: item.batch.name, calories: item.calories, left: item.left, batch: item.batch }));
-  foods
-    .filter(food => food.favourite)
-    .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0) || (b.lastUsedAt || 0) - (a.lastUsedAt || 0))
-    .forEach(food => take({ kind: 'favourite', key: `food:${food.id}`, name: food.name, calories: food.calories, food }, food.id));
-  return chips;
+    .forEach(item => usualRow.take({ kind: 'prep', key: `prep:${item.batch.id}`, name: item.batch.name, calories: item.calories, left: item.left, batch: item.batch }));
+  favourites.forEach(food => favouriteRow.take({ kind: 'favourite', key: `food:${food.id}`, name: food.name, calories: food.calories, food }, food.id));
+  return { usuals: usualRow.chips, favourites: favouriteRow.chips };
 }
