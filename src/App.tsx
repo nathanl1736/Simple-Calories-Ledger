@@ -61,7 +61,6 @@ import { JournalView, getMealGroups, MealCardModal, shareMealCard, sharePhoto, E
 import { LibraryView } from './views/LibraryView';
 import { SettingsView } from './views/SettingsView';
 import { draftNumberText, draftEnergyText, draftPortion, EntryModal } from './sheets/EntryModal';
-import { FoodSearch } from './sheets/FoodSearch';
 import { LogSheet } from './sheets/LogSheet';
 import { GeminiKeyHelp } from './sheets/ConnectGemini';
 import { BatchSheet } from './sheets/BatchSheet';
@@ -70,7 +69,7 @@ import { FoodModal } from './sheets/FoodModal';
 import { RoughMealPanel } from './sheets/RoughMeal';
 import { DayCalorieGoalPanel } from './sheets/DayTarget';
 
-type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'customDbHelp' | 'log' | 'dayTarget' | 'roughMeal' | 'foodSearch' | 'batch' | null;
+type ModalName = 'entry' | 'food' | 'photo' | 'entryPhoto' | 'mealCard' | 'weekDetails' | 'version' | 'backupReminder' | 'aiQuickLog' | 'aiQuickLogHelp' | 'geminiApiKeyHelp' | 'customDbHelp' | 'log' | 'dayTarget' | 'roughMeal' | 'batch' | null;
 type SetTabOptions = { date?: string; resetScroll?: boolean };
 
 function storedTab(value: string | null): Tab {
@@ -192,6 +191,11 @@ export function App() {
   const [batchSheet, setBatchSheet] = useState<BatchSheetRequest>({ mode: 'new', batchId: null, opened: 0 });
   /** The Log sheet's composer, kept here so closing the sheet (or a failed estimate) loses nothing. */
   const [logDraft, setLogDraft] = useState<LogDraft>({ text: '', photos: [] });
+  /**
+   * Set when something the Log sheet's text box found was picked. Its words clear when the sheet next
+   * opens rather than at once, so the results don't vanish from the sheet as it slides away.
+   */
+  const logTextUsed = useRef(false);
   /** The meal the Log sheet's usuals are for and log to. */
   const [logMeal, setLogMeal] = useState<Meal>('Snack');
   /** Log food, or its Suggest mode ("What should I eat?"). */
@@ -411,6 +415,7 @@ export function App() {
    * open it. It logs to the day shown on Today, and its title names that day when it isn't today.
    */
   const openLogSheet = (meal?: Meal, mode: LogMode = 'log') => {
+    clearUsedLogText();
     setLogMeal(meal ?? defaultMealForLogging());
     // A request still running keeps its own mode, so the sheet shows it.
     const running = estimateJobRef.current?.status === 'running' ? estimateJobRef.current : null;
@@ -427,6 +432,13 @@ export function App() {
     setModal('log');
   };
 
+  /** A search in the Log sheet led somewhere: what was typed for it goes the next time the sheet opens. */
+  const clearUsedLogText = () => {
+    if (!logTextUsed.current) return;
+    logTextUsed.current = false;
+    setLogDraft(current => ({ ...current, text: '' }));
+  };
+
   /** Log food for typing a food in. `name` comes from a search that found nothing. */
   const openEntry = (meal: Meal = defaultMealForLogging(), name = '') => {
     // Now, in the tap: Log food's calories box doesn't exist yet and iOS only opens the keyboard for focus during a tap.
@@ -434,12 +446,6 @@ export function App() {
     setEntryDraft({ ...blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)), name });
     setEntryOpenMode('manual');
     setModal('entry');
-  };
-
-  const openFoodSearch = () => {
-    // In the tap, as with +: the search box doesn't exist yet.
-    holdKeyboard('search');
-    setModal('foodSearch');
   };
 
   const editEntry = (entry: Entry) => {
@@ -673,8 +679,8 @@ export function App() {
     };
   };
 
-  const prefillFood = (food: Food) => {
-    setEntryDraft(foodDraft(food, defaultMealForLogging()));
+  const prefillFood = (food: Food, meal: Meal = defaultMealForLogging()) => {
+    setEntryDraft(foodDraft(food, meal));
     setEntryOpenMode('prefill');
     setModal('entry');
   };
@@ -935,6 +941,7 @@ export function App() {
 
   /** The toast's View: the sheet in Suggest mode, on the suggestion. */
   const viewSuggestion = () => {
+    clearUsedLogText();
     setLogMode('suggest');
     setSuggestView('result');
     setModal('log');
@@ -1331,7 +1338,21 @@ export function App() {
           onLogChip={logChip}
           onReviewChip={reviewChip}
           onTypeIn={() => openEntry(logMeal)}
-          onSearch={openFoodSearch}
+          batches={batchesForDay}
+          onChooseFood={food => {
+            logTextUsed.current = true;
+            prefillFood(food, logMeal);
+          }}
+          onLogBatch={batch => {
+            logTextUsed.current = true;
+            setModal(null);
+            logBatchServe(batch, selectedDate, logMeal);
+          }}
+          onLogNew={name => {
+            logTextUsed.current = true;
+            openEntry(logMeal, name);
+          }}
+          onSaveDatabaseFood={saveDatabaseFood}
           onRoughMeal={() => setModal('roughMeal')}
           onBatch={() => openBatchSheet('new')}
           onPasteEstimate={pasteAiQuickLogFromClipboard}
@@ -1361,19 +1382,6 @@ export function App() {
             deleteEntry(id);
           }}
           day={entryDay}
-        />
-        <FoodSearch
-          open={modal === 'foodSearch'}
-          state={state}
-          onClose={() => setModal(current => (current === 'foodSearch' ? null : current))}
-          onChoose={prefillFood}
-          onSaveDatabaseFood={saveDatabaseFood}
-          onLogNew={name => openEntry(defaultMealForLogging(), name)}
-          batches={batchesForDay}
-          onLogBatch={batch => {
-            setModal(null);
-            logBatchServe(batch, selectedDate);
-          }}
         />
         <FoodModal
           food={activeFood}

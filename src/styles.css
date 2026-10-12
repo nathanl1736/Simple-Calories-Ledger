@@ -1949,42 +1949,23 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .quick-picker input, .extra-info input, .extra-info textarea, .extra-info select { background: var(--card); }
 
 /* ================================================================
-   Search foods (2.8): a search over the page, opened from Log
-   food. Favourites, recent foods and the food
-   database each have their own group and mark: a rose heart, a
-   clock, and a dashed database tile (suggestions, not yours yet).
+   Search results (3.1.1): what Log food's text box finds as you
+   type, in place of the usuals and other ways. Fridge, favourites,
+   recent foods and the food database each have their own group
+   and mark: a rose heart, a clock, and a dashed database tile
+   (suggestions, not yours yet).
    ================================================================ */
 
-/* Above the tab bar (40) and status bar scrim (45); below the food menu (80), sheets (100) and toasts (150). */
-.food-search { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; color: var(--ink); }
-/* The top keeps Today's sky colour under the clock, then gives way to the page. */
-.food-search-backdrop { position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, var(--status-scrim, var(--bg)) 0, var(--bg) calc(132px + env(safe-area-inset-top))); }
-.food-search-head { flex: none; width: min(var(--app-shell-width), 100%); margin: 0 auto; padding: calc(10px + env(safe-area-inset-top)) var(--app-pad) 8px; }
-.food-search-bar { display: flex; align-items: center; gap: 12px; }
-.food-search-field { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; height: 50px; border-radius: 25px; background: var(--card); color: var(--muted); }
-.food-search-field > .icon { position: absolute; left: 16px; pointer-events: none; }
-.food-search-field input { height: 50px; min-height: 0; padding: 0 46px; border: 0; border-radius: 25px; background: transparent; color: var(--ink); font-size: 17px; font-weight: 400; letter-spacing: -.43px; -webkit-appearance: none; appearance: none; }
-.food-search-field input::placeholder { color: var(--muted); opacity: 1; }
-.food-search-field input::-webkit-search-cancel-button,
-.food-search-field input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; display: none; }
-.food-search-clear { position: absolute; right: 3px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; background: none; color: var(--muted); }
-.food-search-clear circle { fill: currentColor; opacity: .55; }
-.food-search-clear path { fill: none; stroke: var(--card); stroke-width: 1.8; stroke-linecap: round; }
-.food-search-clear:active { transform: scale(.9); opacity: 1; }
-.food-search-cancel { flex: none; min-height: 44px; padding: 0 2px; background: none; color: var(--color-accent-text); font-size: 17px; line-height: 22px; letter-spacing: -.43px; }
-.food-search-cancel:active { transform: none; opacity: .6; }
-
-/* The results scroll on their own, fading out under the bar rather than meeting it at a hard edge. */
-.food-search-results { flex: 1; min-height: 0; width: min(var(--app-shell-width), 100%); margin: 0 auto; padding: 10px var(--app-pad) calc(40px + env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10px); mask-image: linear-gradient(180deg, transparent 0, #000 10px); }
-.food-search-group + .food-search-group, .food-search-group + .food-search-new, .food-search-empty + .food-search-new { margin-top: 22px; }
-.food-search-label { margin: 0 0 7px 16px; font-size: 13px; line-height: 18px; font-weight: var(--weight-semibold); letter-spacing: -.08px; color: var(--muted); }
-.food-search-list { overflow: hidden; border-radius: 22px; background: var(--card); }
+.log-results { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.food-search-label { margin: 0 4px 8px; font-size: 13px; line-height: 18px; font-weight: var(--weight-semibold); letter-spacing: -.08px; color: var(--muted); }
+/* Grouped like the other ways, on the sheet's inset colour. */
+.food-search-list { overflow: hidden; border-radius: 22px; background: var(--tl-inset); }
 
 /* Rows read like the day line: name, a quiet detail line, energy on the right with its unit under it. */
 .food-search-row { position: relative; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 16px 10px 14px; border-radius: 0; background: none; color: var(--ink); text-align: left; }
 .food-search-row:active { transform: none; opacity: 1; background: color-mix(in srgb, var(--ink) 6%, transparent); }
 .food-search-row + .food-search-row::before, .food-search-more::before { content: ""; position: absolute; top: 0; left: 60px; right: 0; height: .5px; background: var(--line); }
-.food-search-glyph { display: grid; place-items: center; width: 34px; height: 34px; box-sizing: border-box; border-radius: 50%; background: var(--tl-inset); color: var(--color-text-soft); }
+.food-search-glyph { display: grid; place-items: center; width: 34px; height: 34px; box-sizing: border-box; border-radius: 50%; background: var(--card); color: var(--color-text-soft); }
 .food-search-glyph.favourite { background: color-mix(in srgb, var(--color-favourite) 16%, var(--card)); color: var(--color-favourite); }
 .food-search-glyph.database { border-radius: 10px; border: 1.5px dashed color-mix(in srgb, var(--muted) 70%, transparent); background: none; color: var(--muted); }
 .food-search-glyph.new { background: var(--accent-tint); color: var(--color-accent-text); }
@@ -1997,9 +1978,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .food-search-more { position: relative; display: block; width: 100%; min-height: 50px; padding: 0 16px 0 60px; border-radius: 0; background: none; color: var(--color-accent-text); font-size: 17px; line-height: 22px; letter-spacing: -.43px; text-align: left; }
 .food-search-more:active { transform: none; opacity: 1; background: color-mix(in srgb, var(--ink) 6%, transparent); }
 .food-search-new .food-search-name { color: var(--color-accent-text); }
-.food-search-empty { display: grid; gap: 4px; margin: 14px 16px 0; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--muted); }
-.food-search-empty strong { overflow-wrap: anywhere; font-size: 17px; line-height: 22px; font-weight: var(--weight-semibold); letter-spacing: -.43px; color: var(--ink); }
-.food-search-note { margin: 12px 16px 0; font-size: 13px; line-height: 18px; color: var(--muted); }
+.log-results-empty { margin: 0 4px; font-size: 15px; line-height: 20px; letter-spacing: -.23px; color: var(--muted); }
+.food-search-note { margin: 0 4px; font-size: 13px; line-height: 18px; color: var(--muted); }
 
 /* ================================================================
    Parts of the day (2.7.8): Today's day line groups food into

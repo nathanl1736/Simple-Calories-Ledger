@@ -121,7 +121,7 @@ export function takeKeyboardFromStandIn(input: HTMLInputElement) {
   return typed;
 }
 
-/** The page behind the sheets: set `inert` while any of them (or the search overlay) is up. */
+/** The page behind the sheets: set `inert` while any of them is up. */
 const BACKGROUND_SELECTOR = 'main.app, .tabbar-wrap';
 let backgroundInertCount = 0;
 let backgroundOpener: HTMLElement | null = null;
