@@ -87,18 +87,44 @@ await step('Settings opens and Done returns', async () => {
   await visible(page.locator('.tl-hero'));
 });
 
-await step('Search foods overlay opens and cancels', async () => {
-  const trigger = page.getByRole('button', { name: /Search foods/ }).first();
-  if (await trigger.count()) {
-    await trigger.click();
-  } else {
-    await sparkle().click();
-    await visible(s.dialog());
-    await s.dialog().getByRole('button', { name: /Search foods/ }).first().click();
-  }
-  await visible(page.locator('[role=dialog][aria-label="Search foods"]'));
-  await page.locator('.food-search-cancel').click();
-  await page.waitForTimeout(500);
+await step('Typing in Log food searches: results replace the usuals, a tap opens it filled in', async () => {
+  await sparkle().click();
+  await visible(s.dialog());
+  await visible(s.dialog().getByRole('button', { name: /Add to fridge/ }));
+  await s.dialog().locator('textarea.log-text').fill('rice');
+  await visible(s.dialog().locator('.log-results'));
+  const fav = s.dialog().locator('.log-results .food-search-row', { hasText: 'Chicken and rice' });
+  await visible(fav);
+  await visible(s.dialog().locator('.log-results .food-search-row', { hasText: 'Beef mince rice bowl' }));
+  await visible(s.dialog().locator('.log-results .food-search-glyph.database'), 8000);
+  if (await s.dialog().getByRole('button', { name: /Add to fridge/ }).count()) throw new Error('Other ways still show while searching');
+  if (!(await s.dialog().getByRole('button', { name: /^Estimate$/ }).isEnabled())) throw new Error('Estimate is not available while searching');
+  await shot('log-search');
+  await fav.first().click();
+  await page.waitForFunction(() => [...document.querySelectorAll('.modal-panel[role=dialog] input')].some(input => input.value === 'Chicken and rice'), null, { timeout: 6000 });
+  await s.closeAll();
+  // What was typed for it is gone the next time.
+  await sparkle().click();
+  await visible(s.dialog().getByRole('button', { name: /Add to fridge/ }));
+  if (await s.dialog().locator('textarea.log-text').inputValue()) throw new Error('The search stayed in the box');
+  await s.closeAll();
+});
+
+await step('A food database result shows its estimate over Log food', async () => {
+  await sparkle().click();
+  await visible(s.dialog());
+  await s.dialog().locator('textarea.log-text').fill('greek yog');
+  const row = s.dialog().locator('.log-results .food-search-row:has(.food-search-glyph.database)');
+  await visible(row, 8000);
+  await row.first().click();
+  const preview = page.locator('.modal-panel[role=dialog][aria-label="Food estimate"]');
+  await visible(preview);
+  await visible(preview.getByRole('button', { name: 'Use this food' }));
+  await shot('log-search-database');
+  await s.closeTop();
+  // Emptying the box brings the usuals and other ways back.
+  await s.dialog().locator('textarea.log-text').fill('');
+  await visible(s.dialog().getByRole('button', { name: /Add to fridge/ }));
   await s.closeAll();
 });
 

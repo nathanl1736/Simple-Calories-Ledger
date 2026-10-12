@@ -1,6 +1,8 @@
 import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { AppState, Meal } from '../types';
+import type { AppState, Batch, Food, Meal } from '../types';
 import { MAX_ESTIMATE_PHOTOS } from '../aiEstimate';
+import { loadFoodDatabaseWithStatus, type FoodDatabaseItem } from '../foodDatabase';
+import { composerSearchQuery } from '../searchResults';
 import { compressImages, SHARP_PHOTO_OPTIONS } from '../image';
 import { geminiModelLabel, readGeminiKeyStatus } from '../geminiEstimate';
 import { elapsedText, estimatingLabel } from '../estimateJob';
@@ -10,6 +12,7 @@ import { type EstimateJob, type LogDraft, type LogMode } from '../appTypes';
 import { Modal } from '../ui/Modal';
 import { Icon, type IconName } from '../ui/icons';
 import { ConnectGeminiCard } from './ConnectGemini';
+import { FoodSearchResults } from './FoodSearch';
 import { MAX_SUGGEST_PHOTOS } from '../suggest';
 import { SuggestComposer, SuggestResult, type SuggestProps } from './SuggestSheet';
 
@@ -19,11 +22,12 @@ const COMPOSER_MAX_PX = 140;
 const LONG_PRESS_MS = 450;
 
 /**
- * Log food: one sheet, a composer rather than a menu. Describe or photograph what was eaten and
- * Estimate; or tap a usual to log it at once; or pick another way below. Its Suggest mode asks what
- * to eat instead: where you're going or what's at home, and Gemini fits it to the day and the week.
- * Opened by the sparkle on any tab, the Now line, the first-run card and Journal. What it logs goes
- * to the day shown on Today.
+ * Log food: one sheet, one text box rather than a menu. Type and it searches your foods, the fridge
+ * and the food database, the results standing in for the usuals and other ways below; or describe
+ * or photograph what was eaten and Estimate; or tap a usual to log it at once. Its Suggest mode asks
+ * what to eat instead: where you're going or what's at home, and Gemini fits it to the day and the
+ * week. Opened by the sparkle on any tab, the Now line, the first-run card and Journal. What it logs
+ * goes to the day shown on Today.
  */
 export function LogSheet(props: {
   open: boolean;
@@ -52,7 +56,15 @@ export function LogSheet(props: {
   onLogChip: (chip: UsualChip) => void;
   onReviewChip: (chip: UsualChip) => void;
   onTypeIn: () => void;
-  onSearch: () => void;
+  /** The fridge, serves left: what the text box finds first. */
+  batches: Batch[];
+  /** A food the text box found: Log food, filled in. */
+  onChooseFood: (food: Food) => void;
+  /** A fridge serve the text box found: logged at once. */
+  onLogBatch: (batch: Batch) => void;
+  /** Log food to type in, named after what was typed. */
+  onLogNew: (name: string) => void;
+  onSaveDatabaseFood: (item: FoodDatabaseItem) => Promise<void> | void;
   onRoughMeal: () => void;
   onBatch: () => void;
   onPasteEstimate: () => void;
@@ -68,8 +80,11 @@ export function LogSheet(props: {
   const [model, setModel] = useState('');
   const [now, setNow] = useState(() => performance.now());
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
+  /** The sheet's height before the text box started searching. */
+  const restingHeight = useRef(0);
   const suggesting = props.mode === 'suggest';
   // A request belongs to the mode that asked it; the other mode sees the sheet as if nothing were running.
   const jobHere = job && (job.kind === 'suggest') === suggesting ? job : null;
@@ -79,6 +94,10 @@ export function LogSheet(props: {
   // One request at a time: while one runs, the sheet stays in its mode.
   const lockedTo: LogMode | null = job?.status === 'running' ? (job.kind === 'suggest' ? 'suggest' : 'log') : null;
   const unit = energyLabel(state);
+  // Typing searches, and the results take the place of the usuals and other ways. Not with a photo:
+  // then the words are for Gemini.
+  const searchQuery = !suggesting && !running && !ready && !connectFor ? composerSearchQuery(draft) : '';
+  const searching = !!searchQuery;
 
   // Each opening starts with the chips logging on tap.
   useEffect(() => {
@@ -122,6 +141,21 @@ export function LogSheet(props: {
     el.style.height = `${Math.max(COMPOSER_MIN_PX, Math.min(COMPOSER_MAX_PX, el.scrollHeight + 2))}px`;
   }, [draft.text, open, connectFor, job?.status, suggesting]);
 
+  // The sheet sits on the bottom edge, so a list that grew and shrank with each letter would move the
+  // box being typed in. While it searches, the sheet keeps the height it had before the first letter
+  // (through its slide away too) and the results scroll inside it.
+  const panel = () => bodyRef.current?.closest<HTMLElement>('.modal-panel') ?? null;
+  const noteRestingHeight = () => {
+    const sheet = panel();
+    if (!searching && sheet) restingHeight.current = sheet.offsetHeight;
+  };
+  useLayoutEffect(() => {
+    const sheet = panel();
+    if (!sheet) return;
+    if (searching && !sheet.style.height && restingHeight.current) sheet.style.height = `${restingHeight.current}px`;
+    else if (!searching && sheet.style.height) sheet.style.height = '';
+  });
+
   const editDraft = (update: (current: LogDraft) => LogDraft) => {
     // Changing what's asked starts afresh, so the button goes back to Estimate.
     if (failed) props.onDismissJob();
@@ -151,6 +185,16 @@ export function LogSheet(props: {
   const typeIn = () => {
     if (failed) props.onDismissJob();
     props.onTypeIn();
+  };
+  // Picking something the text box found settles it too, still within the tap ("Log it yourself"
+  // brings up the decimal keyboard the same way).
+  const settle = <T,>(pick: (value: T) => void) => (value: T) => {
+    if (failed) props.onDismissJob();
+    pick(value);
+  };
+  // Dragging the results puts the keyboard away, as in iOS, so the whole list can be seen.
+  const dismissKeyboard = () => {
+    if (document.activeElement === textRef.current) textRef.current?.blur();
   };
 
   const canEstimate = !!(draft.text.trim() || draft.photos.length) && !addingPhotos;
@@ -287,11 +331,15 @@ export function LogSheet(props: {
           className="log-text"
           value={draft.text}
           rows={2}
-          aria-label="What did you eat?"
-          placeholder="What did you eat? e.g. 2 eggs on toast with butter, flat white"
+          aria-label="Search your foods, or describe what you ate"
+          placeholder={'Search your foods, or describe a meal: 2\u00a0eggs on toast, flat white'}
           enterKeyHint="enter"
+          // The food database, ready for the first letter.
+          onFocus={() => { loadFoodDatabaseWithStatus().catch(() => undefined); }}
           onChange={event => {
             const text = event.target.value;
+            // Before the results arrive, so it's the height without them.
+            noteRestingHeight();
             editDraft(current => ({ ...current, text }));
           }}
         />
@@ -335,7 +383,7 @@ export function LogSheet(props: {
 
   return (
     <Modal open={open} title={suggesting ? props.suggestTitle : props.title} onClose={props.onClose} bottomSheet className="log-sheet">
-      <div className="log-body">
+      <div ref={bodyRef} className="log-body">
         <div className="seg log-mode" role="group" aria-label="Log or suggest">
           <button type="button" className={suggesting ? '' : 'active'} aria-pressed={!suggesting} disabled={lockedTo === 'suggest'} onClick={() => switchMode('log')}>Log</button>
           <button type="button" className={suggesting ? 'active' : ''} aria-pressed={suggesting} disabled={lockedTo === 'log'} onClick={() => switchMode('suggest')}>Suggest</button>
@@ -343,7 +391,20 @@ export function LogSheet(props: {
 
         {top}
 
-        {!suggesting && !running && !ready && !connectFor && props.chips.length > 0 && (
+        {searching && (
+          <FoodSearchResults
+            state={state}
+            query={searchQuery}
+            batches={props.batches}
+            onChoose={settle(props.onChooseFood)}
+            onLogBatch={settle(props.onLogBatch)}
+            onLogNew={settle(props.onLogNew)}
+            onSaveDatabaseFood={props.onSaveDatabaseFood}
+            onDrag={dismissKeyboard}
+          />
+        )}
+
+        {!suggesting && !searching && !running && !ready && !connectFor && props.chips.length > 0 && (
           <section className="log-usuals" aria-label={`Usuals for ${props.meal.toLowerCase()}`}>
             <div className="log-section-head">
               <span>{checking ? 'Tap one to check it before logging' : `Usuals for ${props.meal.toLowerCase()}`}</span>
@@ -377,13 +438,12 @@ export function LogSheet(props: {
           </section>
         )}
 
-        {!suggesting && (
+        {!suggesting && !searching && (
           <section className="log-ways-section" aria-label="Other ways to log">
             <div className="log-section-head"><span>Other ways</span></div>
             <div className="log-ways">
               {way('prep', 'Add to fridge', props.onBatch, 'Meal prep or something you bought')}
               {way('edit', 'Type it in', typeIn)}
-              {way('search', 'Search foods', props.onSearch)}
               {way('approx', 'Rough meal', props.onRoughMeal)}
             </div>
           </section>
