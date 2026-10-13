@@ -33,7 +33,7 @@ export const ESTIMATE_BOWL = {
   source: 'estimate', name: 'Chicken burrito bowl', meal: 'Lunch', basis: 'serving', servingsEaten: 1, servingDescription: '1 bowl', servingGrams: 0, gramsEaten: 0,
   total: { calories: 720, protein: 42, carbs: 70, fat: 28 }, per100g: { calories: 0, protein: 0, carbs: 0, fat: 0 },
   assumptions: ['Regular size bowl', 'Rice, black beans, chicken, salsa, cheese and guacamole', 'Sour cream included'],
-  confidence: 'medium', notes: 'Chicken, rice, beans, cheese, guacamole and salsa in a bowl.'
+  confidence: 'medium', notes: '1 cup Mexican rice (180 g)\n120 g grilled chicken\n½ cup black beans (85 g)\n30 g grated cheese\n50 g guacamole\n2 tbsp sour cream'
 };
 
 export const ESTIMATE_BOWL_SMALL = {

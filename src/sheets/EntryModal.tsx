@@ -3,7 +3,7 @@ import type { AppState, EnergyUnit, Food } from '../types';
 import { databaseItemToFood, type FoodDatabaseItem } from '../foodDatabase';
 import { linkedFood } from '../favourites';
 import { DAY_PART_LABEL, DAY_PARTS, mealDayPart } from '../tidelight';
-import { energyFromMacros, estimateSourceLabel, estimateSourceValue, macrosDisagree } from '../aiEstimate';
+import { energyFromMacros, estimateAgainText, estimateSourceLabel, estimateSourceValue, macrosDisagree } from '../aiEstimate';
 import {
   energyInputFromKcal,
   energyInputToKcal,
@@ -238,6 +238,7 @@ export function EntryModal({
   onRoughMeal,
   onRepeat,
   onDelete,
+  onEstimateAgain,
   day
 }: {
   open: boolean;
@@ -257,6 +258,8 @@ export function EntryModal({
   /** While editing: log the entry again today, or delete it. */
   onRepeat: (id: string) => void;
   onDelete: (id: string) => void;
+  /** While editing an estimate: what went into it, into Log food's box to change and estimate. */
+  onEstimateAgain: (text: string) => void;
   /** The day being logged to, without this entry. Energy in kcal. */
   day: { eaten: number; target: number; bulking: boolean; date: string };
 }) {
@@ -364,6 +367,11 @@ export function EntryModal({
   }, [open]);
 
   const perUnit = { calories: baseCalories, protein: n(draft.protein), carbs: n(draft.carbs), fat: n(draft.fat) };
+  // A saved estimate can be asked again from what went into it. Not a rough guess (nothing to list)
+  // or a serve from the fridge (it was estimated as a batch).
+  const againText = open && draft.editingId && !draft.batchId && draft.estimateSource && draft.estimateSource !== 'rough'
+    ? estimateAgainText({ id: draft.editingId, name: draft.name, notes: draft.notes, unitMode: draft.unitMode, portion: draftPortion(draft) }, state.entries)
+    : '';
   const macroCheckFails = !!draft.estimateSource && macrosDisagree(perUnit);
   const refine = async () => {
     if (!onRefine || !refineText.trim() || refining) return;
@@ -519,6 +527,14 @@ export function EntryModal({
                 </div>
               )}
               {refineError && <p className="ai-quick-log-error" role="alert">{refineError}</p>}
+              {againText && (
+                <div className="estimate-again">
+                  <button type="button" className="secondary" aria-describedby="estimateAgainHint" onClick={() => onEstimateAgain(againText)}>
+                    <Icon name="sparkle" size={16} filled />Estimate again
+                  </button>
+                  <small id="estimateAgainHint">Opens Log food with what went in, to edit before estimating</small>
+                </div>
+              )}
             </div>
           )}
         </div>

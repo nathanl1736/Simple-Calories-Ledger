@@ -8,11 +8,13 @@ export const SEARCH_DATABASE_SHOWN = 3;
 export const SEARCH_DATABASE_MAX = 20;
 
 /**
- * What the Log sheet's text box searches for: what's typed, unless a photo is attached. A photo
- * means the words describe it for Gemini, so the usuals and other ways stay rather than results.
+ * What the Log sheet's text box searches for: what's typed, unless a photo is attached or it runs
+ * to more than one line. Then the words describe a meal for Gemini (a photo, or a list of what went
+ * in, like the one Estimate again puts there), so the usuals and other ways stay rather than results.
  */
 export function composerSearchQuery(draft: LogDraft) {
-  return draft.photos.length ? '' : draft.text.trim();
+  const text = draft.text.trim();
+  return draft.photos.length || text.includes('\n') ? '' : text;
 }
 
 /**

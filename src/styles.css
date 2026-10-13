@@ -1056,6 +1056,10 @@ textarea { min-height: 78px; resize: vertical; }
 .estimate-warning { margin: 0; color: var(--color-review); font-size: var(--type-helper); font-weight: var(--weight-label); line-height: 1.4; }
 .estimate-refine { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .estimate-refine .secondary { min-height: 48px; }
+/* A saved estimate: Estimate again, with what it does beside it. */
+.estimate-again { display: flex; align-items: center; gap: 10px; }
+.estimate-again .secondary { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; background: var(--card); color: var(--color-accent-text); }
+.estimate-again small { color: var(--muted); font-size: var(--type-helper); line-height: 1.35; }
 /* Sits inside the calories panel, whose inputs use the big number style. */
 .calories-priority .estimate-refine input { min-height: 48px; padding: 10px 12px; font-size: 16px; font-weight: var(--weight-medium); letter-spacing: 0; text-align: left; }
 .gemini-status { margin: 10px 0 0; }
@@ -1192,7 +1196,7 @@ textarea { min-height: 78px; resize: vertical; }
 .journal-entry-title { font-size: var(--type-row-title); font-weight: var(--weight-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .journal-meta-chips { margin-top: 5px; }
 .journal-entry-card > div > .journal-meta-chips:first-child { margin-top: 0; }
-.journal-entry-note { margin-top: 6px; color: var(--muted); font-size: 12px; font-weight: var(--weight-medium); line-height: 1.35; }
+.journal-entry-note { margin-top: 6px; color: var(--muted); font-size: 12px; font-weight: var(--weight-medium); line-height: 1.35; white-space: pre-line; }
 .journal-day-summary-bar {
   position: sticky;
   bottom: calc(90px + env(safe-area-inset-bottom));

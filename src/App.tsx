@@ -14,7 +14,7 @@ import { parseCustomFoodDatabaseText } from './customFoodDatabases';
 import { pruneOneOffEstimates, recordFoodUse, type FavouriteChange } from './favourites';
 import { dayPartAt, entryDayPart, mealDayPart, usualsForMeal } from './tidelight';
 import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
-import { buildEstimateRequest, estimateNotes, estimateSourceValue, parseGeminiEstimate, type GeminiEstimate } from './aiEstimate';
+import { buildEstimateRequest, estimateNotes, estimateSourceValue, LABEL_NOTE, parseGeminiEstimate, type GeminiEstimate } from './aiEstimate';
 import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstimate, requestPackEstimate, requestSuggestion } from './geminiEstimate';
 import { logChips, type UsualChip } from './logUsuals';
 import { removeEntry, removeFood, restoreEntry, restoreFood, revertFoodUse, type RemovedEntry, type RemovedFood } from './undo';
@@ -841,7 +841,8 @@ export function App() {
           carbs: draftNumberText(Math.round(estimate.base.carbs * 10) / 10),
           fat: draftNumberText(Math.round(estimate.base.fat * 10) / 10),
           portion: String(estimate.portion),
-          notes: estimateNotes(fromLabel ? 'Read from the nutrition label.' : estimate.notes, estimate.assumptions, estimate.confidence),
+          // What went in, a line each, so Estimate again can start from it later.
+          notes: estimateNotes(fromLabel ? [estimate.notes, LABEL_NOTE].filter(Boolean).join('\n') : estimate.notes, estimate.assumptions, estimate.confidence),
           estimateSource: fromLabel ? 'label' : 'ai',
           estimateDetails: { confidence: estimate.confidence, assumptions: estimate.assumptions },
           photo
@@ -894,7 +895,8 @@ export function App() {
     setEstimateSession({ description: job.description, photos: job.photos, meal: job.meal, reply: raw });
     setAiQuickLogSeedText('');
     setEstimateJob(null);
-    setLogDraft({ text: '', photos: [] });
+    // What was asked goes. Words put there since (Estimate again, while this ran) stay for next time.
+    setLogDraft(current => ({ text: current.text.trim() === job.description ? '' : current.text, photos: [] }));
     prefillGeminiEstimate(parsed, false, photo);
   };
 
@@ -1023,6 +1025,24 @@ export function App() {
     estimateAbort.current?.abort();
     estimateAbort.current = null;
     setEstimateJob(null);
+  };
+
+  /**
+   * Estimate again, from a saved entry: what went into it goes in Log food's box, under anything
+   * already typed there, to change an amount and tap Estimate. Nothing is asked until then.
+   */
+  const estimateAgain = (text: string) => {
+    const job = estimateJobRef.current?.kind === 'estimate' ? estimateJobRef.current : null;
+    // A failed estimate's error is about other words.
+    if (job?.status === 'failed') setEstimateJob(null);
+    openLogSheet();
+    setLogDraft(current => {
+      // The box still holds an estimate on its way; its words and photos aren't to be added to.
+      if (job && job.status !== 'failed' && current.text.trim() === job.description) return { text, photos: [] };
+      const typed = current.text.trim();
+      if (typed.includes(text)) return current;
+      return { ...current, text: typed ? `${typed}\n${text}` : text };
+    });
   };
 
   const refineGeminiEstimate = async (correction: string) => {
@@ -1382,6 +1402,7 @@ export function App() {
             setModal(null);
             deleteEntry(id);
           }}
+          onEstimateAgain={estimateAgain}
           day={entryDay}
         />
         <FoodModal

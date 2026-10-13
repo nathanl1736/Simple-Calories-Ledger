@@ -1,10 +1,12 @@
-// How a Gemini estimate becomes a log entry: dishes per serving, single foods per 100 g. npm test (Node 22.6+).
+// How a Gemini estimate becomes a log entry (dishes per serving, single foods per 100 g), and what Estimate again
+// starts from. npm test (Node 22.6+).
 import { register } from 'node:module';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 register('./resolveTs.mjs', import.meta.url);
-const { ESTIMATE_SCHEMA, parseGeminiEstimate } = await import('../src/aiEstimate.ts');
+const { ESTIMATE_SCHEMA, GEMINI_ESTIMATE_PROMPT, LABEL_NOTE, estimateAgainText, estimateNotes, itemsFromNotes, parseGeminiEstimate } = await import('../src/aiEstimate.ts');
+const { suggestNotesLead } = await import('../src/suggest.ts');
 
 const zeros = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 const reply = fields => JSON.stringify({
@@ -118,4 +120,77 @@ test('the older per-unit reply still reads', () => {
 test('the schema orders every field it defines, and asks for the basis', () => {
   assert.deepEqual([...ESTIMATE_SCHEMA.propertyOrdering].sort(), Object.keys(ESTIMATE_SCHEMA.properties).sort());
   assert.ok(ESTIMATE_SCHEMA.required.includes('basis'));
+});
+
+test('notes are asked for item by item with amounts, so an estimate can be asked again', () => {
+  assert.ok(ESTIMATE_SCHEMA.required.includes('notes'));
+  assert.match(GEMINI_ESTIMATE_PROMPT, /notes: everything in this entry, one item per line with its amount/);
+  assert.match(GEMINI_ESTIMATE_PROMPT, /Keep the user's own words and amounts/);
+});
+
+/* ---------------------------------------------------------------- Estimate again */
+
+const ITEMS = '150 g chicken breast\n1 cup cooked jasmine rice (185 g)\n1 tbsp peanut oil';
+const saved = (fields = {}) => ({ id: 'e1', name: 'Chicken stir fry', notes: '', unitMode: 'serving', portion: 1, ...fields });
+
+test('an estimate’s notes keep each item on its own line, then what was assumed and how sure', () => {
+  assert.equal(
+    estimateNotes(ITEMS, ['peanut oil', 'jasmine rice'], 'medium'),
+    `${ITEMS}\nAssumed: peanut oil; jasmine rice.\nConfidence: medium.`
+  );
+  assert.equal(estimateNotes('', [], null), '');
+});
+
+test('Estimate again is the name over the items, without the lines about the estimate', () => {
+  const notes = estimateNotes(ITEMS, ['peanut oil'], 'medium');
+  assert.equal(estimateAgainText(saved({ notes })), `Chicken stir fry:\n${ITEMS}`);
+});
+
+test('notes typed into afterwards stay, and blank lines go', () => {
+  const notes = `${estimateNotes(ITEMS, [], 'high')}\n\nHad it at work`;
+  assert.equal(itemsFromNotes(notes), `${ITEMS}\nHad it at work`);
+});
+
+test('notes from before the items had a line each are cut at what was assumed', () => {
+  const notes = 'Chicken, rice, beans, cheese, guacamole and salsa in a bowl. Assumed: regular size bowl; sour cream included. Confidence: medium.';
+  assert.equal(estimateAgainText(saved({ name: 'Chicken burrito bowl', notes })), 'Chicken burrito bowl:\nChicken, rice, beans, cheese, guacamole and salsa in a bowl.');
+  assert.equal(itemsFromNotes('A latte. Confidence: high.'), 'A latte.');
+  // A menu pick before 3.0 said only where it came from.
+  assert.equal(itemsFromNotes('Estimated from a menu photo. Assumed: large chips. Confidence: low.'), '');
+});
+
+test('a label reading keeps the product line, and a name it already says isn’t repeated', () => {
+  const notes = estimateNotes(`Chobani plain Greek yoghurt, 170 g\n${LABEL_NOTE}`, ['ate the whole tub'], 'high');
+  assert.equal(estimateAgainText(saved({ name: 'Chobani Plain Greek Yoghurt', notes, unitMode: '100g', portion: 170 })), 'Chobani plain Greek yoghurt, 170 g');
+  // Before labels had items, the note was only where the numbers came from: the name and grams stand in.
+  assert.equal(estimateAgainText(saved({ name: 'Greek yoghurt', notes: `${LABEL_NOTE} Confidence: high.`, unitMode: '100g', portion: 170 })), 'Greek yoghurt, 170 g');
+});
+
+test('a suggestion’s notes say where it was suggested, which is no use to Gemini', () => {
+  for (const lead of [
+    suggestNotesLead({ source: 'venue', printedEnergy: true }, 'Lunch', 'Macca’s'),
+    suggestNotesLead({ source: 'menu', printedEnergy: true }, 'Dinner'),
+    suggestNotesLead({ source: 'home', printedEnergy: false }, 'Dinner')
+  ]) {
+    assert.equal(estimateAgainText(saved({ name: 'Big Mac meal', notes: estimateNotes(lead, ['medium fries'], 'medium') })), 'Big Mac meal');
+  }
+});
+
+test('logged again from a usual, with no notes of its own, the latest of the same name stands in', () => {
+  const history = [
+    { id: 'old', name: 'chicken stir fry', notes: estimateNotes('200 g chicken breast', [], 'high'), createdAt: 1 },
+    { id: 'new', name: 'Chicken stir fry', notes: estimateNotes(ITEMS, [], 'high'), createdAt: 5 },
+    { id: 'none', name: 'Chicken stir fry', notes: '', createdAt: 9 },
+    { id: 'other', name: 'Beef stir fry', notes: '300 g beef', createdAt: 10 }
+  ];
+  assert.equal(estimateAgainText(saved({ id: 'none' }), history), `Chicken stir fry:\n${ITEMS}`);
+  // Its own saved notes don’t stand in for notes cleared while editing it.
+  assert.equal(estimateAgainText(saved({ id: 'new' }), history.filter(item => item.id !== 'old')), 'Chicken stir fry');
+});
+
+test('with nothing to go on, the name and how much was eaten', () => {
+  assert.equal(estimateAgainText(saved()), 'Chicken stir fry');
+  assert.equal(estimateAgainText(saved({ portion: 1.5 })), 'Chicken stir fry, 1.5 servings');
+  assert.equal(estimateAgainText(saved({ unitMode: '100g', portion: 0 })), 'Chicken stir fry, 100 g');
+  assert.equal(estimateAgainText(saved({ name: '  ' })), '');
 });

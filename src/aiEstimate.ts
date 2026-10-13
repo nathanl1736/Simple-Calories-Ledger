@@ -1,4 +1,4 @@
-import type { EntryEstimateSource, Meal, Totals } from './types';
+import type { Entry, EntryEstimateSource, Meal, Totals } from './types';
 import { amountPortionValue, numberValue, parseAiQuickLog, parseJsonObject, stringValue, unitModeValue } from './aiQuickLog';
 import { MEALS } from './utils';
 
@@ -55,9 +55,9 @@ export const ESTIMATE_SCHEMA = {
     per100g: NUTRITION_SCHEMA,
     assumptions: { type: 'ARRAY', items: { type: 'STRING' } },
     confidence: { type: 'STRING', description: '"high", "medium" or "low"' },
-    notes: { type: 'STRING' }
+    notes: { type: 'STRING', description: 'Every item with its amount, one per line' }
   },
-  required: ['source', 'name', 'meal', 'basis', 'servingsEaten', 'total', 'assumptions', 'confidence'],
+  required: ['source', 'name', 'meal', 'basis', 'servingsEaten', 'total', 'assumptions', 'confidence', 'notes'],
   propertyOrdering: ['source', 'name', 'meal', 'basis', 'servingsEaten', 'servingDescription', 'servingGrams', 'gramsEaten', 'total', 'per100g', 'assumptions', 'confidence', 'notes']
 };
 
@@ -102,7 +102,8 @@ Explain:
 - assumptions: short phrases for anything you guessed (portion size, oil, brand, cooking method). Empty when nothing was guessed.
 - confidence: "high" (read from a label, or exact amounts given), "medium" (clear photo or description with a typical portion), "low" (unclear photo, unknown portion or recipe).
 - meal: Breakfast, Lunch, Dinner, Snack or Drink. Use the meal in the request unless the food clearly says otherwise.
-- name: short and useful for a food log. notes: one short line on what is included.
+- name: short and useful for a food log.
+- notes: everything in this entry, one item per line with its amount, so the user can change an amount and ask again. Keep the user's own words and amounts where they gave them. Give your best amount for anything you assumed or saw in a photo, oil, butter and sauces included (for example "150 g chicken breast", "1 tbsp olive oil", "1 cup cooked rice (185 g)"). For a label reading, one line: the product and how much was eaten. No calories or macros in notes.
 
 Reply with only one JSON object, no markdown, in exactly this shape:
 {
@@ -299,11 +300,70 @@ export function estimateSourceValue(value: unknown): EntryEstimateSource | null 
   return value === 'ai' || value === 'label' || value === 'menu' || value === 'rough' ? value : null;
 }
 
-/** Notes saved with the entry, so the guesses stay visible after logging. */
+/** Notes saved with the entry, so the guesses stay visible after logging. Gemini's notes list the items one per line, so each part has its own line. */
 export function estimateNotes(lead: string, assumptions: string[], confidence: EstimateConfidence | null) {
   return [
-    lead,
+    lead.trim(),
     assumptions.length ? `Assumed: ${assumptions.join('; ')}.` : '',
     confidence ? `Confidence: ${confidence}.` : ''
-  ].filter(Boolean).join(' ');
+  ].filter(Boolean).join('\n');
+}
+
+export const LABEL_NOTE = 'Read from the nutrition label.';
+
+/**
+ * What Dawni writes into an estimate's notes about the estimate rather than the food: what was
+ * assumed, how sure it was, where the numbers came from (`estimateNotes`, `suggestNotesLead`, and
+ * the menu picks before 3.0).
+ * Notes from before the items had a line each run them together on one line, so these are cut
+ * from inside a line too. "Assumed:" runs to the end of its line, as it did there.
+ */
+const ESTIMATE_NOTE_PHRASES = [
+  /\bAssumed: .*$/,
+  /\bConfidence: (high|medium|low)\.?/i,
+  /\bRead from the nutrition label\./i,
+  /\bSuggested (for \w+|to cook at home)[^.]*\./i,
+  /\bEnergy (printed on the menu|as published)\./i,
+  /\bEstimated from a (menu photo|description)\./i
+];
+
+const plainNumber = (value: number) => String(Math.round(value * 10) / 10);
+const nameKey = (name: string) => name.trim().toLowerCase();
+
+/** An entry's notes with Dawni's lines about the estimate taken out: what went into it, one item a line. */
+export function itemsFromNotes(notes: string) {
+  return notes
+    .split('\n')
+    .map(line => ESTIMATE_NOTE_PHRASES.reduce((rest, phrase) => rest.replace(phrase, ''), line).replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * What Estimate again puts in Log food's box: the entry's name, then what went into it as its notes
+ * list it, ready to change an amount and estimate. The name heads the list ("Stir fry:") so Gemini
+ * reads it as what the items make rather than one more thing eaten, and is left off when the notes
+ * already say it. An entry logged again from a usual or a favourite has no notes of its own, so the
+ * latest one of the same name that has them stands in; failing that, the name and amount eaten.
+ */
+export function estimateAgainText(
+  entry: { id?: string; name: string; notes: string; unitMode: 'serving' | '100g'; portion: number },
+  history: Pick<Entry, 'id' | 'name' | 'notes' | 'createdAt'>[] = []
+) {
+  const name = entry.name.trim();
+  let items = itemsFromNotes(entry.notes);
+  if (!items && name) {
+    const earlier = history
+      .filter(item => item.id !== entry.id && nameKey(item.name) === nameKey(name) && itemsFromNotes(item.notes || ''))
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    items = earlier ? itemsFromNotes(earlier.notes || '') : '';
+  }
+  if (!items) {
+    if (!name) return '';
+    const portion = Number.isFinite(entry.portion) && entry.portion > 0 ? entry.portion : entry.unitMode === '100g' ? 100 : 1;
+    if (entry.unitMode === '100g') return `${name}, ${plainNumber(portion)} g`;
+    return portion === 1 ? name : `${name}, ${plainNumber(portion)} servings`;
+  }
+  if (!name || nameKey(items.split('\n')[0]).includes(nameKey(name))) return items;
+  return `${name}:\n${items}`;
 }
