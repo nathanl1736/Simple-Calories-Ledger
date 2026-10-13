@@ -21,6 +21,13 @@ export function toKey(date: Date | string | number) {
 
 export const todayKey = () => toKey(new Date());
 
+/**
+ * The day to show once the date has changed under the app: a screen that was on today moves on to
+ * the new today; a day picked on purpose stays. Left open overnight, a home screen app is suspended
+ * rather than closed, and Today used to come back on yesterday, where one tap logs.
+ */
+export const followToday = (shown: string, previousToday: string, now: string) => (shown === previousToday ? now : shown);
+
 export function addDays(key: string, days: number) {
   const d = new Date(`${key}T00:00:00`);
   d.setDate(d.getDate() + days);

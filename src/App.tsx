@@ -32,6 +32,7 @@ import {
   entryUnitModeValue,
   fmt,
   fmtPortion,
+  followToday,
   goalForDate,
   goalSnapshotFromSettings,
   lockPastGoals,
@@ -306,6 +307,29 @@ export function App() {
     media.addListener(onChange);
     return () => media.removeListener(onChange);
   }, [state.settings.theme, loaded]);
+
+  // Past midnight, whatever was on today follows it: Today's day, and Week's week.
+  const knownToday = useRef(todayKey());
+  useEffect(() => {
+    const check = () => {
+      const now = todayKey();
+      const before = knownToday.current;
+      if (now === before) return;
+      knownToday.current = now;
+      setSelectedDate(shown => followToday(shown, before, now));
+      setBankingWeekStart(shown => followToday(shown, weekStartMonday(before), weekStartMonday(now)));
+    };
+    const timer = window.setInterval(check, 60_000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('pageshow', check);
+    window.addEventListener('focus', check);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('pageshow', check);
+      window.removeEventListener('focus', check);
+    };
+  }, []);
 
   useEffect(() => {
     if (!loaded) return;

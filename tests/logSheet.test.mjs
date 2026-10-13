@@ -7,6 +7,7 @@ register('./resolveTs.mjs', import.meta.url);
 const { logChips, favouritesByUse, MAX_USUAL_CHIPS } = await import('../src/logUsuals.ts');
 const { removeEntry, restoreEntry, revertFoodUse } = await import('../src/undo.ts');
 const { elapsedText, estimatingLabel, logSheetTitle, SHOW_ELAPSED_AFTER_MS } = await import('../src/estimateJob.ts');
+const { followToday } = await import('../src/utils.ts');
 
 const entry = (id, name, calories, extra = {}) => ({ id, name, calories, protein: 0, carbs: 0, fat: 0, date: '2026-10-09', sourceFoodId: null, createdAt: 1, updatedAt: 1, meal: 'Lunch', ...extra });
 const food = (id, name, calories, extra = {}) => ({ id, name, calories, protein: 0, carbs: 0, fat: 0, favourite: true, usageCount: 1, lastUsedAt: 1, createdAt: 1, updatedAt: 1, ...extra });
@@ -17,21 +18,41 @@ const usual = (key, latest) => ({ key, name: latest.name, latest });
 
 const row = chips => chips.map(chip => `${chip.kind}:${chip.name}`);
 
-test('usuals come first, then meal prep with serves left; favourites have their own row, most logged first', () => {
+test('the fridge with serves left comes first, then usuals; favourites have their own row, most logged first', () => {
   const { usuals, favourites } = logChips({
     usuals: [usual('a', entry('e1', 'Chicken and rice', 520)), usual('b', entry('e2', 'Tuna salad sandwich', 380))],
     batches: [{ batch: batch('b1', 'Beef mince rice bowl'), left: 3, calories: 500 }, { batch: batch('b2', 'Curry'), left: 0, calories: 600 }],
     foods: [food('f1', 'Flat white', 120, { usageCount: 31 }), food('f2', 'Greek yoghurt', 194, { usageCount: 40 }), food('f3', 'Apple', 95, { favourite: false })]
   });
   assert.deepEqual(row(usuals), [
+    'prep:Beef mince rice bowl',
     'usual:Chicken and rice',
-    'usual:Tuna salad sandwich',
-    'prep:Beef mince rice bowl'
+    'usual:Tuna salad sandwich'
   ]);
   assert.deepEqual(row(favourites), ['favourite:Greek yoghurt', 'favourite:Flat white']);
   const prep = usuals.find(chip => chip.kind === 'prep');
   assert.equal(prep.left, 3);
   assert.equal(prep.calories, 500);
+});
+
+test('a full set of usuals no longer pushes the fridge off the row', () => {
+  const usuals = Array.from({ length: MAX_USUAL_CHIPS }, (_, i) => usual(`u${i}`, entry(`e${i}`, `Dinner ${i}`, 500)));
+  const { usuals: chips } = logChips({
+    usuals,
+    batches: [{ batch: batch('b1', 'Beef mince rice bowl'), left: 3, calories: 684 }, { batch: batch('b2', 'Muscle Chef pasta'), left: 1, calories: 450 }],
+    foods: []
+  });
+  assert.equal(chips.length, MAX_USUAL_CHIPS);
+  assert.deepEqual(row(chips).slice(0, 3), ['prep:Beef mince rice bowl', 'prep:Muscle Chef pasta', 'usual:Dinner 0']);
+});
+
+test('a usual with a fridge item’s name gives way to the fridge chip, which counts the serves down', () => {
+  const { usuals } = logChips({
+    usuals: [usual('a', entry('e1', 'Beef mince rice bowl', 684))],
+    batches: [{ batch: batch('b1', 'Beef mince rice bowl'), left: 2, calories: 684 }],
+    foods: []
+  });
+  assert.deepEqual(row(usuals), ['prep:Beef mince rice bowl']);
 });
 
 test('every favourite is in Favourites: one that is a usual for this meal leads it, logging as last time', () => {
@@ -149,4 +170,17 @@ test('the sheet title says the day when it isn’t today', () => {
   assert.equal(logSheetTitle('2026-10-11', today), 'Log food · Tomorrow');
   assert.equal(logSheetTitle('2026-10-06', today), 'Log food · Tuesday');
   assert.match(logSheetTitle('2026-09-29', today), /^Log food · Tue,? 29 Sept?$/);
+});
+
+/* ---------------------------------------------------------------- past midnight */
+
+test('left open on today overnight, the app moves on to the new today', () => {
+  assert.equal(followToday('2026-10-12', '2026-10-12', '2026-10-13'), '2026-10-13');
+  // Days later too.
+  assert.equal(followToday('2026-10-09', '2026-10-09', '2026-10-13'), '2026-10-13');
+});
+
+test('a day picked on purpose stays picked when the date changes', () => {
+  assert.equal(followToday('2026-10-10', '2026-10-12', '2026-10-13'), '2026-10-10');
+  assert.equal(followToday('2026-10-12', '2026-10-12', '2026-10-12'), '2026-10-12');
 });
