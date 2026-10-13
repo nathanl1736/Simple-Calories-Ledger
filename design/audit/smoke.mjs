@@ -9,7 +9,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Registry, openSession } from './harness.mjs';
-import { dateKeyIn } from './seed.mjs';
+import { addDays, dateKeyIn, zonedEpoch } from './seed.mjs';
 import { seedFor } from './scenarios.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -269,6 +269,24 @@ await step('Long-press on an entry opens its menu', async () => {
   await visible(page.locator('[role=menu]'));
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
+});
+
+// Last: it moves the clock on a day.
+await step('Left open overnight, Today moves on to the new day, and a fridge tap logs there', async () => {
+  await s.closeAll();
+  await visible(page.locator('.tl-title', { hasText: /^Today$/ }));
+  // A home screen app is suspended overnight, then shown again in the morning.
+  await page.clock.setFixedTime(zonedEpoch(addDays(cfg.today, 1), 8, 0, cfg.tz));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForTimeout(300);
+  const title = await page.locator('.tl-title').innerText();
+  if (title !== 'Today') throw new Error(`Today came back on another day: "${title}"`);
+  await s.scrollTo('.tl-prep');
+  await page.locator('.tl-prep-row').first().click();
+  await visible(page.locator('.toast', { hasText: /^Logged/ }));
+  const toast = await page.locator('.toast', { hasText: /^Logged/ }).last().innerText();
+  if (/yesterday/i.test(toast)) throw new Error(`The serve went to yesterday: ${toast}`);
+  await shot('overnight-fridge');
 });
 
 await browser.close();
