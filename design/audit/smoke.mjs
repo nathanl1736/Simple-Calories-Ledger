@@ -262,6 +262,44 @@ await step('Fridge: two ready meals typed in by name are 2 serves in Foods → F
   await s.tab('tracking');
 });
 
+await step('Fridge: a saved food goes in without a scan, and a serve logs as that food', async () => {
+  const readState = () => page.evaluate(() => new Promise((resolve, reject) => {
+    const open = indexedDB.open('calorie-tracker-db');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const get = open.result.transaction('kv').objectStore('kv').get('state');
+      get.onsuccess = () => resolve(get.result);
+      get.onerror = () => reject(get.error);
+    };
+  }));
+  const name = 'Greek yoghurt, plain';
+  const foodsBefore = (await readState()).foods.length;
+  await sparkle().click();
+  await visible(s.dialog());
+  await s.dialog().getByRole('button', { name: /Add to fridge/ }).first().click();
+  await s.dialog().getByRole('button', { name: /From my foods/ }).click();
+  await visible(s.dialog().getByText('From your foods', { exact: true }));
+  await s.dialog().getByRole('searchbox', { name: 'Search your foods' }).fill('yoghurt plain');
+  await s.dialog().locator('.food-search-row', { hasText: name }).first().click();
+  await visible(s.dialog().locator('.fridge-food', { hasText: name }));
+  if ((await s.dialog().locator('#fridgeServeGrams').inputValue()) !== '200') throw new Error('A per 100 g food did not start from its own serve size');
+  await s.dialog().getByRole('button', { name: 'One serve more' }).click();
+  await shot('fridge-saved-food');
+  await s.dialog().getByRole('button', { name: 'Save 2 serves', exact: true }).click();
+  await page.waitForTimeout(600);
+  const row = page.locator('.tl-prep-row', { hasText: name });
+  await visible(row);
+  await row.click();
+  await visible(page.locator('.toast', { hasText: /1 left/ }));
+  await page.waitForTimeout(300);
+  const saved = await readState();
+  const food = saved.foods.find(item => item.name === name);
+  const entry = saved.entries.filter(item => item.name === name && item.batchId).at(-1);
+  if (saved.foods.length !== foodsBefore) throw new Error(`Saved foods went from ${foodsBefore} to ${saved.foods.length}`);
+  if (!entry || entry.sourceFoodId !== food.id) throw new Error('The serve is not linked to the saved food');
+  if (entry.unitMode !== '100g' || entry.portion !== 200) throw new Error(`The serve logged as ${entry.portion} ${entry.unitMode}, not 200 g`);
+});
+
 await step('Long-press on an entry opens its menu', async () => {
   await s.scrollTo('[aria-label="Day line"]');
   const row = page.locator('[aria-label="Day line"] .tl-row, [aria-label="Day line"] [role=button]').first();

@@ -44,6 +44,14 @@ function FoodSearchRow({ state, kind, food, meta, onChoose }: { state: AppState;
   );
 }
 
+/** What a saved food is, under its name: brand, serving and where its numbers came from. */
+const savedMeta = (food: Food) => [brandNote(food.name, food.brand), servingNote(food), estimateSourceLabel(food.estimateSource)].filter(Boolean).join(' · ');
+
+/** One of your saved foods, marked a favourite or recent, as the search lists it. */
+export function SavedFoodRow({ state, food, onChoose }: { state: AppState; food: Food; onChoose: () => void }) {
+  return <FoodSearchRow state={state} kind={food.favourite ? 'favourite' : 'recent'} food={food} meta={savedMeta(food)} onChoose={onChoose} />;
+}
+
 /**
  * What Log food's text box finds as you type: the fridge, favourites, recent foods and the food
  * database, each row marked by where it comes from, then a row to log what was typed yourself.
@@ -73,7 +81,6 @@ export function FoodSearchResults({ state, query, batches, onChoose, onLogBatch,
   // Each new search starts with the short database list.
   useEffect(() => setMoreDatabase(false), [trimmedQuery]);
 
-  const savedMeta = (food: Food) => [brandNote(food.name, food.brand), servingNote(food), estimateSourceLabel(food.estimateSource)].filter(Boolean).join(' · ');
   const databaseMeta = (item: FoodDatabaseItem) => [databaseSourceChip(item.tags, item.sourceKind), brandNote(item.name, item.brand) || item.customDatabaseName, databaseServingText(item)].filter(Boolean).join(' · ');
   const logDatabaseFood = (item: FoodDatabaseItem) => {
     setPreview(null);

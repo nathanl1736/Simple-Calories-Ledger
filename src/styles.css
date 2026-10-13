@@ -2090,6 +2090,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 
 /* Add to fridge: cooked or bought, then a label photo for bought food. */
 .fridge-choices { display: grid; gap: 10px; }
+/* From your foods: the search over the list, and a picked food's name and serve in place of the fields. */
+.fridge-pick-search { min-height: 48px; }
+.fridge-food { display: grid; gap: 4px; }
+.fridge-food strong { font-size: 20px; line-height: 25px; font-weight: var(--weight-semibold); letter-spacing: -.45px; }
+.fridge-food small { color: var(--color-text-soft); font-size: 14px; line-height: 19px; }
+.fridge-food-serve { margin-top: 4px; }
+.fridge-food-note { margin: 0; }
 .fridge-choice { display: grid; grid-template-columns: 44px minmax(0, 1fr) 16px; align-items: center; gap: 12px; width: 100%; min-height: 76px; padding: 12px 14px 12px 12px; border-radius: var(--radius-card); background: var(--card); color: var(--ink); text-align: left; }
 .fridge-choice:active { transform: scale(.985); }
 .fridge-choice-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--accent-tint); color: var(--color-accent-text); }

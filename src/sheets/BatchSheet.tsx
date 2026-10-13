@@ -1,16 +1,22 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import type { AppState, Batch, BatchIngredient, BatchKind, EnergyUnit, EntryEstimateSource, Totals } from '../types';
+import type { AppState, Batch, BatchIngredient, BatchKind, EnergyUnit, EntryEstimateSource, Food, Totals } from '../types';
 import { energyFromMacros, estimateSourceLabel, macrosDisagree, MAX_ESTIMATE_PHOTOS } from '../aiEstimate';
 import { isGeminiAbort } from '../geminiEstimate';
 import { compressImages, SHARP_PHOTO_OPTIONS } from '../image';
-import { BATCH_SHELF_DAYS, BOUGHT_SHELF_DAYS, batchServe, batchServesLeft, DEFAULT_BATCH_SERVINGS, MAX_BATCH_SERVINGS, MAX_PACKS, packBatch, packsValue, servingsValue, serveGrams, sumTotals, type BatchEstimate, type PackEstimate } from '../mealPrep';
+import { BATCH_SHELF_DAYS, BOUGHT_SHELF_DAYS, batchServe, batchServesLeft, DEFAULT_BATCH_SERVINGS, foodBatch, MAX_BATCH_SERVINGS, MAX_PACKS, packBatch, packsValue, servingsValue, serveGrams, sumTotals, type BatchEstimate, type PackEstimate } from '../mealPrep';
 import { energyInputFromKcal, energyInputToKcal, energyTextForUnit, energyUnitLabel, energyUnitValue, energyValueForUnit, fmt, fmtPortion, n } from '../utils';
 import { type BatchInput, type BatchSheetRequest } from '../appTypes';
 import { Modal } from '../ui/Modal';
-import { Field, ServePips } from '../ui/controls';
+import { Field, MacroChips, ServePips } from '../ui/controls';
 import { Icon } from '../ui/icons';
 import { roundedText, cookedText } from '../ui/format';
 import { ConnectGeminiCard } from './ConnectGemini';
+import { SavedFoodRow } from './FoodSearch';
+import { useFoodSearch } from './useFoodSearch';
+import { favouritesByUse } from '../logUsuals';
+
+/** Foods listed before anything is typed: every favourite, then this many recent ones. */
+const PICK_RECENT_SHOWN = 20;
 
 function ServesStepper({ value, min = 1, max = MAX_BATCH_SERVINGS, noun = 'serve', label = 'Serves', onChange, disabled = false }: { value: number; min?: number; max?: number; noun?: string; label?: string; onChange: (next: number) => void; disabled?: boolean }) {
   return (
@@ -28,7 +34,7 @@ function ServesStepper({ value, min = 1, max = MAX_BATCH_SERVINGS, noun = 'serve
 
 const ZERO_TOTALS: Totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 type ServeInputs = Record<keyof Totals, string>;
-type Step = 'choose' | 'describe' | 'review';
+type Step = 'choose' | 'pick' | 'describe' | 'review';
 /** What a request to Gemini hands back: its reply, for Refine, and what was read from it. */
 type Reading<T> = { raw: string; estimate: T };
 
@@ -45,7 +51,9 @@ function serveInputs(total: Totals, servings: number, unit: EnergyUnit): ServeIn
  * ingredient by ingredient. Bought: photograph the nutrition label and say how many packs, Gemini
  * reads one pack and Dawni multiplies it out into the label's serves. Either way the review shows one
  * serve, and the whole lot is the fixed thing: changing the serves re-splits it, and editing one
- * serve's numbers changes the whole lot to match.
+ * serve's numbers changes the whole lot to match. From your foods: pick a saved food and say how many
+ * serves you have. Its own serve is the fixed thing then, each one logs as that food, and nothing is
+ * asked of Gemini.
  * The sheet can be closed while Gemini works: the request carries on and `onBackground` says how it went.
  */
 export function BatchSheet({ open, request, batch, state, onEstimate, onEstimatePack, onSaveKey, onBusyChange, onBackground, onSave, onFinish, onClose }: {
@@ -96,6 +104,10 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
   const [failed, setFailed] = useState(false);
   /** No key yet: the describe step shows the Connect card in place of Estimate. */
   const [connecting, setConnecting] = useState(false);
+  /** From your foods: the saved food it's a stock of, what the list is searched for, and one serve's grams (per 100 g foods). */
+  const [foodId, setFoodId] = useState<string | null>(null);
+  const [pickQuery, setPickQuery] = useState('');
+  const [serveGramsText, setServeGramsText] = useState('');
   const nameRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const openRef = useRef(open);
@@ -136,9 +148,16 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
     setError('');
     setFailed(false);
     setConnecting(false);
+    setFoodId(source?.foodId || null);
+    setPickQuery('');
+    setServeGramsText(source ? String(serveGrams(source) || '') : '');
   }, [open, request.opened]);
 
   const bought = kind === 'bought';
+  // A saved food it's a stock of, while that food is still saved. Its serve sets the numbers.
+  const linkedFood = foodId ? state.foods.find(food => food.id === foodId) : undefined;
+  const lot = linkedFood ? foodBatch(linkedFood, servings, n(serveGramsText)) : null;
+  const { userResults } = useFoodSearch(state, state.foods, step === 'pick' ? pickQuery : '');
   const used = editing && batch ? batch.servings - batchServesLeft(batch, state.entries) : 0;
   const left = Math.max(0, Math.round((servings - used) * 100) / 100);
   // Editing can't split it into fewer serves than are already logged; Finish is for that.
@@ -294,6 +313,25 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
     setAddingPhotos(false);
   };
 
+  /** A saved food into the fridge: as many serves as last time it was there, or one. */
+  const pickFood = (food: Food) => {
+    const last = state.batches.filter(item => item.foodId === food.id).sort((a, b) => b.createdAt - a.createdAt)[0];
+    setFoodId(food.id);
+    setKind('bought');
+    setName(food.name);
+    setServings(servingsValue(last?.servings || 1));
+    setServeGramsText(food.unitMode === '100g' ? String((last && serveGrams(last)) || food.servingGrams || 100) : '');
+    setRecipe('');
+    setPhotos([]);
+    setIngredients([]);
+    setAssumptions([]);
+    setConfidence(null);
+    setEstimateSource(null);
+    setReply('');
+    setError('');
+    setStep('review');
+  };
+
   /** Picks where it came from. Bought goes straight to the camera when Gemini is there to read the label. */
   const choose = (next: BatchKind) => {
     setKind(next);
@@ -303,6 +341,10 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
   };
 
   const save = (logNow: boolean) => {
+    if (lot) {
+      if (!(lot.total.calories > 0)) return setError(`${linkedFood?.name || 'This food'} has no ${energyUnitLabel(unit)} saved. Add them in Foods first.`);
+      return onSave(lot, logNow);
+    }
     if (!name.trim()) {
       setError('Give it a name so you can find it again.');
       nameRef.current?.focus();
@@ -312,8 +354,8 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
     onSave({ name: name.trim(), kind, recipe: recipe.trim(), servings, total, grams, ingredients, estimateSource, assumptions, confidence }, logNow);
   };
 
-  const serve = batchServe({ total, servings });
-  const gramsEach = serveGrams({ servings, grams });
+  const serve = batchServe({ total: lot?.total || total, servings });
+  const gramsEach = serveGrams({ servings, grams: lot ? lot.grams : grams });
   const macroCheckFails = !!estimateSource && macrosDisagree(serve);
   const counted = sumTotals(ingredients);
   // Typed-over numbers no longer match Gemini's breakdown, so it says so rather than look wrong.
@@ -321,7 +363,9 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
   const unitLabel = energyUnitLabel(unit);
   const title = step === 'choose'
     ? 'Add to fridge'
-    : editing
+    : step === 'pick'
+      ? 'From your foods'
+      : editing
       ? (bought ? 'Edit' : 'Edit batch')
       : request.mode === 'again'
         ? (bought ? 'Bought again' : 'Cook again')
@@ -334,8 +378,8 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
       <span className="batch-serves-label">
         <strong>Serves</strong>
         <small>
-          {total.calories > 0
-            ? `${bought ? 'All of it' : 'Whole batch'} ${energyTextForUnit(total.calories, unit)}${gramsEach ? ` · about ${fmt(gramsEach)} g a serve` : ''}`
+          {(lot?.total || total).calories > 0
+            ? `${bought ? 'All of it' : 'Whole batch'} ${energyTextForUnit((lot?.total || total).calories, unit)}${gramsEach ? ` · about ${fmt(gramsEach)} g a serve` : ''}`
             : bought ? 'How many serves in all' : 'The batch is split evenly'}
         </small>
       </span>
@@ -358,8 +402,58 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
             <span className="fridge-choice-text"><strong>I bought it</strong><small>Ready meals, a tub of ice cream, a box of bars. Snap the nutrition label.</small></span>
             <Icon name="chevron" size={16} />
           </button>
+          {state.foods.length > 0 && (
+            <button type="button" className="fridge-choice" onClick={() => { setError(''); setStep('pick'); }}>
+              <span className="fridge-choice-icon" aria-hidden="true"><Icon name="heart" size={22} /></span>
+              <span className="fridge-choice-text"><strong>From my foods</strong><small>Logged it before? Pick it, no scan. Each serve logs as that food.</small></span>
+              <Icon name="chevron" size={16} />
+            </button>
+          )}
         </div>
         <p className="hint full fridge-choose-note">Each serve then sits on Today, one tap to log, until it’s all eaten.</p>
+      </div>
+    );
+  } else if (step === 'pick') {
+    const query = pickQuery.trim();
+    const favourites = favouritesByUse(state.foods);
+    const recent = [...state.foods].filter(food => !food.favourite).sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0)).slice(0, PICK_RECENT_SHOWN);
+    const list = (title: string, foods: Food[]) => foods.length > 0 && (
+      <section className="food-search-group full">
+        <h2 className="food-search-label">{title}</h2>
+        <div className="food-search-list">
+          {foods.map(food => <SavedFoodRow key={food.id} state={state} food={food} onChoose={() => pickFood(food)} />)}
+        </div>
+      </section>
+    );
+    body = (
+      <div className="form batch-sheet">
+        <input
+          className="full fridge-pick-search"
+          type="search"
+          aria-label="Search your foods"
+          placeholder="Search your foods"
+          value={pickQuery}
+          onChange={event => setPickQuery(event.target.value)}
+          onKeyDown={event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            event.currentTarget.blur();
+          }}
+          autoCapitalize="none"
+          autoCorrect="off"
+          enterKeyHint="search"
+        />
+        {query ? (
+          userResults.length ? list('Your foods', userResults.slice(0, PICK_RECENT_SHOWN)) : <p className="hint full">Nothing saved matches “{query}”. If it’s new, go back and scan it once with I bought it.</p>
+        ) : (
+          <>
+            {list('Favourites', favourites)}
+            {list('Recent', recent)}
+          </>
+        )}
+        <div className="entry-alt-links full">
+          <button type="button" className="text-btn" onClick={() => { setFoodId(null); setName(''); setStep('choose'); }}>Something new instead</button>
+        </div>
       </div>
     );
   } else if (step === 'describe') {
@@ -459,13 +553,40 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
   } else {
     body = (
       <form className="form batch-sheet" onSubmit={(event: FormEvent) => { event.preventDefault(); save(false); }}>
-        <div className="field full">
-          <label className="field-caption" htmlFor="batchName">Name</label>
-          <input ref={nameRef} id="batchName" value={name} placeholder={bought ? 'e.g. Chicken pesto pasta' : 'e.g. Beef mince rice bowl'} onChange={event => { setName(event.target.value); setError(''); }} />
-        </div>
+        {lot && linkedFood ? (
+          <div className="fridge-food full">
+            <strong>{linkedFood.name}</strong>
+            <small>Each serve logs as this saved food, so nothing new lands in Recent.</small>
+          </div>
+        ) : (
+          <div className="field full">
+            <label className="field-caption" htmlFor="batchName">Name</label>
+            <input ref={nameRef} id="batchName" value={name} placeholder={bought ? 'e.g. Chicken pesto pasta' : 'e.g. Beef mince rice bowl'} onChange={event => { setName(event.target.value); setError(''); }} />
+          </div>
+        )}
         {editing && batch && (
           <p className="batch-status full"><ServePips left={left} servings={servings} />{fmtPortion(left)} of {fmt(servings)} serves left · {cookedText(batch.cookedOn, kind)}</p>
         )}
+        {lot && linkedFood ? (
+          <div className="calories-priority full" role="group" aria-label="One serve">
+            <div className="fridge-serves-first">{servesRow}</div>
+            {linkedFood.unitMode === '100g' && (
+              <div className="amount-row">
+                <label className="amount-label" htmlFor="fridgeServeGrams"><span>Grams a serve</span><small>It’s saved per 100 g</small></label>
+                <div className="calorie-input-row amount-input-row">
+                  <input id="fridgeServeGrams" inputMode="decimal" value={serveGramsText} onChange={event => { setServeGramsText(event.target.value); setError(''); }} />
+                  <span aria-hidden="true">g</span>
+                </div>
+              </div>
+            )}
+            <div className="meta-chips fridge-food-serve">
+              <span className="portion-preview-label">One serve</span>
+              <span className="meta-chip accent">{energyTextForUnit(serve.calories, unit)}</span>
+              <MacroChips fat={serve.fat} carbs={serve.carbs} protein={serve.protein} />
+            </div>
+            <p className="hint fridge-food-note">The numbers are your saved food’s. To change them, edit it in Foods.</p>
+          </div>
+        ) : (
         <div className="calories-priority full" role="group" aria-label="One serve">
           {/* Bought: how many serves comes first, as it does on a label, then what's in one. */}
           {bought && <div className="fridge-serves-first">{servesRow}</div>}
@@ -518,6 +639,7 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
             </div>
           )}
         </div>
+        )}
         {ingredients.length > 0 && (
           <details className="extra-info batch-ingredients full" open={request.mode === 'new'}>
             <summary>What went in ({ingredients.length})</summary>
@@ -541,7 +663,12 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
             </div>
           </details>
         )}
-        {!editing && (
+        {!editing && lot && (
+          <div className="entry-alt-links full">
+            <button type="button" className="text-btn" onClick={() => { setError(''); setFoodId(null); setStep('pick'); }}>Pick another food</button>
+          </div>
+        )}
+        {!editing && !lot && (
           <div className="entry-alt-links full">
             <button type="button" className="text-btn" disabled={!!busy} onClick={() => { setError(''); setStep('describe'); }}>
               {bought

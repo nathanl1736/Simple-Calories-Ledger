@@ -246,3 +246,54 @@ test('batches saved before the fridge read back as home cooking with no weight',
   assert.equal(state.batches[1].kind, 'bought');
   assert.equal(state.batches[1].grams, 700);
 });
+
+/* ---------------------------------------------------------------- a saved food in the fridge */
+
+const savedFood = (fields = {}) => ({ id: 'f1', name: 'Chicken pesto pasta', unitMode: 'serving', calories: 455, protein: 38, carbs: 40, fat: 15, favourite: true, usageCount: 3, lastUsedAt: 1, createdAt: 1, updatedAt: 1, estimateSource: 'label', ...fields });
+
+test('a saved food goes in as so many of its serves, linked to it, with nothing asked of Gemini', () => {
+  const lot = m.foodBatch(savedFood({ servingGrams: 350 }), 2);
+  assert.equal(lot.foodId, 'f1');
+  assert.equal(lot.name, 'Chicken pesto pasta');
+  assert.equal(lot.kind, 'bought');
+  assert.equal(lot.servings, 2);
+  assert.deepEqual(lot.total, { calories: 910, protein: 76, carbs: 80, fat: 30 });
+  assert.equal(lot.grams, 700);
+  assert.equal(lot.estimateSource, 'label');
+  assert.deepEqual(m.batchServe(lot), { calories: 455, protein: 38, carbs: 40, fat: 15 });
+});
+
+test('a food saved per 100 g is stocked by the serve: its own serve size, or the grams given, or 100 g', () => {
+  const yoghurt = savedFood({ id: 'y', name: 'Greek yoghurt', unitMode: '100g', calories: 66, protein: 9.5, carbs: 5.6, fat: 0.2, servingGrams: 170 });
+  assert.equal(m.foodServe(yoghurt).grams, 170);
+  assert.equal(Math.round(m.foodServe(yoghurt).serve.calories), 112);
+  assert.equal(m.foodServe(yoghurt, 200).grams, 200);
+  assert.equal(m.foodServe({ ...yoghurt, servingGrams: undefined }).grams, 100);
+  const lot = m.foodBatch(yoghurt, 5);
+  assert.equal(lot.grams, 850);
+  assert.equal(lot.total.calories, 561);
+});
+
+test('a serve of a saved food logs as that food would: per 100 g by its grams, or one serving', () => {
+  const yoghurt = savedFood({ unitMode: '100g', calories: 66, protein: 9.5, carbs: 5.6, fat: 0.2, servingGrams: 170 });
+  const tub = m.foodBatch(yoghurt, 5);
+  assert.deepEqual(m.serveLog(tub, yoghurt, 5), { unitMode: '100g', portion: 170, base: { calories: 66, protein: 9.5, carbs: 5.6, fat: 0.2 } });
+  // The last half serve is half its grams; it still counts as what's left.
+  assert.equal(m.serveLog(tub, yoghurt, 0.5).portion, 85);
+  const meals = m.foodBatch(savedFood(), 2);
+  assert.deepEqual(m.serveLog(meals, savedFood(), 2), { unitMode: 'serving', portion: 1, base: { calories: 455, protein: 38, carbs: 40, fat: 15 } });
+  // A batch with no saved food behind it (or one since deleted) is a serve, as before.
+  assert.equal(m.serveLog(tub, undefined, 5).unitMode, 'serving');
+});
+
+test('a logged per-100 g serve counts as one serve, whatever it weighs', () => {
+  const tub = { ...m.foodBatch(savedFood({ unitMode: '100g', servingGrams: 170 }), 5), id: 'b1' };
+  const entries = [{ id: 'e1', batchId: 'b1', unitMode: '100g', portion: 170 }, { id: 'e2', batchId: 'b1', unitMode: '100g', portion: 250 }];
+  assert.equal(m.batchServesLeft(tub, entries), 3);
+});
+
+test('the link to the saved food is kept when the fridge is read back', () => {
+  const state = normalizeStateShape({ batches: [{ ...m.foodBatch(savedFood(), 2), id: 'b1', cookedOn: '2026-10-13', finishedAt: null, createdAt: 1, updatedAt: 1 }, { id: 'b2', name: 'Curry', total: { calories: 2000 }, servings: 4 }] });
+  assert.equal(state.batches[0].foodId, 'f1');
+  assert.equal('foodId' in state.batches[1], false);
+});

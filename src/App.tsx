@@ -19,7 +19,7 @@ import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstima
 import { logChips, type UsualChip } from './logUsuals';
 import { removeEntry, removeFood, restoreEntry, restoreFood, revertFoodUse, type RemovedEntry, type RemovedFood } from './undo';
 import { estimatingLabel, logSheetTitle, suggestSheetTitle } from './estimateJob';
-import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, buildPackRequest, parseBatchEstimate, parsePackEstimate, pruneBatches, serveNote } from './mealPrep';
+import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, buildPackRequest, parseBatchEstimate, parsePackEstimate, pruneBatches, serveLog, serveNote } from './mealPrep';
 import { buildSuggestContext, buildSuggestRequest, isSuggestFresh, loadLastSuggest, mealBudget, parseSuggest, saveLastSuggest, suggestNotesLead, type SuggestItem, type SuggestSession } from './suggest';
 import {
   applyDayCalorieOverride,
@@ -1084,22 +1084,21 @@ export function App() {
   const logBatchServe = async (batch: Batch, date: string, meal: Meal = defaultMealForLogging()) => {
     const left = batchServesLeft(batch, latestState.current.entries);
     if (left <= 0) return notify(`No serves of ${batch.name} left`);
-    const serve = batchServe(batch);
-    // The last half serve is logged as a half, so the batch ends at exactly none.
-    const portion = Math.min(1, left);
+    // A saved food in the fridge logs as that food: linked to it, so it lands on it rather than in Recent again.
+    const food = batch.foodId ? latestState.current.foods.find(item => item.id === batch.foodId) : undefined;
+    const { unitMode, portion, base } = serveLog(batch, food, left);
     const now = Date.now();
     const entry = normalizeEntry({
       id: uid(),
-      sourceFoodId: null,
+      sourceFoodId: food?.id ?? null,
       date,
-      name: batch.name,
-      unitMode: 'serving',
+      name: food?.name || batch.name,
+      unitMode,
       portion,
-      // Whole Cal and tenths of a gram, as Log food shows them.
-      baseCalories: Math.round(serve.calories),
-      baseProtein: Math.round(serve.protein * 10) / 10,
-      baseCarbs: Math.round(serve.carbs * 10) / 10,
-      baseFat: Math.round(serve.fat * 10) / 10,
+      baseCalories: base.calories,
+      baseProtein: base.protein,
+      baseCarbs: base.carbs,
+      baseFat: base.fat,
       meal,
       part: mealDayPart(meal) ? undefined : recentLog()?.part ?? dayPartNow(),
       estimateSource: batch.estimateSource,
@@ -1108,15 +1107,20 @@ export function App() {
       createdAt: now,
       updatedAt: now
     });
+    const foodsBefore = latestState.current.foods;
     await updateLatest(draft => {
       draft.entries.push(entry);
+      if (food) recordFoodUse(draft.foods, { sourceFoodId: food.id, snapshot: food, favourite: null, fromDatabase: false, now, newId: uid });
     });
+    const foodsAfter = latestState.current.foods;
     lastLogged = { meal, part: entryDayPart(entry), at: now };
-    const leftAfter = Math.round((left - portion) * 100) / 100;
+    // A serve is one, however many grams it weighs.
+    const leftAfter = Math.round((left - Math.min(1, left)) * 100) / 100;
     notify(`Logged ${energyText(state, entry.calories)} · ${meal.toLowerCase()}${dayNote(date)} · ${leftAfter > 0 ? `${fmtPortion(leftAfter)} left` : 'last serve'}`, 5000, {
       label: 'Undo',
       run: () => updateLatest(draft => {
         draft.entries = draft.entries.filter(item => item.id !== entry.id);
+        draft.foods = revertFoodUse(draft.foods, foodsBefore, foodsAfter);
       }).then(() => notify('Undone'))
     });
   };
@@ -1168,6 +1172,9 @@ export function App() {
       }
       saved = { ...input, id: uid(), cookedOn: today, finishedAt: null, createdAt: now, updatedAt: now };
       draft.batches = pruneBatches([...draft.batches, saved], draft.entries, today);
+      // Stocked, a saved food is in use: Recent keeps it until its first serve is logged.
+      const stocked = input.foodId ? draft.foods.find(food => food.id === input.foodId) : undefined;
+      if (stocked) stocked.lastUsedAt = now;
     });
     setModal(null);
     if (!saved) return;
