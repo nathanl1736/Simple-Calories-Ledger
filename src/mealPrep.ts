@@ -1,4 +1,5 @@
-import type { Batch, BatchIngredient, BatchKind, Entry, Totals } from './types';
+import type { Batch, BatchIngredient, BatchKind, Entry, Food, Totals } from './types';
+import type { BatchInput } from './appTypes';
 import { aboutUserLine, confidenceValue, estimateSourceValue, stringList, type EstimateConfidence } from './aiEstimate';
 import { numberValue, parseJsonObject, stringValue } from './aiQuickLog';
 import { addDays, fmt, n, normalizeDateKey, toKey } from './utils';
@@ -411,6 +412,65 @@ export function serveGrams(batch: Pick<Batch, 'servings'> & { grams?: number }) 
   return grams > 0 ? Math.round(grams / Math.max(1, batch.servings)) : 0;
 }
 
+/**
+ * One serve of a saved food: a serving of it, or for one saved per 100 g, `grams` of it (its own
+ * serve size when it has one, else 100 g). `grams` is what one serve weighs, 0 when unknown.
+ */
+export function foodServe(food: Pick<Food, 'unitMode' | 'servingGrams' | 'calories' | 'protein' | 'carbs' | 'fat'>, grams = 0): { serve: Totals; grams: number } {
+  const numbers = { calories: n(food.calories), protein: n(food.protein), carbs: n(food.carbs), fat: n(food.fat) };
+  if (food.unitMode !== '100g') return { serve: numbers, grams: n(food.servingGrams) };
+  const weight = grams > 0 ? grams : n(food.servingGrams) || 100;
+  const scale = (value: number) => (value * weight) / 100;
+  return { serve: { calories: scale(numbers.calories), protein: scale(numbers.protein), carbs: scale(numbers.carbs), fat: scale(numbers.fat) }, grams: weight };
+}
+
+/**
+ * A saved food put in the fridge: `servings` of its serve, each logged as that food. It counts as
+ * bought, so it keeps as long as bought food does. No Gemini: the numbers are the food's own.
+ */
+export function foodBatch(food: Food, servings: number, grams = 0): BatchInput {
+  const count = servingsValue(servings);
+  const one = foodServe(food, grams);
+  return {
+    name: food.name,
+    kind: 'bought',
+    recipe: '',
+    servings: count,
+    total: {
+      calories: Math.round(one.serve.calories * count),
+      protein: round1(one.serve.protein * count),
+      carbs: round1(one.serve.carbs * count),
+      fat: round1(one.serve.fat * count)
+    },
+    grams: Math.round(one.grams * count),
+    ingredients: [],
+    estimateSource: estimateSourceValue(food.estimateSource),
+    assumptions: [],
+    confidence: null,
+    foodId: food.id
+  };
+}
+
+/**
+ * How one serve from the fridge is logged: a serve of it, or for a saved food kept per 100 g, the
+ * serve's grams at its per-100 g numbers, as logging that food itself would. The last part of a serve
+ * is logged as that part, so the fridge ends at exactly none. Whole Cal and tenths of a gram.
+ */
+export function serveLog(batch: Pick<Batch, 'total' | 'servings' | 'grams'>, food: Pick<Food, 'unitMode'> | undefined, left: number) {
+  const part = Math.min(1, left);
+  const gramsEach = serveGrams(batch);
+  const per = (scale: number) => ({
+    calories: Math.round(batch.total.calories * scale),
+    protein: round1(batch.total.protein * scale),
+    carbs: round1(batch.total.carbs * scale),
+    fat: round1(batch.total.fat * scale)
+  });
+  if (food?.unitMode === '100g' && gramsEach > 0) {
+    return { unitMode: '100g' as const, portion: round1(gramsEach * part), base: per(100 / n(batch.grams)) };
+  }
+  return { unitMode: 'serving' as const, portion: part, base: per(1 / Math.max(1, batch.servings)) };
+}
+
 /** The note a logged serve carries, so the entry says where it came from. */
 export function serveNote(batch: Pick<Batch, 'servings'> & { kind?: BatchKind }) {
   return batchKindValue(batch.kind) === 'bought'
@@ -471,6 +531,7 @@ export function normalizeBatch(input: unknown): Batch | null {
     confidence,
     cookedOn: normalizeDateKey(raw.cookedOn) || toKey(createdAt),
     finishedAt: n(raw.finishedAt) || null,
+    ...(typeof raw.foodId === 'string' && raw.foodId ? { foodId: raw.foodId } : {}),
     createdAt,
     updatedAt: n(raw.updatedAt) || createdAt
   };

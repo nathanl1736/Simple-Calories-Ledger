@@ -96,6 +96,8 @@ export type Batch = {
   cookedOn: string;
   /** Set by Finish, when the rest was eaten without logging or thrown out. */
   finishedAt: number | null;
+  /** A saved food stocked in the fridge: each serve logs as that food and counts as using it, so nothing new lands in Recent. */
+  foodId?: string;
   createdAt: number;
   updatedAt: number;
 };
