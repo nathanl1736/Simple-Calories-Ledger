@@ -178,6 +178,30 @@ await step('Mocked Gemini estimate reaches the review sheet', async () => {
   await s.closeAll();
 });
 
+await step('Estimate again: a logged estimate puts what went in back in Log food\u2019s box', async () => {
+  await sparkle().click();
+  await visible(s.dialog().locator('textarea.log-text'));
+  await s.dialog().locator('textarea.log-text').fill('Chicken burrito bowl from Guzman y Gomez, medium');
+  await s.dialog().getByRole('button', { name: /^Estimate$/ }).click();
+  await visible(s.dialog().getByRole('button', { name: /^Log \d/ }), 15000);
+  await s.dialog().getByRole('button', { name: /^Log \d/ }).click();
+  await page.waitForTimeout(600);
+  await s.scrollTo('[aria-label="Day line"]');
+  await page.locator('[aria-label="Day line"]').getByRole('button', { name: /^Chicken burrito bowl, / }).first().click();
+  await visible(s.dialog().getByText('Edit entry', { exact: true }));
+  await shot('estimate-again-entry');
+  await s.dialog().getByRole('button', { name: 'Estimate again' }).click();
+  await page.waitForFunction(() => !!document.querySelector('textarea.log-text')?.value, null, { timeout: 6000 });
+  const text = await s.dialog().locator('textarea.log-text').inputValue();
+  if (!text.startsWith('Chicken burrito bowl:\n1 cup Mexican rice (180 g)\n')) throw new Error(`Log food's box holds ${JSON.stringify(text)}`);
+  if (/Assumed|Confidence/.test(text)) throw new Error(`Dawni's notes about the estimate went in the box: ${text}`);
+  // A list of what went in is for Gemini, not a search: the usuals and Other ways stay.
+  await visible(s.dialog().getByRole('button', { name: /Add to fridge/ }));
+  await shot('estimate-again-log');
+  await s.dialog().locator('textarea.log-text').fill('');
+  await s.closeAll();
+});
+
 await step('Suggest: a typed venue reaches a result with Log this', async () => {
   await sparkle().click();
   await visible(s.dialog());

@@ -41,7 +41,7 @@ Use this exact JSON shape:
   "protein": 0,
   "carbs": 0,
   "fat": 0,
-  "notes": "brief ingredient and estimate notes"
+  "notes": "every item with its amount, one per line"
 }
 
 Choosing unitMode:
@@ -74,7 +74,7 @@ Rules:
 - Use numbers only for calories, protein, carbs, and fat.
 - Estimate conservatively if unsure.
 - Keep the name short and useful for a food log.
-- Put ingredient details in notes.
+- In notes, list every item with its amount, one per line (like "150 g chicken breast", "1 tbsp olive oil"), including oil, butter and sauces you assumed, so I can change an amount and ask again.
 - Do not split ingredients into separate items.
 - Do not wrap the result in markdown or code fences.
 - After I provide ingredients, reply only with the JSON object.`;

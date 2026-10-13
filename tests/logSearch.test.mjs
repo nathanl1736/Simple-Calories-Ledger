@@ -22,6 +22,12 @@ test('with a photo attached the words are for Gemini, so nothing is searched', (
   assert.equal(composerSearchQuery({ text: 'half of it', photos: ['data:image/jpeg;base64,xx'] }), '');
 });
 
+test('more than one line describes a meal for Gemini, so nothing is searched', () => {
+  assert.equal(composerSearchQuery({ text: 'Chicken stir fry:\n150 g chicken breast\n1 tbsp peanut oil', photos: [] }), '');
+  // A line break typed at the end is not a second line yet.
+  assert.equal(composerSearchQuery({ text: 'chicken\n', photos: [] }), 'chicken');
+});
+
 /* ---------------------------------------------------------------- what it lists */
 
 test('favourites and recent foods split, each capped', () => {

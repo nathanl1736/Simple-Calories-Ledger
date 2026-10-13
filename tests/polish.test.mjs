@@ -55,13 +55,13 @@ test('fewer notes than the limit are all shown, and blanks and a zero limit show
   assert.deepEqual(newestNotes(['one'], 0), []);
 });
 
-test('the real release notes end with the 3.1.2 headline, and the newest five are distinct', () => {
+test('the real release notes end with the 3.1.3 headline, and the newest five are distinct', () => {
   const notes = JSON.parse(read('../src/release-notes.json'));
   const shown = newestNotes(notes);
   assert.equal(shown.length, 5);
   assert.equal(shown[0], notes[notes.length - 1]);
-  assert.match(shown[0], /^Favourites in Log food/);
-  assert.match(shown[1], /^One box in Log food/);
+  assert.match(shown[0], /^Estimate again/);
+  assert.match(shown[1], /^Favourites in Log food/);
   assert.equal(new Set(shown).size, 5);
   // The oldest note (the first release's) is not what the sheet leads with any more.
   assert.notEqual(shown[0], notes[0]);
