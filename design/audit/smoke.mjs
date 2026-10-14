@@ -333,6 +333,33 @@ await step('Fridge: one more of something bought keeps each serve; a split only 
   await s.tab('tracking');
 });
 
+await step('Fridge: a serve logged from the fridge can be hearted, and the favourite then takes a serve from it', async () => {
+  const name = 'Vanilla ice cream (Connoisseur)';
+  await s.scrollTo('[aria-label="Day line"]');
+  await page.locator('[aria-label="Day line"] .tl-row', { hasText: name }).first().click();
+  await visible(s.dialog().locator('.batch-entry-hint'));
+  await s.dialog().getByRole('button', { name: 'Favourite', exact: true }).click();
+  await shot('fridge-serve-heart');
+  await s.dialog().locator('button.entry-save').click();
+  await page.waitForTimeout(600);
+  const saved = await readState();
+  const food = saved.foods.find(item => item.name === name);
+  if (!food?.favourite) throw new Error('The hearted fridge serve is not a favourite');
+  if (food.calories !== 160 || food.servingGrams !== 70) throw new Error(`Saved as ${food.calories} Cal and ${food.servingGrams} g a serve, not 160 and 70`);
+  const batch = saved.batches.find(item => item.name === name);
+  if (batch.servings !== 9 || batch.foodId) throw new Error('Hearting a serve changed the fridge');
+  // In Log food the favourite is the fridge serve, so a tap counts the fridge down (8 left before).
+  await sparkle().click();
+  await visible(s.dialog());
+  const chip = s.dialog().locator('.log-favourites .log-chip', { hasText: 'Vanilla ice cream' }).first();
+  await visible(chip);
+  if (!(await chip.getAttribute('class')).includes('prep')) throw new Error('The favourite does not take a serve from the fridge');
+  await page.waitForTimeout(500);
+  await shot('fridge-favourite-chip');
+  await chip.click();
+  await visible(page.locator('.toast', { hasText: /7 left/ }));
+});
+
 await step('Long-press on an entry opens its menu', async () => {
   await s.scrollTo('[aria-label="Day line"]');
   const row = page.locator('[aria-label="Day line"] .tl-row, [aria-label="Day line"] [role=button]').first();

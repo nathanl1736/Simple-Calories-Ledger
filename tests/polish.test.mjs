@@ -60,8 +60,8 @@ test('the real release notes end with the 3.1.4.1 fix, and the newest five are d
   const shown = newestNotes(notes);
   assert.equal(shown.length, 5);
   assert.equal(shown[0], notes[notes.length - 1]);
-  assert.match(shown[0], /^Fridge serves add up/);
-  assert.match(shown[1], /^Put your saved foods in the fridge/);
+  assert.match(shown[0], /^Favourite anything from the fridge/);
+  assert.match(shown[1], /^Fridge serves add up/);
   assert.equal(new Set(shown).size, 5);
   // The oldest note (the first release's) is not what the sheet leads with any more.
   assert.notEqual(shown[0], notes[0]);

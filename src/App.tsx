@@ -11,7 +11,7 @@ import { applyAppUpdate, checkForAppUpdate, clearUpdateReloadMarkers, dismissUpd
 import { MealGroup } from './canvas';
 import { databaseItemToFood, refreshFoodEstimateDatabase, type FoodDatabaseItem } from './foodDatabase';
 import { parseCustomFoodDatabaseText } from './customFoodDatabases';
-import { pruneOneOffEstimates, recordFoodUse, type FavouriteChange } from './favourites';
+import { linkedFood, pruneOneOffEstimates, recordFoodUse, type FavouriteChange } from './favourites';
 import { dayPartAt, entryDayPart, mealDayPart, usualsForMeal } from './tidelight';
 import { AI_QUICK_LOG_PROMPT, amountPortionValue, parseAiQuickLog, type AiQuickLogEntry } from './aiQuickLog';
 import { buildEstimateRequest, estimateNotes, estimateSourceValue, LABEL_NOTE, parseGeminiEstimate, type GeminiEstimate } from './aiEstimate';
@@ -19,7 +19,7 @@ import { isGeminiAbort, isGeminiTimeout, requestBatchEstimate, requestMealEstima
 import { logChips, type UsualChip } from './logUsuals';
 import { removeEntry, removeFood, restoreEntry, restoreFood, revertFoodUse, type RemovedEntry, type RemovedFood } from './undo';
 import { estimatingLabel, logSheetTitle, suggestSheetTitle } from './estimateJob';
-import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, buildPackRequest, parseBatchEstimate, parsePackEstimate, pruneBatches, serveLog, serveNote } from './mealPrep';
+import { activeBatches, batchServe, batchServesLeft, buildBatchRequest, buildPackRequest, parseBatchEstimate, parsePackEstimate, pruneBatches, serveGrams, serveLog, serveNote } from './mealPrep';
 import { buildSuggestContext, buildSuggestRequest, isSuggestFresh, loadLastSuggest, mealBudget, parseSuggest, saveLastSuggest, suggestNotesLead, type SuggestItem, type SuggestSession } from './suggest';
 import {
   applyDayCalorieOverride,
@@ -474,6 +474,8 @@ export function App() {
 
   const editEntry = (entry: Entry) => {
     const sourceFood = entry.sourceFoodId ? state.foods.find(food => food.id === entry.sourceFoodId) : null;
+    // A fridge serve knows its weight from the label, so hearting it saves that too.
+    const fromFridge = !sourceFood && entry.batchId ? state.batches.find(batch => batch.id === entry.batchId) : undefined;
     setEntryDraft({
       editingId: entry.id,
       sourceFoodId: entry.sourceFoodId || '',
@@ -483,7 +485,7 @@ export function App() {
       unitMode: entryUnitModeValue(entry.unitMode),
       brand: sourceFood?.brand || '',
       servingLabel: sourceFood?.servingLabel || '',
-      servingGrams: sourceFood?.servingGrams ? String(sourceFood.servingGrams) : '',
+      servingGrams: sourceFood?.servingGrams ? String(sourceFood.servingGrams) : fromFridge && serveGrams(fromFridge) ? String(serveGrams(fromFridge)) : '',
       source: sourceFood?.source || '',
       sourceId: sourceFood?.sourceId || '',
       category: sourceFood?.category || '',
@@ -537,8 +539,10 @@ export function App() {
   };
 
   const touchFoodAfterLog = (draftState: AppState, entry: Entry, draft: EntryDraft): FavouriteChange => {
-    // The fridge runs out, so its serves stay out of saved foods and Recent.
-    if (entry.autoNamed || entry.batchId) return null;
+    if (entry.autoNamed) return null;
+    // The fridge runs out, so its serves stay out of saved foods and Recent, unless the heart changes:
+    // hearting one saves a serve of it as a favourite, and the fridge carries on as it was.
+    if (entry.batchId && (draft.favourite === null || draft.favourite === !!linkedFood(draftState.foods, entry.sourceFoodId, entry.name)?.favourite)) return null;
     const isDatabaseFood = draft.source === 'foodEstimateDatabase' || draft.source === 'customFoodDatabase';
     return recordFoodUse(draftState.foods, {
       sourceFoodId: entry.sourceFoodId,
@@ -741,6 +745,23 @@ export function App() {
   const serveDraft = (batch: Batch, meal: Meal): EntryDraft => {
     const serve = batchServe(batch);
     const left = batchServesLeft(batch, latestState.current.entries);
+    // A saved food in the fridge is checked as that food, as a tap would log it, so hearting it here keeps the food as it's saved.
+    const food = batch.foodId ? latestState.current.foods.find(item => item.id === batch.foodId) : undefined;
+    if (food) {
+      const unit = energyUnitValue(state.settings.energyUnit);
+      const { unitMode, portion, base } = serveLog(batch, food, Math.max(0, Math.min(1, left)) || 1);
+      return {
+        ...foodDraft(food, meal),
+        unitMode,
+        calories: draftEnergyText(base.calories, unit),
+        protein: draftNumberText(base.protein),
+        carbs: draftNumberText(base.carbs),
+        fat: draftNumberText(base.fat),
+        portion: fmtPortion(portion),
+        notes: serveNote(batch),
+        batchId: batch.id
+      };
+    }
     return {
       ...blankEntryDraft(meal, energyUnitValue(state.settings.energyUnit)),
       name: batch.name,
@@ -749,6 +770,7 @@ export function App() {
       carbs: draftNumberText(Math.round(serve.carbs * 10) / 10),
       fat: draftNumberText(Math.round(serve.fat * 10) / 10),
       portion: fmtPortion(Math.max(0, Math.min(1, left)) || 1),
+      servingGrams: serveGrams(batch) ? String(serveGrams(batch)) : '',
       notes: serveNote(batch),
       estimateSource: batch.estimateSource,
       batchId: batch.id
