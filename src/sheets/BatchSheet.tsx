@@ -3,7 +3,7 @@ import type { AppState, Batch, BatchIngredient, BatchKind, EnergyUnit, EntryEsti
 import { energyFromMacros, estimateSourceLabel, macrosDisagree, MAX_ESTIMATE_PHOTOS } from '../aiEstimate';
 import { isGeminiAbort } from '../geminiEstimate';
 import { compressImages, SHARP_PHOTO_OPTIONS } from '../image';
-import { BATCH_SHELF_DAYS, BOUGHT_SHELF_DAYS, batchServe, batchServesLeft, DEFAULT_BATCH_SERVINGS, foodBatch, MAX_BATCH_SERVINGS, MAX_PACKS, packBatch, packsValue, servingsValue, serveGrams, sumTotals, type BatchEstimate, type PackEstimate } from '../mealPrep';
+import { BATCH_SHELF_DAYS, BOUGHT_SHELF_DAYS, batchServe, batchServesLeft, DEFAULT_BATCH_SERVINGS, defaultServesChange, foodBatch, MAX_BATCH_SERVINGS, MAX_PACKS, packBatch, packsValue, resizeLot, servingsValue, serveGrams, sumTotals, type BatchEstimate, type PackEstimate, type ServesChange } from '../mealPrep';
 import { energyInputFromKcal, energyInputToKcal, energyTextForUnit, energyUnitLabel, energyUnitValue, energyValueForUnit, fmt, fmtPortion, n } from '../utils';
 import { type BatchInput, type BatchSheetRequest } from '../appTypes';
 import { Modal } from '../ui/Modal';
@@ -37,6 +37,8 @@ type ServeInputs = Record<keyof Totals, string>;
 type Step = 'choose' | 'pick' | 'describe' | 'review';
 /** What a request to Gemini hands back: its reply, for Refine, and what was read from it. */
 type Reading<T> = { raw: string; estimate: T };
+/** The lot as it was opened, read or typed. Changing the serves works from this, so stepping up and back lands where it began. */
+type Lot = { total: Totals; servings: number; grams: number };
 
 /** One serve's numbers as typed text; blank while the batch has none yet. */
 function serveInputs(total: Totals, servings: number, unit: EnergyUnit): ServeInputs {
@@ -50,8 +52,10 @@ function serveInputs(total: Totals, servings: number, unit: EnergyUnit): ServeIn
  * from. Cooked (meal prep): list what went in and how many serves, Gemini estimates the whole batch
  * ingredient by ingredient. Bought: photograph the nutrition label and say how many packs, Gemini
  * reads one pack and Dawni multiplies it out into the label's serves. Either way the review shows one
- * serve, and the whole lot is the fixed thing: changing the serves re-splits it, and editing one
- * serve's numbers changes the whole lot to match. From your foods: pick a saved food and say how many
+ * serve. Changing the serves means more of the same for bought food (each serve keeps its numbers,
+ * the whole lot grows) and the same pot split again for cooking; once the count moves, a choice under
+ * the stepper swaps the two. A split leaves serves already logged alone and splits only what's left.
+ * Editing one serve's numbers changes the whole lot to match. From your foods: pick a saved food and say how many
  * serves you have. Its own serve is the fixed thing then, each one logs as that food, and nothing is
  * asked of Gemini.
  * The sheet can be closed while Gemini works: the request carries on and `onBackground` says how it went.
@@ -85,6 +89,11 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
   const [name, setName] = useState('');
   const [total, setTotal] = useState<Totals>(ZERO_TOTALS);
   const [grams, setGrams] = useState(0);
+  const [base, setBase] = useState<Lot>({ total: ZERO_TOTALS, servings: DEFAULT_BATCH_SERVINGS, grams: 0 });
+  /** What a new number of serves means, once picked under the stepper; until then it goes by the food. */
+  const [servesChange, setServesChange] = useState<ServesChange | null>(null);
+  /** The numbers were typed in a serve at a time, so there's no whole batch to split: more serves are more of it. */
+  const [typedServe, setTypedServe] = useState(false);
   const [inputs, setInputs] = useState<ServeInputs>(() => serveInputs(ZERO_TOTALS, 1, unit));
   const [ingredients, setIngredients] = useState<BatchIngredient[]>([]);
   const [assumptions, setAssumptions] = useState<string[]>([]);
@@ -134,6 +143,9 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
     setName(source?.name || '');
     setTotal(nextTotal);
     setGrams(source?.grams || 0);
+    setBase({ total: nextTotal, servings: count, grams: source?.grams || 0 });
+    setServesChange(null);
+    setTypedServe(false);
     setInputs(serveInputs(nextTotal, count, unit));
     setIngredients(source?.ingredients || []);
     setAssumptions(source?.assumptions || []);
@@ -163,16 +175,31 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
   // Editing can't split it into fewer serves than are already logged; Finish is for that.
   const minServings = Math.max(1, Math.ceil(used));
 
-  const changeServings = (next: number) => {
-    const count = Math.max(minServings, servingsValue(next));
+  const change = servesChange || (typedServe ? 'keep' : defaultServesChange(kind));
+
+  /** Sets the serves and the numbers that go with them, worked out from the lot as it started. */
+  const resize = (count: number, how: ServesChange) => {
+    const next = resizeLot(base, base.servings, count, how, used);
     setServings(count);
-    setInputs(serveInputs(total, count, unit));
+    setTotal(next.total);
+    setGrams(next.grams);
+    setInputs(serveInputs(next.total, count, unit));
+  };
+
+  const changeServings = (next: number) => resize(Math.max(minServings, servingsValue(next)), change);
+
+  const pickServesChange = (how: ServesChange) => {
+    setServesChange(how);
+    resize(servings, how);
   };
 
   const setServeInput = (key: keyof Totals, value: string) => {
     setInputs(current => ({ ...current, [key]: value }));
     const each = key === 'calories' ? energyInputToKcal(value, unit) : n(value);
-    setTotal(current => ({ ...current, [key]: key === 'calories' ? Math.round(each * servings) : Math.round(each * servings * 10) / 10 }));
+    const next = { ...total, [key]: key === 'calories' ? Math.round(each * servings) : Math.round(each * servings * 10) / 10 };
+    setTotal(next);
+    // Typed numbers are the new starting point for changing the serves.
+    setBase({ total: next, servings, grams });
     setError('');
   };
 
@@ -180,6 +207,9 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
     setReply(raw);
     setName(estimate.name);
     setTotal(estimate.total);
+    setBase({ total: estimate.total, servings, grams });
+    setServesChange(null);
+    setTypedServe(false);
     setInputs(serveInputs(estimate.total, servings, unit));
     setIngredients(estimate.ingredients);
     setAssumptions(estimate.assumptions);
@@ -197,6 +227,9 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
     setServings(lot.servings);
     setInputs(serveInputs(lot.total, lot.servings, unit));
     setGrams(lot.grams);
+    setBase(lot);
+    setServesChange(null);
+    setTypedServe(false);
     setLabelServe(estimate.servingDescription);
     setIngredients([]);
     setAssumptions(estimate.assumptions);
@@ -294,6 +327,9 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
     // Bought: one serve a pack to start with, as a ready meal is. A tub's serves go up on the stepper.
     const count = bought ? servingsValue(packs) : servings;
     setServings(count);
+    setBase({ total: ZERO_TOTALS, servings: count, grams: 0 });
+    setServesChange(null);
+    setTypedServe(true);
     // What it is, typed on the way here, is its name.
     if (bought && recipe.trim()) setName(current => current || recipe.trim());
     setInputs(serveInputs(ZERO_TOTALS, count, unit));
@@ -358,8 +394,13 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
   const gramsEach = serveGrams({ servings, grams: lot ? lot.grams : grams });
   const macroCheckFails = !!estimateSource && macrosDisagree(serve);
   const counted = sumTotals(ingredients);
-  // Typed-over numbers no longer match Gemini's breakdown, so it says so rather than look wrong.
-  const breakdownEdited = ingredients.length > 0 && Math.abs(counted.calories - total.calories) > Math.max(2, servings);
+  // Typed-over numbers, or more of the same, no longer match Gemini's breakdown, so it says so rather
+  // than look wrong. A split is the same food, so it's checked against the lot it was split from.
+  const breakdownEdited = ingredients.length > 0 && Math.abs(counted.calories - (change === 'split' ? base.total : total).calories) > Math.max(2, servings);
+  // The serves moved off where they started, so it asks which way they meant it. A batch Gemini has
+  // just estimated is all of what was listed, so it can only be split.
+  const resized = !lot && servings !== base.servings && base.total.calories > 0 && (bought || !reply);
+  const whole = lot?.total || total;
   const unitLabel = energyUnitLabel(unit);
   const title = step === 'choose'
     ? 'Add to fridge'
@@ -374,17 +415,25 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
           : (bought ? 'Review' : 'Review batch');
 
   const servesRow = (
-    <div className="batch-serves-row">
-      <span className="batch-serves-label">
-        <strong>Serves</strong>
-        <small>
-          {(lot?.total || total).calories > 0
-            ? `${bought ? 'All of it' : 'Whole batch'} ${energyTextForUnit((lot?.total || total).calories, unit)}${gramsEach ? ` · about ${fmt(gramsEach)} g a serve` : ''}`
-            : bought ? 'How many serves in all' : 'The batch is split evenly'}
-        </small>
-      </span>
-      <ServesStepper value={servings} min={minServings} onChange={changeServings} disabled={!!busy} />
-    </div>
+    <>
+      <div className="batch-serves-row">
+        <span className="batch-serves-label">
+          <strong>Serves</strong>
+          <small>
+            {whole.calories > 0
+              ? `${editing && used > 0 ? `What’s left ${energyTextForUnit(serve.calories * left, unit)}` : `${bought ? 'All of it' : 'Whole batch'} ${energyTextForUnit(whole.calories, unit)}`}${gramsEach ? ` · about ${fmt(gramsEach)} g a serve` : ''}`
+              : bought ? 'How many serves in all' : 'The batch is split evenly'}
+          </small>
+        </span>
+        <ServesStepper value={servings} min={minServings} onChange={changeServings} disabled={!!busy} />
+      </div>
+      {resized && (
+        <span className="unit-toggle-chip serves-change" role="group" aria-label={`What ${fmt(servings)} serves means`}>
+          <button type="button" className={change === 'keep' ? 'active' : ''} aria-pressed={change === 'keep'} disabled={!!busy} onClick={() => pickServesChange('keep')}>Each serve the same</button>
+          <button type="button" className={change === 'split' ? 'active' : ''} aria-pressed={change === 'split'} disabled={!!busy} onClick={() => pickServesChange('split')}>{used > 0 ? 'Split what’s left' : 'Split the same amount'}</button>
+        </span>
+      )}
+    </>
   );
 
   let body;
@@ -601,7 +650,7 @@ export function BatchSheet({ open, request, batch, state, onEstimate, onEstimate
           </div>
           {!bought && servesRow}
           {bought && labelServe && servings > 1 && (
-            <p className="hint fridge-label-serve">The label’s serve is {labelServe}. If yours are bigger, use fewer serves.</p>
+            <p className="hint fridge-label-serve">The label’s serve is {labelServe}. If yours are bigger, take serves off and pick Split the same amount.</p>
           )}
           {estimateSource && (
             <div className="estimate-review">

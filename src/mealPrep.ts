@@ -368,6 +368,31 @@ export function servingsValue(value: unknown) {
   return Math.min(MAX_BATCH_SERVINGS, Math.max(1, whole || DEFAULT_BATCH_SERVINGS));
 }
 
+/**
+ * What a new number of serves means. 'keep': more (or fewer) of the same, so each serve keeps its
+ * numbers and the whole lot grows or shrinks. 'split': the same food in more or fewer serves.
+ */
+export type ServesChange = 'keep' | 'split';
+
+/** Bought food comes by the pack, so another serve is another one of it; a cooked batch is one pot split up. */
+export function defaultServesChange(kind: BatchKind | undefined): ServesChange {
+  return batchKindValue(kind) === 'bought' ? 'keep' : 'split';
+}
+
+/**
+ * The lot told it has `to` serves instead of `from`. Splitting leaves the serves already logged as
+ * they were and splits only what's left, so nothing is counted twice; the whole is then said again
+ * at the new serve, since one serve is always the total over the serves. With nothing left to split
+ * (every serve logged, or none left after the change), each serve keeps its numbers.
+ */
+export function resizeLot(lot: { total: Totals; grams: number }, from: number, to: number, change: ServesChange, used = 0) {
+  const before = Math.max(1, from);
+  const leftBefore = before - used;
+  const leftAfter = to - used;
+  const by = change === 'split' && leftBefore > 0 && leftAfter > 0 ? (leftBefore * to) / (before * leftAfter) : to / before;
+  return { total: scaleTotals(lot.total, by), grams: Math.round(lot.grams * by) };
+}
+
 /** One serve of a batch. */
 export function batchServe(batch: Pick<Batch, 'total' | 'servings'>): Totals {
   const servings = Math.max(1, batch.servings);

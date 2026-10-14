@@ -297,3 +297,55 @@ test('the link to the saved food is kept when the fridge is read back', () => {
   assert.equal(state.batches[0].foodId, 'f1');
   assert.equal('foodId' in state.batches[1], false);
 });
+
+/* ---------------------------------------------------------------- changing the serves */
+
+test('bought food takes more of the same: each serve keeps its numbers and the lot grows', () => {
+  assert.equal(m.defaultServesChange('bought'), 'keep');
+  assert.equal(m.defaultServesChange('cooked'), 'split');
+  // Batches from before the fridge were all home cooking.
+  assert.equal(m.defaultServesChange(undefined), 'split');
+  const pots = { total: { calories: 450, protein: 30, carbs: 36, fat: 13.5 }, grams: 510 };
+  const four = m.resizeLot(pots, 3, 4, 'keep');
+  assert.deepEqual(four, { total: { calories: 600, protein: 40, carbs: 48, fat: 18 }, grams: 680 });
+  assert.deepEqual(m.batchServe({ ...four, servings: 4 }), { calories: 150, protein: 10, carbs: 12, fat: 4.5 });
+  assert.equal(m.resizeLot(pots, 3, 2, 'keep').total.calories, 300);
+});
+
+test('a fourth pot after one is logged: the log comes to four pots, not three split four ways', () => {
+  const batch = { id: 'y1', servings: 3, total: { calories: 450, protein: 30, carbs: 36, fat: 13.5 }, grams: 510 };
+  const entries = [serve('y1', 1, { calories: 150 })];
+  const used = batch.servings - m.batchServesLeft(batch, entries);
+  const edited = { ...batch, ...m.resizeLot(batch, 3, 4, 'keep', used), servings: 4 };
+  const left = m.batchServesLeft(edited, entries);
+  assert.equal(left, 3);
+  const each = m.serveLog(edited, undefined, left).base.calories;
+  assert.equal(each, 150);
+  assert.equal(150 + left * each, 600);
+});
+
+test('splitting a cooked batch splits what is left, so the log never comes to more than the pot', () => {
+  const batch = { id: 'c1', servings: 4, total: { calories: 2000, protein: 160, carbs: 200, fat: 60 }, grams: 2400 };
+  const entries = [serve('c1', 1, { calories: 500 }), serve('c1', 1, { calories: 500 })];
+  const used = batch.servings - m.batchServesLeft(batch, entries);
+  assert.equal(used, 2);
+  // The half that's left goes into four containers: 250 Cal and 300 g each, not 2000 / 6.
+  const edited = { ...batch, ...m.resizeLot(batch, 4, 6, 'split', used), servings: 6 };
+  assert.deepEqual(m.batchServe(edited), { calories: 250, protein: 20, carbs: 25, fat: 7.5 });
+  assert.equal(m.serveGrams(edited), 300);
+  const logged = entries.reduce((sum, entry) => sum + entry.calories, 0);
+  assert.equal(logged + m.batchServesLeft(edited, entries) * m.batchServe(edited).calories, 2000);
+  // Nothing logged yet: the whole batch is split again, as before.
+  assert.deepEqual(m.resizeLot(batch, 4, 5, 'split'), { total: batch.total, grams: 2400 });
+});
+
+test('with nothing left to split, more serves are more of the same', () => {
+  const lot = { total: { calories: 2000, protein: 160, carbs: 200, fat: 60 }, grams: 0 };
+  // Every serve logged.
+  assert.equal(m.resizeLot(lot, 4, 5, 'split', 4).total.calories, 2500);
+  // Down to just the serves logged.
+  assert.equal(m.resizeLot(lot, 4, 2, 'split', 2).total.calories, 1000);
+  // Half a serve logged: the 3.5 serves left (1750 Cal) go into 4.5, about 389 Cal each.
+  const halves = m.resizeLot(lot, 4, 5, 'split', 0.5);
+  assert.equal(Math.round(m.batchServe({ ...halves, servings: 5 }).calories), 389);
+});
