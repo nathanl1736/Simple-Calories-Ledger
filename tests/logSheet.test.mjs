@@ -96,6 +96,29 @@ test('the usuals row stops at eight chips; favourites keep every one', () => {
   assert.equal(logChips({ usuals: [], batches: [], foods }).favourites.length, 20);
 });
 
+test('a favourite with serves in the fridge takes one from there, by its link or its name', () => {
+  const stocked = { ...batch('b1', 'Greek yoghurt pot'), foodId: 'f1' };
+  const { usuals, favourites } = logChips({
+    usuals: [usual('u', entry('e1', 'Beef mince rice bowl', 684, { sourceFoodId: 'f3' }))],
+    batches: [{ batch: stocked, left: 3, calories: 150 }, { batch: batch('b2', 'Beef mince rice bowl'), left: 2, calories: 684 }],
+    foods: [food('f1', 'Greek yoghurt', 160, { usageCount: 9 }), food('f2', 'Flat white', 120, { usageCount: 5 }), food('f3', 'Beef mince rice bowl', 650, { usageCount: 1 })]
+  });
+  // The fridge still leads the usuals row; in Favourites the same food counts its serves down.
+  assert.deepEqual(row(usuals), ['prep:Greek yoghurt pot', 'prep:Beef mince rice bowl']);
+  assert.deepEqual(row(favourites), ['prep:Beef mince rice bowl', 'prep:Greek yoghurt pot', 'favourite:Flat white']);
+  assert.equal(favourites[1].batch.id, 'b1');
+  assert.equal(favourites[1].left, 3);
+});
+
+test('once the fridge has none left, the favourite logs as itself again', () => {
+  const { favourites } = logChips({
+    usuals: [],
+    batches: [{ batch: { ...batch('b1', 'Greek yoghurt'), foodId: 'f1' }, left: 0, calories: 150 }],
+    foods: [food('f1', 'Greek yoghurt', 160)]
+  });
+  assert.deepEqual(row(favourites), ['favourite:Greek yoghurt']);
+});
+
 test('no favourites, no favourites row', () => {
   const { favourites } = logChips({ usuals: [], batches: [], foods: [food('f1', 'Apple', 95, { favourite: false })] });
   assert.deepEqual(favourites, []);

@@ -47,8 +47,9 @@ export function favouritesByUse(foods: Food[]) {
  * - usuals: the fridge with serves left, then this meal's usuals (`usualsForMeal`) that aren't favourites.
  *   The fridge leads: it's food on hand that runs out, and a full set of usuals once pushed it off the row.
  * - favourites: every favourite. Those that are usuals for this meal come first and log as they were
- *   logged last time; the rest follow by how often they're logged.
- * Every favourite is in its own row, so it can always be found there, and nothing shows twice.
+ *   logged last time; the rest follow by how often they're logged. A favourite with serves in the fridge
+ *   (stocked from it, or of the same name) takes one from there, so the fridge counts down either way.
+ * Every favourite is in its own row, so it can always be found there, and nothing else shows twice.
  */
 export function logChips({ usuals, batches, foods, limit = MAX_USUAL_CHIPS }: {
   usuals: { key: string; name: string; latest: Entry }[];
@@ -61,15 +62,20 @@ export function logChips({ usuals, batches, foods, limit = MAX_USUAL_CHIPS }: {
   const favouriteRow = chipRow(Infinity);
   const favouriteFor = (usual: { name: string; latest: Entry }) =>
     favourites.find(food => food.id === usual.latest.sourceFoodId) || favourites.find(food => nameKey(food.name) === nameKey(usual.name));
-  batches
-    .filter(item => item.left > 0)
-    .forEach(item => usualRow.take({ kind: 'prep', key: `prep:${item.batch.id}`, name: item.batch.name, calories: item.calories, left: item.left, batch: item.batch }));
+  const stocked = batches.filter(item => item.left > 0);
+  const prepChip = (item: { batch: Batch; left: number; calories: number }): UsualChip =>
+    ({ kind: 'prep', key: `prep:${item.batch.id}`, name: item.batch.name, calories: item.calories, left: item.left, batch: item.batch });
+  const inFridge = (food: Food) => {
+    const item = stocked.find(each => each.batch.foodId === food.id) || stocked.find(each => nameKey(each.batch.name) === nameKey(food.name));
+    return item && prepChip(item);
+  };
+  stocked.forEach(item => usualRow.take(prepChip(item)));
   usuals.forEach(usual => {
     const chip: UsualChip = { kind: 'usual', key: `usual:${usual.key}`, name: usual.name, calories: usual.latest.calories, entry: usual.latest };
     const favourite = favouriteFor(usual);
-    if (favourite) favouriteRow.take(chip, favourite.id, usual.latest.sourceFoodId);
+    if (favourite) favouriteRow.take(inFridge(favourite) || chip, favourite.id, usual.latest.sourceFoodId);
     else if (!favouriteRow.has(usual.name, usual.latest.sourceFoodId)) usualRow.take(chip, usual.latest.sourceFoodId);
   });
-  favourites.forEach(food => favouriteRow.take({ kind: 'favourite', key: `food:${food.id}`, name: food.name, calories: food.calories, food }, food.id));
+  favourites.forEach(food => favouriteRow.take(inFridge(food) || { kind: 'favourite', key: `food:${food.id}`, name: food.name, calories: food.calories, food }, food.id));
   return { usuals: usualRow.chips, favourites: favouriteRow.chips };
 }

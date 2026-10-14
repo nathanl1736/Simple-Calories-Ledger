@@ -2109,6 +2109,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .fridge-serves-first { margin-bottom: 10px; }
 .fridge-serves-first .batch-serves-row { margin-top: 0; }
 .fridge-label-serve { margin: 8px 0 0; font-size: 13px; line-height: 1.35; }
+/* Under the serves stepper once the count moves: more of the same, or the same food split again. */
+.serves-change { display: flex; width: 100%; margin-top: 10px; }
+.serves-change button { flex: 1; padding: 0 8px; }
 
 /* ===== 3.0 Week (chunk 2) ===== */
 /* Week: the working under the headline, the plan on the days after today, and the stats block. */

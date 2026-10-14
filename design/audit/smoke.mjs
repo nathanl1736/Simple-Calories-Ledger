@@ -262,16 +262,17 @@ await step('Fridge: two ready meals typed in by name are 2 serves in Foods → F
   await s.tab('tracking');
 });
 
+const readState = () => page.evaluate(() => new Promise((resolve, reject) => {
+  const open = indexedDB.open('calorie-tracker-db');
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const get = open.result.transaction('kv').objectStore('kv').get('state');
+    get.onsuccess = () => resolve(get.result);
+    get.onerror = () => reject(get.error);
+  };
+}));
+
 await step('Fridge: a saved food goes in without a scan, and a serve logs as that food', async () => {
-  const readState = () => page.evaluate(() => new Promise((resolve, reject) => {
-    const open = indexedDB.open('calorie-tracker-db');
-    open.onerror = () => reject(open.error);
-    open.onsuccess = () => {
-      const get = open.result.transaction('kv').objectStore('kv').get('state');
-      get.onsuccess = () => resolve(get.result);
-      get.onerror = () => reject(get.error);
-    };
-  }));
   const name = 'Greek yoghurt, plain';
   const foodsBefore = (await readState()).foods.length;
   await sparkle().click();
@@ -298,6 +299,65 @@ await step('Fridge: a saved food goes in without a scan, and a serve logs as tha
   if (saved.foods.length !== foodsBefore) throw new Error(`Saved foods went from ${foodsBefore} to ${saved.foods.length}`);
   if (!entry || entry.sourceFoodId !== food.id) throw new Error('The serve is not linked to the saved food');
   if (entry.unitMode !== '100g' || entry.portion !== 200) throw new Error(`The serve logged as ${entry.portion} ${entry.unitMode}, not 200 g`);
+});
+
+await step('Fridge: one more of something bought keeps each serve; a split only splits what is left', async () => {
+  // The ice cream from the label step: 8 serves of 160 Cal, one logged.
+  await s.tab('library');
+  await page.getByRole('tab', { name: 'Fridge' }).click();
+  await page.getByRole('button', { name: /^Edit Vanilla ice cream/ }).first().click();
+  await visible(s.dialog().getByRole('button', { name: 'Save changes' }));
+  const each = () => s.dialog().locator('#batchCalories').inputValue();
+  if ((await each()) !== '160') throw new Error(`A serve opened at ${await each()} Cal, not 160`);
+  await s.dialog().getByRole('button', { name: 'One serve more' }).click();
+  if ((await each()) !== '160') throw new Error(`One more serve changed each serve to ${await each()} Cal`);
+  const choice = s.dialog().getByRole('group', { name: 'What 9 serves means' });
+  await visible(choice);
+  if ((await choice.getByRole('button', { name: 'Each serve the same' }).getAttribute('aria-pressed')) !== 'true') throw new Error('Bought food did not default to Each serve the same');
+  await shot('fridge-edit-more');
+  // Split: the 7 serves left (1,120 Cal) go into 8.
+  await choice.getByRole('button', { name: 'Split what’s left' }).click();
+  if ((await each()) !== '140') throw new Error(`Split what's left gave ${await each()} Cal a serve, not 140`);
+  await choice.getByRole('button', { name: 'Each serve the same' }).click();
+  await s.dialog().getByRole('button', { name: 'Save changes' }).click();
+  await page.waitForTimeout(600);
+  const batch = (await readState()).batches.find(item => item.name.startsWith('Vanilla ice cream'));
+  if (batch.servings !== 9 || batch.total.calories !== 1440) throw new Error(`Saved as ${batch.servings} serves of ${batch.total.calories} Cal, not 9 of 1440`);
+  // Cooking splits by default.
+  await page.getByRole('button', { name: /^Edit Beef mince rice bowl/ }).first().click();
+  await s.dialog().getByRole('button', { name: 'One serve more' }).click();
+  const pressed = s.dialog().locator('.serves-change button[aria-pressed="true"]');
+  await visible(pressed);
+  if (!/^Split/.test(await pressed.innerText())) throw new Error('A cooked batch did not default to splitting');
+  await s.closeTop();
+  await s.tab('tracking');
+});
+
+await step('Fridge: a serve logged from the fridge can be hearted, and the favourite then takes a serve from it', async () => {
+  const name = 'Vanilla ice cream (Connoisseur)';
+  await s.scrollTo('[aria-label="Day line"]');
+  await page.locator('[aria-label="Day line"] .tl-row', { hasText: name }).first().click();
+  await visible(s.dialog().locator('.batch-entry-hint'));
+  await s.dialog().getByRole('button', { name: 'Favourite', exact: true }).click();
+  await shot('fridge-serve-heart');
+  await s.dialog().locator('button.entry-save').click();
+  await page.waitForTimeout(600);
+  const saved = await readState();
+  const food = saved.foods.find(item => item.name === name);
+  if (!food?.favourite) throw new Error('The hearted fridge serve is not a favourite');
+  if (food.calories !== 160 || food.servingGrams !== 70) throw new Error(`Saved as ${food.calories} Cal and ${food.servingGrams} g a serve, not 160 and 70`);
+  const batch = saved.batches.find(item => item.name === name);
+  if (batch.servings !== 9 || batch.foodId) throw new Error('Hearting a serve changed the fridge');
+  // In Log food the favourite is the fridge serve, so a tap counts the fridge down (8 left before).
+  await sparkle().click();
+  await visible(s.dialog());
+  const chip = s.dialog().locator('.log-favourites .log-chip', { hasText: 'Vanilla ice cream' }).first();
+  await visible(chip);
+  if (!(await chip.getAttribute('class')).includes('prep')) throw new Error('The favourite does not take a serve from the fridge');
+  await page.waitForTimeout(500);
+  await shot('fridge-favourite-chip');
+  await chip.click();
+  await visible(page.locator('.toast', { hasText: /7 left/ }));
 });
 
 await step('Long-press on an entry opens its menu', async () => {

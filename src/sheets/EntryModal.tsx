@@ -426,8 +426,7 @@ export function EntryModal({
       <label className="field-caption" htmlFor="entryName">Food name</label>
       <div className="name-row">
         <input ref={nameInputRef} id="entryName" value={draft.name} placeholder={isFavourite && !draft.name.trim() ? 'Name your favourite' : `${draft.meal} entry`} onChange={event => update({ name: event.target.value })} />
-        {/* The fridge runs out, so a serve from it isn't something to favourite. */}
-        {!draft.batchId && <FavouriteToggle on={isFavourite} onToggle={toggleFavourite} />}
+        <FavouriteToggle on={isFavourite} onToggle={toggleFavourite} />
       </div>
     </div>
   );
